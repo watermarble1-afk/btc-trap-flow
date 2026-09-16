@@ -61,3 +61,11 @@ These are experimental heuristics, not validated probabilities.
 - Benchmark signal outcomes may remain stored internally for historical research, but
   they are not the displayed performance metric and cannot close positions.
 - v6.5 refresh recovery and v6.4 HOLD/PRESSURE/SWITCH behavior remain.
+
+
+## v6.8 position cumulative verification
+- Renamed the top `실전 누적 검증` section to `포지션 누적 검증`.
+- The visible cumulative performance source is `/api/position-performance`.
+- Closed actual positions determine W/L and win rate.
+- Open actual positions are shown as holdings and are excluded from win rate.
+- Ordinary signal benchmark outcomes are not the cumulative performance metric.

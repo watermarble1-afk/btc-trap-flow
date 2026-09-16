@@ -60,7 +60,7 @@ body.embedded-btc header{position:relative!important}
   <div class="card"><div class="lbl">FLOW 강도</div><div class="val" id="flow">WARMING</div></div>
   <div class="card"><div class="lbl">OI 변화</div><div class="val" id="oi">—</div></div>
   <div class="card"><div class="lbl">BOOK 5단계</div><div class="val" id="book">—</div></div>
-  <div class="card"><div class="lbl">실전 누적 검증</div><div class="val" id="fwd">0W / 0L</div></div>
+  <div class="card"><div class="lbl">포지션 누적 검증</div><div class="val" id="fwd">0W / 0L</div></div>
 </div>
 
 <div class="grid">
@@ -736,7 +736,7 @@ async function syncServer(){
       fetch(SERVER_API+'/api/signals?limit=300',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/position',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/position-events?limit=1000',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/stats',{cache:'no-store'}).then(r=>r.json()),
+      fetch(SERVER_API+'/api/position-performance',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/positions',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[])
     ]);
     serverSaved=(Array.isArray(sigs)?sigs:[]).map(x=>({
