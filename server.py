@@ -367,49 +367,49 @@ def position_events(limit:int=300):
 
 
 @app.get("/api/stock/gaon")
-async def stock_gaon():
-    """Gaon Cable 000500 daily OHLCV. Naver Finance primary."""
+async def stock_gaon(tf: str="1D"):
+    """Gaon Cable 000500 OHLCV. Intraday via Yahoo; daily via Naver primary."""
     import ast, datetime as _dt
+    tf=tf.upper()
     headers={"User-Agent":"Mozilla/5.0","Referer":"https://finance.naver.com/"}
     errors=[]
+    # Intraday: Yahoo supports practical chart intervals/ranges.
+    ymap={"1M":("1m","7d"),"5M":("5m","60d"),"15M":("15m","60d"),
+          "30M":("30m","60d"),"60M":("60m","730d"),"1H":("60m","730d")}
+    if tf in ymap:
+        interval,rg=ymap[tf]
+        try:
+            url="https://query1.finance.yahoo.com/v8/finance/chart/000500.KS"
+            params={"range":rg,"interval":interval,"events":"history","includePrePost":"false"}
+            async with httpx.AsyncClient(timeout=20.0,headers=headers,follow_redirects=True) as client:
+                r=await client.get(url,params=params);r.raise_for_status();j=r.json()
+            result=j["chart"]["result"][0];q=result["indicators"]["quote"][0];ts=result.get("timestamp") or []
+            rows=[]
+            for i,t in enumerate(ts):
+                vals=(q["open"][i],q["high"][i],q["low"][i],q["close"][i])
+                if any(v is None for v in vals):continue
+                rows.append({"time":int(t),"open":vals[0],"high":vals[1],"low":vals[2],"close":vals[3],"volume":q["volume"][i] or 0})
+            if rows:return {"symbol":"000500.KS","name":"가온전선","currency":"KRW","source":"YAHOO","tf":tf,"rows":rows}
+        except Exception as e:errors.append("intraday: "+str(e))
+
+    # Daily base from Naver; weekly/monthly are aggregated in browser.
     try:
-        end=_dt.datetime.now().strftime("%Y%m%d")
-        start=(_dt.datetime.now()-_dt.timedelta(days=900)).strftime("%Y%m%d")
+        endd=_dt.datetime.now().strftime("%Y%m%d")
+        startd=(_dt.datetime.now()-_dt.timedelta(days=2200)).strftime("%Y%m%d")
         url="https://api.finance.naver.com/siseJson.naver"
-        params={"symbol":"000500","requestType":"1","startTime":start,"endTime":end,"timeframe":"day"}
+        params={"symbol":"000500","requestType":"1","startTime":startd,"endTime":endd,"timeframe":"day"}
         async with httpx.AsyncClient(timeout=20.0,headers=headers,follow_redirects=True) as client:
-            r=await client.get(url,params=params);r.raise_for_status();txt=r.text.strip()
-        data=ast.literal_eval(txt)
+            r=await client.get(url,params=params);r.raise_for_status();data=ast.literal_eval(r.text.strip())
         rows=[]
         for row in data[1:]:
-            if not isinstance(row,(list,tuple)) or len(row)<7: continue
+            if not isinstance(row,(list,tuple)) or len(row)<6:continue
             ds=str(row[0]).strip()
-            if not re.fullmatch(r"\d{8}",ds): continue
-            o,h,l,c,v=row[1],row[2],row[3],row[4],row[5]
-            # Naver order is date, open, high, low, close, volume, foreign...
+            if not re.fullmatch(r"\d{8}",ds):continue
             t=int(_dt.datetime.strptime(ds,"%Y%m%d").replace(tzinfo=_dt.timezone.utc).timestamp())
-            rows.append({"time":t,"open":float(o),"high":float(h),"low":float(l),"close":float(c),"volume":float(v)})
-        if len(rows)>=30:
-            return {"symbol":"000500","name":"가온전선","currency":"KRW","source":"NAVER","rows":rows}
-        errors.append("naver rows="+str(len(rows)))
-    except Exception as e:
-        errors.append("naver: "+str(e))
-
-    try:
-        url="https://query1.finance.yahoo.com/v8/finance/chart/000500.KS"
-        params={"range":"2y","interval":"1d","events":"history"}
-        async with httpx.AsyncClient(timeout=15.0,headers=headers,follow_redirects=True) as client:
-            r=await client.get(url,params=params);r.raise_for_status();j=r.json()
-        result=j["chart"]["result"][0];q=result["indicators"]["quote"][0];ts=result.get("timestamp") or []
-        rows=[]
-        for i,t in enumerate(ts):
-            vals=(q["open"][i],q["high"][i],q["low"][i],q["close"][i])
-            if any(v is None for v in vals): continue
-            rows.append({"time":int(t),"open":vals[0],"high":vals[1],"low":vals[2],"close":vals[3],"volume":q["volume"][i] or 0})
-        if rows:return {"symbol":"000500.KS","name":"가온전선","currency":"KRW","source":"YAHOO","rows":rows}
-    except Exception as e:
-        errors.append("yahoo: "+str(e))
-    return {"symbol":"000500","name":"가온전선","currency":"KRW","rows":[],"error":" | ".join(errors)}
+            rows.append({"time":t,"open":float(row[1]),"high":float(row[2]),"low":float(row[3]),"close":float(row[4]),"volume":float(row[5])})
+        if rows:return {"symbol":"000500","name":"가온전선","currency":"KRW","source":"NAVER","tf":"1D","rows":rows}
+    except Exception as e:errors.append("daily: "+str(e))
+    return {"symbol":"000500","name":"가온전선","currency":"KRW","tf":tf,"rows":[],"error":" | ".join(errors)}
 
 # Web terminal. Keep this mount at the end so /api/* routes take priority.
 STATIC_DIR = Path(__file__).resolve().parent / "static"

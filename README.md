@@ -1,11 +1,7 @@
-# MY MARKET TERMINAL v4.4 — Indicator Colors
-
-BTC + 가온전선:
-- 지표 설정 버튼 유지
-- SMA / EMA 기간 직접 입력
-- 이평선 추가 전에 색상 선택 가능
-- 각 이평선마다 서로 다른 색상 저장
-- 지표 태그도 해당 선 색상으로 표시
-- 설정은 브라우저 localStorage에 저장
-- 거래량 ON/OFF 유지
-- 가온전선 v4.3 hard-fix 구조 유지
+# v4.7 BTC Weekly + Monthly
+BTC timeframe:
+1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO
+- 1W = OKX weekly candle
+- 1MO = OKX monthly candle (API bar 1M)
+- weekly/monthly loaded from OKX public REST
+Gaon multi-timeframe and indicator/candle percentage features retained.
