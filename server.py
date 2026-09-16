@@ -298,6 +298,29 @@ def evaluate_scalp():
                   {"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},"SCALP",A)
     scalp_prev_d10=w10["ratio"]
 
+
+def update_position_excursions():
+    """Persist MFE/MAE on every trade tick, independently of signal/reversal logic."""
+    if not last_price:
+        return
+    now=int(time.time()*1000)
+    for pos in all_positions():
+        engine=pos["engine"]; side=pos["side"]; entry=float(pos["entry"])
+        best=float(pos.get("best_price") if pos.get("best_price") is not None else entry)
+        worst=float(pos.get("worst_price") if pos.get("worst_price") is not None else entry)
+        if side=="LONG":
+            best=max(best,last_price); worst=min(worst,last_price)
+            mfe=max(0.0,best-entry); mae=max(0.0,entry-worst)
+        else:
+            best=min(best,last_price); worst=max(worst,last_price)
+            mfe=max(0.0,entry-best); mae=max(0.0,worst-entry)
+        c=db()
+        c.execute("""UPDATE engine_positions
+                     SET best_price=?,worst_price=?,mfe=?,mae=?,updated_ts=?
+                     WHERE engine=?""",
+                  (best,worst,mfe,mae,now,engine))
+        c.commit(); c.close()
+
 def manage_position_reversal():
     """Research position state machine:
     OPEN/HOLD <-> PRESSURE -> EXIT or SWITCH.
@@ -426,12 +449,13 @@ async def public_loop():
                         if ch=="trades":
                             px=float(d["px"]); sz=float(d["sz"]); ts=int(d["ts"]);last_price=px
                             trades.append({"px":px,"ts":ts,"side":d["side"],"notional":px*sz})
+                            update_position_excursions()
                         elif ch=="open-interest":
                             current_oi=float(d["oi"]);oi_hist.append({"ts":int(d["ts"]),"oi":current_oi})
                         elif ch=="books5":
                             b=sum(float(x[1]) for x in d.get("bids",[]));a=sum(float(x[1]) for x in d.get("asks",[]))
                             book_imb=(b-a)/(b+a) if b+a else 0
-                    evaluate();evaluate_scalp();manage_position_reversal();update_outcomes()
+                    manage_position_reversal();evaluate();evaluate_scalp();update_outcomes()
         except Exception as e:
             status["public"]="reconnecting";print("public",e);await asyncio.sleep(2)
 

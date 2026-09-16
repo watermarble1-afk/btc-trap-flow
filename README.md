@@ -84,3 +84,11 @@ These are experimental heuristics, not validated probabilities.
 - LONG POS is cyan; SHORT POS is yellow; EXIT is neutral X.
 - Ordinary signal rows no longer show entry price.
 - Engine filtering now includes the matching engine's OPEN/EXIT/SWITCH markers.
+
+## v6.11 position metrics fix
+- Verified MFE/MAE formulas were correct, but their persistence depended on the combined
+  reversal-manager call that ran after signal evaluation.
+- Added `update_position_excursions()` on every OKX trade tick.
+- MFE/MAE now persist independently of signal generation and benchmark logic.
+- Reversal/pressure manager is also executed before signal evaluation in the public loop.
+- Existing position lifecycle, HOLD/PRESSURE/X/SWITCH and entry logic are unchanged.
