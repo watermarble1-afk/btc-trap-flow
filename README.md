@@ -131,3 +131,16 @@ These are experimental heuristics, not validated probabilities.
 - This produces X -> FLAT/WAIT only; it does NOT automatically reverse.
 - Flow EXIT and stronger SWITCH logic from v6.15 remain available before/alongside this backstop.
 - Purpose: a position can no longer remain HOLD indefinitely merely because momentary Delta/Book pressure cools after a decisive adverse price expansion.
+
+## v6.17 MULTI ENGINE FIX
+Audit result:
+- CORE 5M/15M evaluator was alive.
+- SCALP 1M/3M evaluator was alive and called continuously; sparse output is condition-driven.
+- MACRO 1H/4H had UI/filter/position scaffolding but NO signal evaluator and was never called. It could not generate native MACRO signals.
+
+Fix:
+- Added symmetric MACRO evaluator using 4H liquidity + 1H sweep/reclaim + flow flip.
+- Added live `evaluate_macro()` call.
+- Added MACRO save/reset/cooldown state.
+- Added MACRO to `/api/signals?engine=MACRO` filtering and signal stats.
+- Existing CORE/SCALP, position EXIT/SWITCH, structure invalidation, MFE/MAE remain.

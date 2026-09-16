@@ -28,6 +28,9 @@ last_signal_ts=0
 prev_d10=0.0
 scalp_arm=None
 scalp_last_signal_ts=0
+macro_arm=None
+macro_prev_d10=0.0
+macro_last_signal_ts=0
 scalp_prev_d10=0.0
 status={"public":"starting","business":"starting","started":int(time.time()*1000)}
 
@@ -203,7 +206,7 @@ def apply_position_signal(engine,side,price,signal_id,atr_value=None):
     position_event("SWITCH",side,price,signal_id,"same-engine opposite signal",engine)
 
 def save_signal(name,side,score,level,ext,metrics,engine="CORE",atr_value=None):
-    global last_signal_ts,trap_arm,scalp_last_signal_ts,scalp_arm
+    global last_signal_ts,trap_arm,scalp_last_signal_ts,scalp_arm,macro_last_signal_ts,macro_arm
     p=last_price; A=atr_value or atr5()
     if side=="LONG":
         sl=min(ext,level-.22*A); risk=max(p-sl,.35*A); tp1=p+1.5*risk; tp2=p+2.3*risk
@@ -212,6 +215,7 @@ def save_signal(name,side,score,level,ext,metrics,engine="CORE",atr_value=None):
     if (side=="LONG" and p<=sl) or (side=="SHORT" and p>=sl):
         if engine=="SCALP": scalp_arm=None
         elif engine=="CORE": trap_arm=None
+        elif engine=="MACRO": macro_arm=None
         return
     now=int(time.time()*1000)
     c=db();cur=c.execute("""INSERT INTO signals(ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flow,book,status,engine)
@@ -226,6 +230,8 @@ def save_signal(name,side,score,level,ext,metrics,engine="CORE",atr_value=None):
         last_signal_ts=now;trap_arm=None
     elif engine=="SCALP":
         scalp_last_signal_ts=now;scalp_arm=None
+    elif engine=="MACRO":
+        macro_last_signal_ts=now;macro_arm=None
 
 def evaluate():
     global trap_arm,prev_d10
@@ -297,6 +303,45 @@ def evaluate_scalp():
                 save_signal("SCALP S","SHORT",score,scalp_arm["level"],scalp_arm["ext"],
                   {"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},"SCALP",A)
     scalp_prev_d10=w10["ratio"]
+
+
+
+def evaluate_macro():
+    """MACRO engine: 4H liquidity/structure + 1H sweep/reclaim + slower flow confirmation."""
+    global macro_arm,macro_prev_d10
+    if not last_price or len(trades)<20:return
+    H,L=liquidity_tf("4H",80,20)
+    if H is None:return
+    A=atr_tf("1H",24); c=list(candles["1H"])[-1] if candles["1H"] else None
+    if not c:return
+    w10,w30=flow(10000),flow(30000);oi60=oi_delta();inten=flow_intensity();now=int(time.time()*1000)
+
+    if c["high"]>H+.035*A and c["close"]<H+.10*A:
+        if not macro_arm or macro_arm["dir"]!="S" or now-macro_arm["ts"]>30*60*1000:
+            macro_arm={"dir":"S","level":H,"ext":c["high"],"ts":now,"peak":w30["ratio"]}
+    if c["low"]<L-.035*A and c["close"]>L-.10*A:
+        if not macro_arm or macro_arm["dir"]!="L" or now-macro_arm["ts"]>30*60*1000:
+            macro_arm={"dir":"L","level":L,"ext":c["low"],"ts":now,"peak":w30["ratio"]}
+    if macro_arm and now-macro_arm["ts"]>45*60*1000:macro_arm=None
+
+    if macro_arm and now-macro_last_signal_ts>20*60*1000:
+        if macro_arm["dir"]=="L":
+            reclaim=last_price>macro_arm["level"]+.025*A
+            hot=macro_arm["peak"]<-.08 or w30["ratio"]<-.10 or macro_prev_d10<-.12
+            flip=w10["ratio"]>.05 and w10["ratio"]-macro_prev_d10>.09
+            score=35+(20 if hot else 0)+(25 if flip else 0)+(10 if oi60<-.010 else 0)+(5 if inten>1.00 else 0)+(5 if book_imb>-.22 else 0)
+            if reclaim and hot and flip and score>=80:
+                save_signal("MACRO L","LONG",score,macro_arm["level"],macro_arm["ext"],
+                    {"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},"MACRO",A)
+        else:
+            reclaim=last_price<macro_arm["level"]-.025*A
+            hot=macro_arm["peak"]>.08 or w30["ratio"]>.10 or macro_prev_d10>.12
+            flip=w10["ratio"]<-.05 and macro_prev_d10-w10["ratio"]>.09
+            score=35+(20 if hot else 0)+(25 if flip else 0)+(10 if oi60<-.010 else 0)+(5 if inten>1.00 else 0)+(5 if book_imb<.22 else 0)
+            if reclaim and hot and flip and score>=80:
+                save_signal("MACRO S","SHORT",score,macro_arm["level"],macro_arm["ext"],
+                    {"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},"MACRO",A)
+    macro_prev_d10=w10["ratio"]
 
 
 def position_path_extremes(pos):
@@ -514,7 +559,7 @@ async def public_loop():
                         manage_position_reversal()
                     except Exception as e:
                         print("position_manager",repr(e))
-                    evaluate();evaluate_scalp();update_outcomes()
+                    evaluate();evaluate_scalp();evaluate_macro();update_outcomes()
         except Exception as e:
             status["public"]="reconnecting";print("public",e);await asyncio.sleep(2)
 
@@ -565,7 +610,7 @@ def live():
 @app.get("/api/signals")
 def signals(limit:int=100, engine:str="ALL"):
     c=db();c.row_factory=sqlite3.Row
-    if engine.upper() in ("CORE","SCALP"):
+    if engine.upper() in ("CORE","SCALP","MACRO"):
         rows=[dict(x) for x in c.execute("SELECT * FROM signals WHERE engine=? ORDER BY ts DESC LIMIT ?",(engine.upper(),min(limit,1000))).fetchall()]
     else:
         rows=[dict(x) for x in c.execute("SELECT * FROM signals ORDER BY ts DESC LIMIT ?",(min(limit,1000),)).fetchall()]
@@ -575,7 +620,7 @@ def signals(limit:int=100, engine:str="ALL"):
 def stats():
     c=db();c.row_factory=sqlite3.Row
     out={}
-    for eng in ("SCALP","CORE"):
+    for eng in ("SCALP","CORE","MACRO"):
         r=c.execute("""SELECT COUNT(*) total,
           SUM(CASE WHEN status='WIN' THEN 1 ELSE 0 END) wins,
           SUM(CASE WHEN status='LOSS' THEN 1 ELSE 0 END) losses,
