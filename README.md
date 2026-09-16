@@ -144,3 +144,10 @@ Fix:
 - Added MACRO save/reset/cooldown state.
 - Added MACRO to `/api/signals?engine=MACRO` filtering and signal stats.
 - Existing CORE/SCALP, position EXIT/SWITCH, structure invalidation, MFE/MAE remain.
+
+
+## v6.19 MOBILE FULL
+- `/mobile` keeps the same Railway server, DB, signals and positions as desktop.
+- Mobile exposes the full desktop-side information: structure/liquidity, order flow, current target, engine positions, trade ledger and live signal history.
+- Bottom navigation: Chart / Structure / Orders / Target / Position / Records.
+- No trading/signal-engine logic changes in this patch.

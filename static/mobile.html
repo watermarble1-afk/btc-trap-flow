@@ -51,15 +51,15 @@ body.embedded-btc header{position:relative!important}
 <style id="mobileAppCss">
 html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px;max-width:none}.top{position:sticky;top:0;z-index:60;background:#070a10eF;padding:8px 2px;margin-bottom:8px;backdrop-filter:blur(8px)}
 .top h1{font-size:16px}.top .sub{display:none}.cards{display:flex;overflow-x:auto;gap:6px;margin-bottom:8px;scrollbar-width:none}.cards::-webkit-scrollbar{display:none}.cards .card{flex:0 0 132px;padding:9px}.cards .val{font-size:15px}
-.grid{display:block}.panel{padding:7px;border-radius:10px}.grid>section.panel{margin-bottom:8px}#chart{height:54vh;min-height:390px;max-height:620px}.buttons{overflow-x:auto;white-space:nowrap;flex-wrap:nowrap;padding-bottom:2px}.buttons button{flex:0 0 auto;padding:8px 12px}.chartTools{margin-top:4px}.indPanel{position:fixed;left:8px;right:8px;top:70px;width:auto;max-height:72vh;overflow:auto}.hoverPctBar{overflow-x:auto;white-space:nowrap;flex-wrap:nowrap}.legend,.warn{display:none}
-#enginePanel{overflow-x:auto!important;flex-wrap:nowrap!important;white-space:nowrap}#enginePanel>div{display:none!important}#enginePanel button,#enginePanel span{flex:0 0 auto}.mtf{grid-template-columns:repeat(4,1fr)}aside.panel{padding:0;border:0;background:transparent}aside .box{margin-bottom:7px}.history{max-height:240px}.histrow{grid-template-columns:70px 1fr 55px}.mobilebar{position:fixed;left:0;right:0;bottom:0;height:62px;z-index:100;background:#0b111bf5;border-top:1px solid #263249;display:grid;grid-template-columns:repeat(4,1fr);padding:6px env(safe-area-inset-right) calc(6px + env(safe-area-inset-bottom)) env(safe-area-inset-left);backdrop-filter:blur(10px)}.mobilebar button{border:0;background:transparent;color:#8d99ad;font-size:10px;font-weight:800}.mobilebar button b{display:block;font-size:18px;color:#dce5f2;margin-bottom:1px}.mobilebar button.on{color:#6da7ff}.mobilebar button.on b{color:#6da7ff}
+.grid{display:block}.panel{padding:7px;border-radius:10px}.grid>section.panel{margin-bottom:8px}#chart{height:58vh;min-height:430px;max-height:680px}.buttons{overflow-x:auto;white-space:nowrap;flex-wrap:nowrap;padding-bottom:2px}.buttons button{flex:0 0 auto;padding:8px 12px}.chartTools{margin-top:4px}.indPanel{position:fixed;left:8px;right:8px;top:70px;width:auto;max-height:72vh;overflow:auto}.hoverPctBar{overflow-x:auto;white-space:nowrap;flex-wrap:nowrap}.legend,.warn{display:none}
+#enginePanel{overflow-x:auto!important;flex-wrap:nowrap!important;white-space:nowrap}#enginePanel>div{display:none!important}#enginePanel button,#enginePanel span{flex:0 0 auto}.mtf{grid-template-columns:repeat(4,1fr)}aside.panel{padding:0;border:0;background:transparent}aside .box{margin-bottom:7px}.history{max-height:360px}.histrow{grid-template-columns:70px 1fr 55px}.mobilebar{position:fixed;left:0;right:0;bottom:0;height:62px;z-index:100;background:#0b111bf5;border-top:1px solid #263249;display:grid;grid-template-columns:repeat(4,1fr);padding:6px env(safe-area-inset-right) calc(6px + env(safe-area-inset-bottom)) env(safe-area-inset-left);backdrop-filter:blur(10px)}.mobilebar button{border:0;background:transparent;color:#8d99ad;font-size:10px;font-weight:800}.mobilebar button b{display:block;font-size:18px;color:#dce5f2;margin-bottom:1px}.mobilebar button.on{color:#6da7ff}.mobilebar button.on b{color:#6da7ff}.mobilebar6{grid-template-columns:repeat(6,1fr)}.mobilebar6 button{font-size:9px;padding:2px}.mobilebar6 button b{font-size:16px}aside .box{scroll-margin-top:72px}#chart{scroll-margin-top:72px}
 @media(max-width:600px){.cards{grid-template-columns:none}.grid{grid-template-columns:1fr}#chart{height:52vh}.box{border-radius:10px}.row{font-size:12px;padding:6px 0}.signal{font-size:20px}.tiny{font-size:10px}}
 </style>
 </head>
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v18.1 · SERVER SYNC</h1>
+    <h1>BTC OKX RADAR v19 · MOBILE FULL</h1>
     <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 신호 엔진은 5M 진입 / 15M 위치 / 1H·4H 구조</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
@@ -953,12 +953,23 @@ document.querySelectorAll('.engBtn').forEach(x=>x.onclick=()=>{
  renderMarkers();
 });
 </script>
-<div class="mobilebar"><button class="on" data-jump="chart"><b>⌁</b>차트</button><button data-jump="flow"><b>⇄</b>주문흐름</button><button data-jump="target"><b>◎</b>타점</button><button data-jump="position"><b>◆</b>포지션</button></div><script>
+<div class="mobilebar mobilebar6"><button class="on" data-jump="chart"><b>⌁</b>차트</button><button data-jump="structure"><b>⌗</b>구조</button><button data-jump="flow"><b>⇄</b>주문</button><button data-jump="target"><b>◎</b>타점</button><button data-jump="position"><b>◆</b>포지션</button><button data-jump="records"><b>≡</b>기록</button></div><script>
 (function(){
  const boxes=[...document.querySelectorAll('aside .box')];
  const byTitle=t=>boxes.find(b=>(b.querySelector('h3')?.textContent||'').includes(t));
- const targets={chart:document.getElementById('chart'),flow:byTitle('실시간 주문흐름'),target:byTitle('현재 타점'),position:byTitle('엔진별 현재 포지션')};
- document.querySelectorAll('.mobilebar button').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('.mobilebar button').forEach(x=>x.classList.remove('on'));btn.classList.add('on');targets[btn.dataset.jump]?.scrollIntoView({behavior:'smooth',block:'start'});});
+ const targets={
+   chart:document.getElementById('chart'),
+   structure:byTitle('현재 LIQUIDITY 위치') || byTitle('큰 구조'),
+   flow:byTitle('실시간 주문흐름'),
+   target:byTitle('현재 타점'),
+   position:byTitle('엔진별 현재 포지션'),
+   records:byTitle('포지션 / 거래 기록') || byTitle('라이브 신호 기록')
+ };
+ document.querySelectorAll('.mobilebar button').forEach(btn=>btn.onclick=()=>{
+   document.querySelectorAll('.mobilebar button').forEach(x=>x.classList.remove('on'));
+   btn.classList.add('on');
+   targets[btn.dataset.jump]?.scrollIntoView({behavior:'smooth',block:'start'});
+ });
  if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
 })();
 </script></body></html>
