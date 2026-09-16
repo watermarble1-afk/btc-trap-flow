@@ -1,22 +1,11 @@
-# v5.5 1H / 4H Macro Trend Engine
+# v5.6 Trade Table + Candle/Daily Move
 
-Adds a third independent BTC research signal engine:
+Changes:
+- Chart markers are clean again: no entry/exit dollar amount in marker text.
+- Added right-side position/trade ledger with engine, direction, entry, exit, holding time and return.
+- Existing CORE OPEN/EXIT/SWITCH position events feed the ledger; no fake exits are created.
+- Restores/extends candle hover information: OHLC + candle % + high/low range % where the existing OHLC legend is used.
+- Adds '오늘 · 일봉 기준' card showing current daily candle dollar move and percentage move from daily open.
+- Existing signal labels/colors, SCALP/TRAP/MACRO engines and benchmark stats remain.
 
-MACRO (1H/4H)
-- 4H EMA 8/21 defines broad trend regime.
-- 1H EMA 8/21 confirms trend and supplies pullback/reclaim trigger.
-- Requires 1H pullback toward fast EMA followed by close back in trend direction.
-- Uses 1H ATR to normalize distance/strength.
-- 45 minute signal cooldown.
-- Benchmark signals: MACRO L / MACRO S.
-- Separate MACRO WIN/LOSS stats.
-
-Display:
-- AUTO: 1M/3M => SCALP, 5M/15M => TRAP, 1H/4H => MACRO, higher TF => ALL.
-- Manual button: 추세 1H/4H.
-- ALL distinguishes all three engines by label, timeframe and color.
-- Live history shows [1H/4H] and entry price.
-
-Important:
-MACRO is a first research heuristic for broad-trend context, not a validated trading edge.
-Like SCALP, MACRO is benchmark-signal only. The existing actual position/X state machine remains CORE-only.
+SCALP and MACRO still do not have independent actual position state machines; their signal entries remain in signal history/benchmark until that is implemented.

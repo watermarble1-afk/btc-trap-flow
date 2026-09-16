@@ -155,7 +155,13 @@ body.embedded-btc header{position:relative!important}
 </section>
 
 <aside class="panel">
-  <div class="box"><h3>큰 구조</h3><div class="mtf" id="mtf"></div></div>
+  <div class="box"><div style="margin-bottom:14px;padding:12px;border:1px solid #263246;border-radius:12px">
+<div style="font-weight:700;margin-bottom:8px">오늘 · 일봉 기준</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+<div><span class="tiny">금액 변화</span><div id="dayMoveUsd" style="font-size:18px;font-weight:800">—</div></div>
+<div><span class="tiny">상승률</span><div id="dayMovePct" style="font-size:18px;font-weight:800">—</div></div>
+</div></div>
+<h3>큰 구조</h3><div class="mtf" id="mtf"></div></div>
 
   <div class="box">
     <h3>현재 LIQUIDITY 위치</h3>
@@ -652,6 +658,8 @@ function renderForward(){
 }
 function renderHistory(){
   renderForward();
+  renderTradeLedger();
+  updateDailyMove();
   const sigRows=allSaved().map(s=>({
     kind:'SIGNAL',ts:Number(s.ts),time:s.time,dir:s.dir,engine:s.engine||'CORE',
     name:s.name,price:Number(s.entry),status:s.status
@@ -688,7 +696,7 @@ function renderMarkers(){
       position:s.dir==='LONG'?'belowBar':'aboveBar',
       color,
       shape:s.dir==='LONG'?'arrowUp':'arrowDown',
-      text:((s.engine==='SCALP'?'[1/3M] ':s.engine==='MACRO'?'[1H/4H] ':'[5/15M] ')+(s.name||((s.dir==='LONG')?'TRAP L':'TRAP S'))+' · $'+fmt(s.entry))
+      text:((s.engine==='SCALP'?'[1/3M] ':s.engine==='MACRO'?'[1H/4H] ':'[5/15M] ')+(s.name||((s.dir==='LONG')?'TRAP L':'TRAP S')))
     });
   }
 
@@ -704,13 +712,60 @@ function renderMarkers(){
         time:e.time, position:e.side==='LONG'?'belowBar':'aboveBar',
         color:e.side==='LONG'?'#4f8cff':'#ff4f64',
         shape:e.side==='LONG'?'arrowUp':'arrowDown',
-        text:'SWITCH '+(e.side==='LONG'?'L':'S')+' · $'+fmt(e.price)
+        text:'SWITCH '+(e.side==='LONG'?'L':'S')
       });
     }
   }
   marks.sort((a,b)=>a.time-b.time);
   try{candle.setMarkers(marks)}catch(e){}
 }
+
+function updateDailyMove(){
+  try{
+    const arr=(cache&&cache['1D'])||[];
+    if(!arr.length) return;
+    const d=arr[arr.length-1], o=Number(d.open??d.o), c=Number(d.close??d.c);
+    if(!Number.isFinite(o)||!Number.isFinite(c)||!o) return;
+    const diff=c-o, pct=diff/o*100, col=diff>=0?'#35d98a':'#ff5c70';
+    const a=$('dayMoveUsd'), b=$('dayMovePct');
+    if(a){a.textContent=(diff>=0?'+':'')+'$'+Math.abs(diff).toLocaleString(undefined,{maximumFractionDigits:1});a.style.color=col}
+    if(b){b.textContent=(pct>=0?'+':'')+pct.toFixed(2)+'%';b.style.color=col}
+  }catch(e){}
+}
+function renderTradeLedger(){
+  const el=$('tradeLedger'); if(!el)return;
+  const ev=[...(positionEvents||[])].sort((a,b)=>Number(a.ts)-Number(b.ts));
+  const rows=[];
+  let open=null;
+  for(const e of ev){
+    const type=String(e.event||'').toUpperCase();
+    if(type==='OPEN'||type==='SWITCH'){
+      if(type==='SWITCH'&&open){
+        rows.push({...open,exit:Number(e.price),exitTs:Number(e.ts)});
+      }
+      open={ts:Number(e.ts),engine:e.engine||'CORE',side:e.side,entry:Number(e.price)};
+    } else if(type==='EXIT'&&open){
+      rows.push({...open,exit:Number(e.price),exitTs:Number(e.ts)}); open=null;
+    }
+  }
+  if(open) rows.push({...open,exit:null,exitTs:null});
+  rows.reverse();
+  if(!rows.length){el.innerHTML='<tr><td colspan="7" class="tiny" style="padding:8px">아직 포지션 기록 없음</td></tr>';return}
+  el.innerHTML=rows.slice(0,30).map(r=>{
+    const held=(r.exitTs||Date.now())-r.ts, mins=Math.max(0,Math.floor(held/60000));
+    const hold=mins>=1440?`${Math.floor(mins/1440)}일 ${Math.floor((mins%1440)/60)}시간`:mins>=60?`${Math.floor(mins/60)}시간 ${mins%60}분`:`${mins}분`;
+    let pct=null;
+    if(r.exit!=null&&r.entry){pct=(r.side==='SHORT'?(r.entry-r.exit):(r.exit-r.entry))/r.entry*100}
+    const eng=r.engine==='SCALP'?'1/3M':r.engine==='MACRO'?'1H/4H':'5/15M';
+    const col=r.side==='LONG'?(r.engine==='SCALP'?'#35d98a':r.engine==='MACRO'?'#27c2a4':'#4f8cff'):(r.engine==='SCALP'?'#ff78b4':r.engine==='MACRO'?'#d95bd1':'#ff4f64');
+    return `<tr style="border-top:1px solid #1f2a3a">
+      <td style="padding:7px 6px">${new Date(r.ts).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
+      <td>${eng}</td><td style="color:${col};font-weight:800">${r.side==='LONG'?'L':'S'}</td>
+      <td>$${fmt(r.entry)}</td><td>${r.exit==null?'보유중':'$'+fmt(r.exit)}</td><td>${hold}</td>
+      <td style="color:${pct==null?'#f0c84b':pct>=0?'#35d98a':'#ff5c70'}">${pct==null?'OPEN':(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td></tr>`;
+  }).join('');
+}
+
 async function syncServer(){
   try{
     const [live,sigs,pos,events,stats]=await Promise.all([
@@ -784,7 +839,8 @@ async function boot(){
   renderChart(true);detectBreakoutForRetest();connectBusiness();connectPublic();
   $('status').textContent='WebSocket 연결 중…';
 }
-boot().then(()=>{syncServer();setInterval(syncServer,5000)}).catch(e=>{$('status').textContent='오류: '+e.message});
+boot().then(()=>{syncServer();
+setTimeout(()=>{try{fetchCandles('1D').then(updateDailyMove)}catch(e){}},1200);setInterval(syncServer,5000)}).catch(e=>{$('status').textContent='오류: '+e.message});
 
 // ---- USER INDICATORS v4.1 ----
 let userMA=[],maSeries=[],userVWAP=null;
