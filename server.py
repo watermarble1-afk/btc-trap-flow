@@ -591,6 +591,34 @@ def recover_missing_positions():
         c2.commit(); c2.close()
     c.close()
 
+
+@app.get("/api/position-performance")
+def api_position_performance():
+    """Performance is based only on actual closed research positions (EXIT events)."""
+    c=db(); c.row_factory=sqlite3.Row
+    exits=c.execute("""SELECT * FROM position_events WHERE event='EXIT'
+                       ORDER BY ts DESC,id DESC LIMIT 2000""").fetchall()
+    rows=[]
+    wins=losses=0
+    for ex in exits:
+        engine=ex["engine"] or "CORE"
+        # Find the latest OPEN/SWITCH for this engine before this EXIT.
+        op=c.execute("""SELECT * FROM position_events
+                        WHERE engine=? AND event IN ('OPEN','SWITCH') AND ts<=?
+                        ORDER BY ts DESC,id DESC LIMIT 1""",(engine,ex["ts"])).fetchone()
+        if not op or not op["price"] or not ex["price"]: continue
+        side=op["side"]; entry=float(op["price"]); exitp=float(ex["price"])
+        ret=((exitp-entry)/entry*100.0) * (1 if side=="LONG" else -1)
+        if ret>0:wins+=1
+        elif ret<0:losses+=1
+        rows.append({"engine":engine,"side":side,"opened_ts":op["ts"],"closed_ts":ex["ts"],
+                     "entry":entry,"exit":exitp,"return_pct":ret,
+                     "result":"WIN" if ret>0 else "LOSS" if ret<0 else "BE"})
+    decided=wins+losses
+    c.close()
+    return {"closed":len(rows),"wins":wins,"losses":losses,
+            "winrate":(wins/decided*100.0 if decided else None),"trades":rows[:500]}
+
 @app.get("/api/position-audit")
 def api_position_audit():
     recover_missing_positions()

@@ -24,7 +24,7 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
 <nav><button class="tab on" data-p="btc">BTC</button><button class="tab" data-p="stocks">주식</button><button class="tab" data-p="news">NEWS</button><button class="tab" data-p="lab">SIGNAL LAB</button></nav>
 <div class="status">BTC SERVER <span id="srv" class="live">● CHECK</span></div></header>
 <main>
-<section id="btc" class="page on"><iframe src="btc.html?v=66"></iframe></section>
+<section id="btc" class="page on"><iframe src="btc.html?v=67"></iframe></section>
 <section id="stocks" class="page"><iframe src="stock.html?v=64"></iframe></section>
 <section id="news" class="page">
  <div class="newsbar">
@@ -48,7 +48,7 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
   <div class="card"><h3>OPEN</h3><div id="open" class="big">0</div></div>
  </div>
  <div class="card" style="margin-top:12px">
-  <h3>일반 신호와 실제 포지션 분리 · POS L/S → HOLD ↔ PRESSURE → X / SWITCH</h3>
+  <h3>실제 포지션 성과 · POS L/S → HOLD ↔ PRESSURE → X / SWITCH · 승률은 청산 포지션 기준</h3>
   <div id="labFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
    <button class="chip on" data-lf="ALL">전체</button><button class="chip" data-lf="CORE">5/15M</button>
    <button class="chip" data-lf="SCALP">1/3M</button><button class="chip" data-lf="MACRO">1H/4H</button>
@@ -57,7 +57,7 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
   <div style="overflow:auto"><table class="ledger"><thead><tr><th>진입 시간</th><th>엔진</th><th>방향</th><th>진입가</th><th>청산가</th><th>청산 시간</th><th>보유시간</th><th>수익률</th><th>상태</th></tr></thead><tbody id="positionsBody"><tr><td colspan="9">불러오는 중…</td></tr></tbody></table></div>
  </div>
  <div class="card" style="margin-top:12px">
-  <h3>신호 벤치마크 기록 · WIN/LOSS는 TP/SL 비교용이며 실제 포지션 청산과 무관</h3>
+  <h3>신호 벤치마크 기록 · 포지션 성과는 TP/SL 비교용이며 실제 포지션 청산과 무관</h3>
   <div style="overflow:auto;max-height:600px"><table class="ledger"><thead><tr><th>발생 시간</th><th>엔진</th><th>방향</th><th>신호</th><th>진입가</th><th>SL</th><th>TP1</th><th>TP2</th><th>SCORE</th><th>결과</th></tr></thead><tbody id="signalsBody"><tr><td colspan="10">불러오는 중…</td></tr></tbody></table></div>
  </div>
 </section>

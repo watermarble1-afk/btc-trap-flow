@@ -48,3 +48,16 @@ These are experimental heuristics, not validated probabilities.
   they remain confirmation/research observations.
 - Benchmark WIN/LOSS is still separate and never closes the actual position.
 - Position recovery from v6.5 remains enabled.
+
+
+## v6.7 position-only visible performance
+- Ordinary chart/live signals are direction-only; no entry price is shown for them.
+- Only actual `POS L` / `POS S` markers show the tracked entry price.
+- POS markers use a distinct high-contrast palette from ordinary directional signals.
+- User-facing benchmark WIN/LOSS presentation is removed.
+- Actual performance endpoint `/api/position-performance` computes wins/losses/winrate
+  only from closed actual research positions: OPEN/SWITCH -> EXIT.
+- Open positions are excluded from winrate.
+- Benchmark signal outcomes may remain stored internally for historical research, but
+  they are not the displayed performance metric and cannot close positions.
+- v6.5 refresh recovery and v6.4 HOLD/PRESSURE/SWITCH behavior remain.
