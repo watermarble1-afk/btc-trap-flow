@@ -465,11 +465,17 @@ def manage_position_reversal():
                   (best,worst,mfe,mae,new_state,new_psince,pscore,now,engine))
         c.commit();c.close()
 
-        # STRUCTURE INVALIDATION: do not let short-lived flow cooling keep a broken
-        # position alive. This is EXIT-only; it never forces an opposite entry.
-        # Uses the position's original ATR so the rule is stable across restarts.
-        structure_exit_atr = 0.75 if engine=="SCALP" else 1.00 if engine=="CORE" else 1.35
-        if adverse >= structure_exit_atr:
+        # SCALP HOLD GUARD: micro-flow is noisy immediately after entry.
+        # Give a fresh SCALP position 45s to develop before ordinary FLOW EXIT/SWITCH.
+        # A truly broken entry can still emergency-exit immediately at >=1.25 ATR adverse.
+        hold_ms=max(0, now-int(pos.get("opened_ts") or now))
+        scalp_guard = engine=="SCALP" and hold_ms < 45000
+
+        # STRUCTURE INVALIDATION: EXIT-only; never forces an opposite entry.
+        # During the SCALP guard, only the wider emergency threshold is active.
+        structure_exit_atr = 0.85 if engine=="SCALP" else 1.00 if engine=="CORE" else 1.35
+        structure_blocked = scalp_guard and adverse < 1.25
+        if adverse >= structure_exit_atr and not structure_blocked:
             old_signal=pos["signal_id"]
             note=(f"STRUCTURE INVALIDATION adverse={adverse:.2f}ATR score={pscore} "
                   f"d10={d10:.3f} d30={d30:.3f} flow={intensity:.2f} "
@@ -482,7 +488,7 @@ def manage_position_reversal():
 
         # Strong reversal: EXIT old side + SWITCH to opposite side.
         switch_accept = adverse>=0.38 if engine=="SCALP" else adverse>=0.45 if engine=="CORE" else adverse>=0.55
-        if persisted and pscore>=switch_threshold and switch_accept:
+        if persisted and pscore>=switch_threshold and switch_accept and not scalp_guard:
             old_signal=pos["signal_id"]
             note=(f"FLOW SWITCH score={pscore} d10={d10:.3f} d30={d30:.3f} "
                   f"flow={intensity:.2f} oi60={oi:.4f} book={book:.3f} mfe={mfe:.1f} mae={mae:.1f}")
@@ -498,7 +504,7 @@ def manage_position_reversal():
         exit_ms=8000 if engine=="SCALP" else 18000 if engine=="CORE" else 45000
         exit_accept=adverse>=0.22 if engine=="SCALP" else adverse>=0.28 if engine=="CORE" else adverse>=0.38
         exit_persisted = new_state=="PRESSURE" and new_psince and now-int(new_psince)>=exit_ms
-        if exit_persisted and pscore>=exit_threshold and exit_accept:
+        if exit_persisted and pscore>=exit_threshold and exit_accept and not scalp_guard:
             old_signal=pos["signal_id"]
             note=(f"FLOW EXIT score={pscore} d10={d10:.3f} d30={d30:.3f} "
                   f"flow={intensity:.2f} oi60={oi:.4f} book={book:.3f} mfe={mfe:.1f} mae={mae:.1f}")
