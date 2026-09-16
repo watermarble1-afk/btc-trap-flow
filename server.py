@@ -225,7 +225,7 @@ async def startup():
     await seed()
     asyncio.create_task(public_loop());asyncio.create_task(business_loop());asyncio.create_task(snapshot_loop())
 
-@app.get("/")
+@app.get("/api/status")
 def home():
     return {"service":"BTC Trap Flow Collector","ok":True,"status":status}
 
