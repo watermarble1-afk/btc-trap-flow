@@ -638,13 +638,13 @@ function renderHistory(){
     const tm=new Date(x.ts).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
     if(x.kind==='POSITION'){
       const isExit=x.event==='EXIT';
-      const c=isExit?'#c7d0dd':(x.dir==='LONG'?'#4f8cff':'#ff4f64');
+      const c=isExit?'#d1d5db':(x.dir==='LONG'?'#00e5ff':'#ffd400');
       const label=isExit?'X 청산':(x.event==='SWITCH'?'SWITCH '+(x.dir==='LONG'?'L':'S'):'포지션 '+(x.dir==='LONG'?'L':'S'));
       return `<div class="histrow"><span>${tm}</span><b style="color:${c}">${label} · $${fmt(x.price)}</b><span class="tiny">${isExit?'EXIT':x.event}</span></div>`;
     }
     const c=x.engine==='SCALP'?(x.dir==='LONG'?'#35d98a':'#ff78b4'):x.engine==='MACRO'?(x.dir==='LONG'?'#27c2a4':'#d95bd1'):(x.dir==='LONG'?'#4f8cff':'#ff4f64');
     const tf=x.engine==='SCALP'?'[1/3M]':x.engine==='MACRO'?'[1H/4H]':'[5/15M]';
-    return `<div class="histrow"><span>${tm}</span><b style="color:${c}">${tf} ${x.name} · 진입 $${fmt(x.price)}</b><span class=""></span></div>`;
+    return `<div class="histrow"><span>${tm}</span><b style="color:${c}">${tf} ${x.name}</b><span class="tiny">SIGNAL</span></div>`;
   }).join(''):'<div class="tiny">아직 없음</div>';
 }
 function renderMarkers(){
@@ -665,19 +665,23 @@ function renderMarkers(){
     });
   }
 
-  // Position layer: X means position closed. It is not a LOSS mark.
-  for(const e of positionEvents.filter(e=>e.time>=from && effective!=='SCALP' && effective!=='MACRO')){
-    if(e.event==='EXIT'){
+  // Actual position layer. OPEN is deliberately distinct from ordinary signals.
+  for(const e of positionEvents.filter(e=>e.time>=from)){
+    const ev=String(e.event||'').toUpperCase();
+    if(!['OPEN','EXIT','SWITCH'].includes(ev)) continue;
+    if(effective!=='ALL' && (e.engine||'CORE')!==effective) continue;
+    if(ev==='EXIT'){
       marks.push({
         time:e.time, position:e.side==='LONG'?'aboveBar':'belowBar',
-        color:'#c7d0dd', shape:'circle', text:(String(e.event).toUpperCase()==='SWITCH'?(e.side==='LONG'?'SW L':'SW S'):'X')
+        color:'#d1d5db', shape:'circle', text:'X'
       });
-    }else if(e.event==='SWITCH'){
+    }else{
+      const isL=e.side==='LONG';
       marks.push({
-        time:e.time, position:e.side==='LONG'?'belowBar':'aboveBar',
-        color:e.side==='LONG'?'#4f8cff':'#ff4f64',
-        shape:e.side==='LONG'?'arrowUp':'arrowDown',
-        text:'SWITCH '+(e.side==='LONG'?'L':'S')
+        time:e.time, position:isL?'belowBar':'aboveBar',
+        color:isL?'#00e5ff':'#ffd400',
+        shape:isL?'arrowUp':'arrowDown',
+        text:(ev==='SWITCH'?'◆ SW ':'◆ POS ')+(isL?'L':'S')+' $'+fmt(e.price)
       });
     }
   }

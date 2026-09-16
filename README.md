@@ -77,3 +77,10 @@ These are experimental heuristics, not validated probabilities.
 - 1/3M, 5/15M, 1H/4H header stats now also use closed actual positions per engine.
 - Open positions do not count as W/L.
 - Ordinary signal benchmark statuses no longer feed displayed win rate.
+
+## v6.10 POS marker fix
+- Root cause fixed: chart renderer previously drew EXIT and SWITCH only; OPEN was omitted.
+- Actual OPEN now renders as `◆ POS L/S $entry`.
+- LONG POS is cyan; SHORT POS is yellow; EXIT is neutral X.
+- Ordinary signal rows no longer show entry price.
+- Engine filtering now includes the matching engine's OPEN/EXIT/SWITCH markers.
