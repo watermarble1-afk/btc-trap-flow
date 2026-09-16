@@ -368,54 +368,45 @@ def position_events(limit:int=300):
 
 @app.get("/api/stock/gaon")
 async def stock_gaon():
-    """Gaon Cable 000500 daily OHLCV. Primary source + Yahoo fallback."""
-    headers={"User-Agent":"Mozilla/5.0"}
+    """Gaon Cable 000500 daily OHLCV. Naver Finance primary."""
+    import ast, datetime as _dt
+    headers={"User-Agent":"Mozilla/5.0","Referer":"https://finance.naver.com/"}
     errors=[]
-    # Primary: public daily-history JSON.
     try:
-        url="https://aikstockdata.com/data/public/s/000500_history.json"
-        async with httpx.AsyncClient(timeout=15.0,headers=headers,follow_redirects=True) as client:
-            r=await client.get(url);r.raise_for_status();j=r.json()
-        raw=j if isinstance(j,list) else (j.get("history") or j.get("data") or j.get("prices") or [])
+        end=_dt.datetime.now().strftime("%Y%m%d")
+        start=(_dt.datetime.now()-_dt.timedelta(days=900)).strftime("%Y%m%d")
+        url="https://api.finance.naver.com/siseJson.naver"
+        params={"symbol":"000500","requestType":"1","startTime":start,"endTime":end,"timeframe":"day"}
+        async with httpx.AsyncClient(timeout=20.0,headers=headers,follow_redirects=True) as client:
+            r=await client.get(url,params=params);r.raise_for_status();txt=r.text.strip()
+        data=ast.literal_eval(txt)
         rows=[]
-        for x in raw:
-            if not isinstance(x,dict): continue
-            ds=x.get("date") or x.get("trade_date") or x.get("dt")
-            o=x.get("open") or x.get("open_price"); h=x.get("high") or x.get("high_price")
-            l=x.get("low") or x.get("low_price"); c=x.get("close") or x.get("close_price")
-            v=x.get("volume") or x.get("vol") or 0
-            if not ds or None in (o,h,l,c): continue
-            import datetime as _dt
-            if isinstance(ds,(int,float)):
-                t=int(ds/1000 if ds>10_000_000_000 else ds)
-            else:
-                ds=str(ds).replace(".","-").replace("/","-")
-                t=int(_dt.datetime.fromisoformat(ds[:10]).replace(tzinfo=_dt.timezone.utc).timestamp())
-            def num(z):
-                if isinstance(z,str): z=z.replace(",","")
-                return float(z)
-            rows.append({"time":t,"open":num(o),"high":num(h),"low":num(l),"close":num(c),"volume":num(v or 0)})
-        rows=sorted({x["time"]:x for x in rows}.values(),key=lambda x:x["time"])
+        for row in data[1:]:
+            if not isinstance(row,(list,tuple)) or len(row)<7: continue
+            ds=str(row[0]).strip()
+            if not re.fullmatch(r"\d{8}",ds): continue
+            o,h,l,c,v=row[1],row[2],row[3],row[4],row[5]
+            # Naver order is date, open, high, low, close, volume, foreign...
+            t=int(_dt.datetime.strptime(ds,"%Y%m%d").replace(tzinfo=_dt.timezone.utc).timestamp())
+            rows.append({"time":t,"open":float(o),"high":float(h),"low":float(l),"close":float(c),"volume":float(v)})
         if len(rows)>=30:
-            return {"symbol":"000500","name":"가온전선","currency":"KRW","source":"public-history","rows":rows}
-        errors.append("primary rows="+str(len(rows)))
+            return {"symbol":"000500","name":"가온전선","currency":"KRW","source":"NAVER","rows":rows}
+        errors.append("naver rows="+str(len(rows)))
     except Exception as e:
-        errors.append("primary: "+str(e))
+        errors.append("naver: "+str(e))
 
-    # Fallback: Yahoo chart.
     try:
         url="https://query1.finance.yahoo.com/v8/finance/chart/000500.KS"
-        params={"range":"2y","interval":"1d","events":"history","includeAdjustedClose":"true"}
+        params={"range":"2y","interval":"1d","events":"history"}
         async with httpx.AsyncClient(timeout=15.0,headers=headers,follow_redirects=True) as client:
             r=await client.get(url,params=params);r.raise_for_status();j=r.json()
         result=j["chart"]["result"][0];q=result["indicators"]["quote"][0];ts=result.get("timestamp") or []
         rows=[]
         for i,t in enumerate(ts):
             vals=(q["open"][i],q["high"][i],q["low"][i],q["close"][i])
-            if any(v is None for v in vals):continue
+            if any(v is None for v in vals): continue
             rows.append({"time":int(t),"open":vals[0],"high":vals[1],"low":vals[2],"close":vals[3],"volume":q["volume"][i] or 0})
-        if rows:return {"symbol":"000500.KS","name":"가온전선","currency":"KRW","source":"yahoo-fallback","rows":rows}
-        errors.append("yahoo rows=0")
+        if rows:return {"symbol":"000500.KS","name":"가온전선","currency":"KRW","source":"YAHOO","rows":rows}
     except Exception as e:
         errors.append("yahoo: "+str(e))
     return {"symbol":"000500","name":"가온전선","currency":"KRW","rows":[],"error":" | ".join(errors)}

@@ -34,18 +34,18 @@ function saveInd(){localStorage.setItem(INDKEY,JSON.stringify({ma:userMA,vwap:$(
 function drawInd(){
  if(!chart||!candle)return; let a=indData(); if(!a.length)return;
  for(const x of maSeries)try{chart.removeSeries(x)}catch(e){} maSeries=[];
- userMA.forEach((m,i)=>{let z=chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:m.type+m.n});z.setData(calcMA(a,m.n,m.type));maSeries.push(z)});
+ userMA.forEach((m,i)=>{let z=chart.addLineSeries({lineWidth:2,color:m.c||'#f1c75b',priceLineVisible:false,lastValueVisible:false,title:m.type+m.n});z.setData(calcMA(a,m.n,m.type));maSeries.push(z)});
  if(userVWAP){try{chart.removeSeries(userVWAP)}catch(e){}userVWAP=null}
  if($('vwapChk').checked){userVWAP=chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'VWAP'});userVWAP.setData(calcUserVWAP(a))}
  if(typeof vol!=='undefined'&&vol)vol.applyOptions({visible:$('volChk').checked});
  if(typeof volume!=='undefined'&&volume)volume.applyOptions({visible:$('volChk').checked});
- $('indTags').innerHTML=userMA.map((m,i)=>`<span class="indTag" data-rm="${i}">${m.type}${m.n} ×</span>`).join('');
+ $('indTags').innerHTML=userMA.map((m,i)=>`<span class="indTag" data-rm="${i}" style="border-color:${m.c||'#f1c75b'};color:${m.c||'#f1c75b'}">${m.type}${m.n} ×</span>`).join('');
  document.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{userMA.splice(+x.dataset.rm,1);saveInd();drawInd()});
 }
 function initInd(){
  loadInd();
  $('indBtn').onclick=()=>$('indPanel').classList.toggle('open');
- $('addMA').onclick=()=>{let n=Math.max(2,Math.min(500,+$('maLen').value||20)),type=$('maType').value;if(!userMA.some(x=>x.n===n&&x.type===type))userMA.push({n,type});saveInd();drawInd()};
+ $('addMA').onclick=()=>{let n=Math.max(2,Math.min(500,+$('maLen').value||20)),type=$('maType').value;let c=$('maColor').value;if(!userMA.some(x=>x.n===n&&x.type===type))userMA.push({n,type,c});saveInd();drawInd()};
  $('vwapChk').onchange=$('volChk').onchange=()=>{saveInd();drawInd()};
  setTimeout(drawInd,1200);
 }
@@ -108,7 +108,7 @@ body.embedded-btc header{position:relative!important}
 <div class="chartTools"><button class="indBtn" id="indBtn">⚙ 지표 설정</button>
 <div class="indPanel" id="indPanel">
  <b style="font-size:12px">차트 지표</b>
- <div class="indRow"><span>이평선</span><input id="maLen" type="number" min="2" max="500" value="20"><select id="maType"><option>SMA</option><option>EMA</option></select></div>
+ <div class="indRow"><span>이평선</span><input id="maLen" type="number" min="2" max="500" value="20"><select id="maType"><option>SMA</option><option>EMA</option></select></div><div class="indRow"><span>선 색상</span><input id="maColor" type="color" value="#f1c75b" style="width:54px;height:30px;padding:2px"><span></span></div>
  <button id="addMA">+ 이평선 추가</button>
  <div class="indTags" id="indTags"></div>
  <div style="height:1px;background:#263249;margin:10px 0"></div>
@@ -760,18 +760,18 @@ function saveInd(){localStorage.setItem(INDKEY,JSON.stringify({ma:userMA,vwap:$(
 function drawInd(){
  if(!chart||!candle)return; let a=indData(); if(!a.length)return;
  for(const x of maSeries)try{chart.removeSeries(x)}catch(e){} maSeries=[];
- userMA.forEach((m,i)=>{let z=chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:m.type+m.n});z.setData(calcMA(a,m.n,m.type));maSeries.push(z)});
+ userMA.forEach((m,i)=>{let z=chart.addLineSeries({lineWidth:2,color:m.c||'#f1c75b',priceLineVisible:false,lastValueVisible:false,title:m.type+m.n});z.setData(calcMA(a,m.n,m.type));maSeries.push(z)});
  if(userVWAP){try{chart.removeSeries(userVWAP)}catch(e){}userVWAP=null}
  if($('vwapChk').checked){userVWAP=chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'VWAP'});userVWAP.setData(calcUserVWAP(a))}
  if(typeof vol!=='undefined'&&vol)vol.applyOptions({visible:$('volChk').checked});
  if(typeof volume!=='undefined'&&volume)volume.applyOptions({visible:$('volChk').checked});
- $('indTags').innerHTML=userMA.map((m,i)=>`<span class="indTag" data-rm="${i}">${m.type}${m.n} ×</span>`).join('');
+ $('indTags').innerHTML=userMA.map((m,i)=>`<span class="indTag" data-rm="${i}" style="border-color:${m.c||'#f1c75b'};color:${m.c||'#f1c75b'}">${m.type}${m.n} ×</span>`).join('');
  document.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{userMA.splice(+x.dataset.rm,1);saveInd();drawInd()});
 }
 function initInd(){
  loadInd();
  $('indBtn').onclick=()=>$('indPanel').classList.toggle('open');
- $('addMA').onclick=()=>{let n=Math.max(2,Math.min(500,+$('maLen').value||20)),type=$('maType').value;if(!userMA.some(x=>x.n===n&&x.type===type))userMA.push({n,type});saveInd();drawInd()};
+ $('addMA').onclick=()=>{let n=Math.max(2,Math.min(500,+$('maLen').value||20)),type=$('maType').value;let c=$('maColor').value;if(!userMA.some(x=>x.n===n&&x.type===type))userMA.push({n,type,c});saveInd();drawInd()};
  $('vwapChk').onchange=$('volChk').onchange=()=>{saveInd();drawInd()};
  setTimeout(drawInd,1200);
 }

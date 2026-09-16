@@ -1,190 +1,52 @@
-<!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>가온전선 · STOCK SIGNAL LAB v1</title>
-<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js">
-// ---- USER INDICATORS v4.1 ----
-let userMA=[],maSeries=[],userVWAP=null;
-const INDKEY='marketTerminalIndicators:'+location.pathname;
-function indData(){
-  if(typeof cache!=='undefined' && typeof cur!=='undefined' && cache[cur]) return cache[cur];
-  return window.__stockRows||[];
-}
-function calcMA(a,n,type){
- let out=[],ema=null,k=2/(n+1);
- for(let i=0;i<a.length;i++){
-   let v;
-   if(type==='EMA'){ema=ema==null?a[i].close:a[i].close*k+ema*(1-k);if(i>=n-1)v=ema}
-   else if(i>=n-1){let sum=0;for(let j=i-n+1;j<=i;j++)sum+=a[j].close;v=sum/n}
-   if(v!=null)out.push({time:a[i].time,value:v});
- } return out;
-}
-function calcUserVWAP(a){
- let out=[],pv=0,v=0,lastDay='';
- for(const x of a){
-   let d=new Date(x.time*1000).toISOString().slice(0,10);
-   if(d!==lastDay){pv=0;v=0;lastDay=d}
-   let q=x.volume||1;pv+=((x.high+x.low+x.close)/3)*q;v+=q;out.push({time:x.time,value:pv/v});
- } return out;
-}
-function loadInd(){try{let x=JSON.parse(localStorage.getItem(INDKEY)||'{}');userMA=x.ma||[];$('vwapChk').checked=!!x.vwap;$('volChk').checked=x.vol!==false}catch(e){}}
-function saveInd(){localStorage.setItem(INDKEY,JSON.stringify({ma:userMA,vwap:$('vwapChk').checked,vol:$('volChk').checked}))}
-function drawInd(){
- if(!chart||!candle)return; let a=indData(); if(!a.length)return;
- for(const x of maSeries)try{chart.removeSeries(x)}catch(e){} maSeries=[];
- userMA.forEach((m,i)=>{let z=chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:m.type+m.n});z.setData(calcMA(a,m.n,m.type));maSeries.push(z)});
- if(userVWAP){try{chart.removeSeries(userVWAP)}catch(e){}userVWAP=null}
- if($('vwapChk').checked){userVWAP=chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'VWAP'});userVWAP.setData(calcUserVWAP(a))}
- if(typeof vol!=='undefined'&&vol)vol.applyOptions({visible:$('volChk').checked});
- if(typeof volume!=='undefined'&&volume)volume.applyOptions({visible:$('volChk').checked});
- $('indTags').innerHTML=userMA.map((m,i)=>`<span class="indTag" data-rm="${i}">${m.type}${m.n} ×</span>`).join('');
- document.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{userMA.splice(+x.dataset.rm,1);saveInd();drawInd()});
-}
-function initInd(){
- loadInd();
- $('indBtn').onclick=()=>$('indPanel').classList.toggle('open');
- $('addMA').onclick=()=>{let n=Math.max(2,Math.min(500,+$('maLen').value||20)),type=$('maType').value;if(!userMA.some(x=>x.n===n&&x.type===type))userMA.push({n,type});saveInd();drawInd()};
- $('vwapChk').onchange=$('volChk').onchange=()=>{saveInd();drawInd()};
- setTimeout(drawInd,1200);
-}
-window.__initIndicators=initInd;
-</script>
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>가온전선 · STOCK SIGNAL LAB</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
-:root{--bg:#070a10;--p:#0e1420;--line:#20293a;--txt:#e9eef7;--mut:#8d99ad;--blue:#4f8cff;--red:#ff4f64;--cyan:#35d7e5;--x:#d7dee9;--y:#f1c75b}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,sans-serif}
-.wrap{padding:12px;max-width:1700px;margin:auto}.top{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
-h1{font-size:19px;margin:0}.sub{font-size:11px;color:var(--mut);margin-top:3px}.pill{border:1px solid var(--line);background:#111927;padding:7px 10px;border-radius:8px;font-size:11px}
-.cards{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:10px 0}.card,.panel{background:var(--p);border:1px solid var(--line);border-radius:11px}.card{padding:9px}.lbl{font-size:10px;color:var(--mut)}.val{font-weight:800;font-size:16px;margin-top:3px}
-.grid{display:grid;grid-template-columns:minmax(0,2fr) 360px;gap:10px}.panel{padding:10px}#chart{height:690px}.legend{font-size:10px;color:var(--mut);display:flex;gap:13px;flex-wrap:wrap;margin-top:6px}
-.blue{color:var(--blue)}.red{color:var(--red)}.cyan{color:var(--cyan)}.x{color:var(--x)}.yellow{color:var(--y)}
-.row{display:flex;justify-content:space-between;border-bottom:1px solid #192130;padding:7px 2px;font-size:11px}.row:last-child{border:0}
-.siglist{max-height:420px;overflow:auto}.sig{display:grid;grid-template-columns:78px 1fr 70px;gap:6px;padding:7px 2px;border-bottom:1px solid #192130;font-size:10px}.note{font-size:10px;line-height:1.6;color:var(--mut)}
+:root{--bg:#070a10;--p:#0e1420;--line:#20293a;--txt:#e9eef7;--mut:#8d99ad;--blue:#4f8cff;--red:#ff4f64;--cyan:#35d7e5}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,sans-serif}.wrap{padding:12px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}h1{font-size:18px;margin:0}.mut{color:var(--mut);font-size:10px}
+.pill,.btn{border:1px solid var(--line);background:#131b29;color:var(--txt);padding:7px 10px;border-radius:7px}.btn{cursor:pointer}
+.cards{display:grid;grid-template-columns:repeat(5,1fr);gap:7px;margin:10px 0}.card,.panel{background:var(--p);border:1px solid var(--line);border-radius:10px;padding:9px}.lbl{font-size:9px;color:var(--mut)}.val{font-size:15px;font-weight:800;margin-top:3px}
+.grid{display:grid;grid-template-columns:minmax(0,2fr) 350px;gap:9px}.tools{position:relative;margin-bottom:7px}.ind{display:none;position:absolute;z-index:20;top:38px;left:0;width:320px;background:#0d1420;border:1px solid #30405a;border-radius:9px;padding:10px}.ind.open{display:block}
+.ind input,.ind select{background:#111a28;color:white;border:1px solid #30405a;padding:6px;border-radius:5px}.tag{display:inline-block;border:1px solid #30405a;padding:4px 7px;border-radius:20px;font-size:10px;margin:5px 3px 0 0;cursor:pointer}
+#chart{height:680px}.legend{font-size:10px;color:var(--mut);display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}.list{max-height:520px;overflow:auto}.item{display:grid;grid-template-columns:80px 1fr 80px;gap:5px;border-bottom:1px solid #1b2433;padding:7px 0;font-size:10px}
+.blue{color:var(--blue)}.red{color:var(--red)}.cyan{color:var(--cyan)}
 @media(max-width:850px){.cards{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}#chart{height:520px}}
-</style>
-<style>
-.indBtn{border:1px solid #2b3850;background:#151d2b;color:#d8e1ee;padding:7px 12px;border-radius:7px;cursor:pointer;font-weight:700}
-.indPanel{display:none;position:absolute;z-index:50;top:42px;left:10px;width:330px;background:#0d1420;border:1px solid #2a3850;border-radius:10px;padding:10px;box-shadow:0 12px 30px #0008}
-.indPanel.open{display:block}.indRow{display:grid;grid-template-columns:72px 1fr 64px;gap:6px;align-items:center;margin:6px 0;font-size:11px}
-.indPanel input,.indPanel select{background:#111a28;color:#e8eef7;border:1px solid #2a3850;border-radius:6px;padding:6px;min-width:0}
-.indPanel button{background:#172338;color:#e8eef7;border:1px solid #31415c;border-radius:6px;padding:6px;cursor:pointer}
-.indTags{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}.indTag{font-size:10px;border:1px solid #31415c;border-radius:99px;padding:4px 7px;cursor:pointer}
-.chartTools{position:relative;display:flex;gap:6px;align-items:center;margin-bottom:7px}
 </style></head><body><div class="wrap">
-<div class="top"><div><h1>가온전선 <span class="yellow">000500</span> · STOCK SIGNAL LAB v1</h1>
-<div class="sub">1차 연구판 · 일봉 OHLCV 기반 과거 LONG / SHORT / RETEST / EXIT(X)</div></div><div class="pill" id="state">DATA LOADING…</div></div>
-<div class="cards">
-<div class="card"><div class="lbl">최근 종가</div><div class="val" id="last">—</div></div>
-<div class="card"><div class="lbl">과거 신호</div><div class="val" id="cnt">—</div></div>
-<div class="card"><div class="lbl">LONG</div><div class="val blue" id="lc">—</div></div>
-<div class="card"><div class="lbl">SHORT</div><div class="val red" id="sc">—</div></div>
-<div class="card"><div class="lbl">현재 연구 상태</div><div class="val" id="pos">FLAT</div></div>
-</div>
-<div class="grid"><section class="panel"><div class="chartTools"><button class="indBtn" id="indBtn">⚙ 지표 설정</button>
-<div class="indPanel" id="indPanel">
- <b style="font-size:12px">차트 지표</b>
- <div class="indRow"><span>이평선</span><input id="maLen" type="number" min="2" max="500" value="20"><select id="maType"><option>SMA</option><option>EMA</option></select></div>
- <button id="addMA">+ 이평선 추가</button>
- <div class="indTags" id="indTags"></div>
- <div style="height:1px;background:#263249;margin:10px 0"></div>
- <div class="indRow"><span>기타</span><label><input type="checkbox" id="vwapChk"> VWAP</label><label><input type="checkbox" id="volChk" checked> 거래량</label></div>
- <div style="font-size:9px;color:#7f8ba0;margin-top:7px">예: 5·20·60·120·240 또는 직접 숫자 입력 · 설정은 이 브라우저에 저장</div>
-</div></div><div id="chart"></div>
-<div class="legend"><span class="blue"><b>LONG ▲</b> 저점 유동성 sweep 후 reclaim</span><span class="red"><b>SHORT ▼</b> 고점 유동성 sweep 후 reject</span><span class="cyan"><b>RETEST</b> 돌파 후 첫 되돌림</span><span class="x"><b>X</b> 반대 변곡/추적청산</span></div>
-</section><aside>
-<div class="panel"><b style="font-size:12px">연구 로직</b><p class="note">직전 10거래일 고가/저가를 유동성 기준으로 보고, 당일 꼬리가 레벨을 넘었다가 종가가 다시 안쪽으로 들어오면 TRAP 후보로 기록합니다. 신호 후 포지션은 반대 신호 또는 ATR 기반 추적 변곡에서 X로 종료합니다. 이 v1은 과거 패턴 검증용이며 수익확률을 뜻하지 않습니다.</p></div>
-<div class="panel" style="margin-top:8px"><b style="font-size:12px">과거 신호</b><div class="siglist" id="list"></div></div>
-</aside></div></div>
+<div class="top"><div><h1>가온전선 <span style="color:#f1c75b">000500</span> · STOCK SIGNAL LAB v1.1</h1><div class="mut">일봉 과거 신호 연구판</div></div><div class="pill" id="state">DATA LOADING…</div></div>
+<div class="cards"><div class="card"><div class="lbl">최근 종가</div><div class="val" id="last">—</div></div><div class="card"><div class="lbl">데이터</div><div class="val" id="bars">—</div></div><div class="card"><div class="lbl">LONG</div><div class="val blue" id="lc">—</div></div><div class="card"><div class="lbl">SHORT</div><div class="val red" id="sc">—</div></div><div class="card"><div class="lbl">상태</div><div class="val" id="pos">FLAT</div></div></div>
+<div class="grid"><section class="panel"><div class="tools"><button class="btn" id="indBtn">⚙ 지표 설정</button><div class="ind" id="ind">
+<div><input id="len" type="number" min="2" max="500" value="20" style="width:75px"> <select id="typ"><option>SMA</option><option>EMA</option></select> <input id="maColor" type="color" value="#f1c75b" title="선 색상" style="width:42px;height:31px;padding:2px;vertical-align:middle"> <button class="btn" id="add">+ 추가</button></div>
+<div id="tags"></div><div style="margin-top:9px"><label><input id="volC" type="checkbox" checked> 거래량</label></div><div class="mut" style="margin-top:7px">5·20·60·120·240 등 직접 입력 · 클릭한 이평선은 ×로 삭제</div></div></div>
+<div id="chart"></div><div class="legend"><span class="blue"><b>LONG ▲</b></span><span class="red"><b>SHORT ▼</b></span><span class="cyan"><b>RETEST</b></span><span><b>X</b> 포지션 정리</span></div></section>
+<aside><div class="panel"><b>과거 신호</b><div class="list" id="list"></div></div></aside></div></div>
 <script>
-const $=id=>document.getElementById(id), fmt=n=>Math.round(n||0).toLocaleString('ko-KR')+'원';
-let chart,candle,vol;
-function atr(a,i,n=14){if(i<1)return 0;let s=0,k=0;for(let j=Math.max(1,i-n+1);j<=i;j++){let p=a[j-1].close,x=a[j];s+=Math.max(x.high-x.low,Math.abs(x.high-p),Math.abs(x.low-p));k++}return k?s/k:0}
-function analyze(a){
- let sig=[],pos=null,breakout=null;
- for(let i=20;i<a.length;i++){
-   let x=a[i], prev=a.slice(i-10,i), hi=Math.max(...prev.map(z=>z.high)), lo=Math.min(...prev.map(z=>z.low)), A=atr(a,i);
-   let avgV=a.slice(i-20,i).reduce((q,z)=>q+(z.volume||0),0)/20;
-   let longTrap=x.low<lo && x.close>lo && x.close>x.low+(x.high-x.low)*.55;
-   let shortTrap=x.high>hi && x.close<hi && x.close<x.low+(x.high-x.low)*.45;
-   if(longTrap){sig.push({i,time:x.time,type:'LONG',price:x.close}); if(pos?.side==='SHORT')sig.push({i,time:x.time,type:'EXIT',side:'SHORT',price:x.close}); pos={side:'LONG',entry:x.close,best:x.close,A};}
-   else if(shortTrap){sig.push({i,time:x.time,type:'SHORT',price:x.close}); if(pos?.side==='LONG')sig.push({i,time:x.time,type:'EXIT',side:'LONG',price:x.close}); pos={side:'SHORT',entry:x.close,best:x.close,A};}
-   if(x.close>hi && x.volume>avgV*1.35)breakout={side:'LONG',level:hi,until:i+8,used:false};
-   if(x.close<lo && x.volume>avgV*1.35)breakout={side:'SHORT',level:lo,until:i+8,used:false};
-   if(breakout && i<=breakout.until && !breakout.used){
-     if(breakout.side==='LONG' && x.low<=breakout.level*1.012 && x.close>breakout.level){sig.push({i,time:x.time,type:'RETEST L',price:x.close});breakout.used=true}
-     if(breakout.side==='SHORT' && x.high>=breakout.level*.988 && x.close<breakout.level){sig.push({i,time:x.time,type:'RETEST S',price:x.close});breakout.used=true}
-   }
-   if(pos){
-     if(pos.side==='LONG'){pos.best=Math.max(pos.best,x.high);if(i>20 && pos.best-pos.entry>=.8*pos.A && pos.best-x.close>=1.15*pos.A){sig.push({i,time:x.time,type:'EXIT',side:'LONG',price:x.close});pos=null}}
-     else{pos.best=Math.min(pos.best,x.low);if(i>20 && pos.entry-pos.best>=.8*pos.A && x.close-pos.best>=1.15*pos.A){sig.push({i,time:x.time,type:'EXIT',side:'SHORT',price:x.close});pos=null}}
-   }
- }
- return {sig,pos};
-}
-async function init(){
- try{
-  let j=await fetch('/api/stock/gaon',{cache:'no-store'}).then(r=>r.json()), a=j.rows||[];
-  if(!a.length)throw new Error(j.error||'no rows');window.__stockRows=a;
-  $('state').textContent='● DAILY DATA';$('state').style.color='#35d7e5';$('last').textContent=fmt(a.at(-1).close);
-  chart=LightweightCharts.createChart($('chart'),{layout:{background:{color:'#0a0f18'},textColor:'#8d99ad'},grid:{vertLines:{color:'#151d2a'},horzLines:{color:'#151d2a'}},rightPriceScale:{borderColor:'#253044'},timeScale:{borderColor:'#253044',timeVisible:false}});
-  candle=chart.addCandlestickSeries({upColor:'#2fd58b',downColor:'#ff5c70',borderVisible:false,wickUpColor:'#2fd58b',wickDownColor:'#ff5c70'});
-  vol=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'vol'});chart.priceScale('vol').applyOptions({scaleMargins:{top:.82,bottom:0}});
-  candle.setData(a);vol.setData(a.map(x=>({time:x.time,value:x.volume,color:x.close>=x.open?'rgba(47,213,139,.28)':'rgba(255,92,112,.28)'})));
-  let r=analyze(a), sig=r.sig;
-  let marks=sig.map(s=>({time:s.time,position:s.type==='LONG'||s.type==='RETEST L'?'belowBar':s.type==='SHORT'||s.type==='RETEST S'?'aboveBar':s.side==='LONG'?'aboveBar':'belowBar',
-    color:s.type==='LONG'?'#4f8cff':s.type==='SHORT'?'#ff4f64':s.type.startsWith('RETEST')?'#35d7e5':'#d7dee9',
-    shape:s.type==='LONG'?'arrowUp':s.type==='SHORT'?'arrowDown':s.type.startsWith('RETEST')?'circle':'circle',
-    text:s.type==='EXIT'?'X '+s.side:s.type}));
-  candle.setMarkers(marks.sort((x,y)=>x.time-y.time));chart.timeScale().fitContent();
-  $('cnt').textContent=sig.length;$('lc').textContent=sig.filter(x=>x.type==='LONG').length;$('sc').textContent=sig.filter(x=>x.type==='SHORT').length;
-  $('pos').textContent=r.pos?r.pos.side:'FLAT';$('pos').style.color=r.pos?.side==='LONG'?'#4f8cff':r.pos?.side==='SHORT'?'#ff4f64':'#e9eef7';
-  $('list').innerHTML=sig.slice().reverse().slice(0,60).map(s=>{let d=new Date(s.time*1000).toLocaleDateString('ko-KR');let c=s.type==='LONG'?'blue':s.type==='SHORT'?'red':s.type.startsWith('RETEST')?'cyan':'x';return `<div class="sig"><span>${d}</span><b class="${c}">${s.type==='EXIT'?'X '+s.side:s.type}</b><span>${fmt(s.price)}</span></div>`}).join('');
-  try{if(window.__initIndicators)window.__initIndicators();drawInd()}catch(e){};new ResizeObserver(()=>chart.applyOptions({width:$('chart').clientWidth})).observe($('chart'));
- }catch(e){$('state').textContent='DATA ERROR · '+e.message;$('state').style.color='#ff4f64';$('list').innerHTML='<div class="note">'+e.message+'</div>'}
-}
+const $=x=>document.getElementById(x), won=n=>Math.round(n||0).toLocaleString('ko-KR')+'원';
+let chart,candle,volume,rows=[],ma=[],maSeries=[];
+function ATR(a,i,n=14){let s=0,k=0;for(let j=Math.max(1,i-n+1);j<=i;j++){let x=a[j],p=a[j-1].close;s+=Math.max(x.high-x.low,Math.abs(x.high-p),Math.abs(x.low-p));k++}return k?s/k:0}
+function signals(a){let out=[],pos=null,bo=null;for(let i=20;i<a.length;i++){let x=a[i],p=a.slice(i-10,i),hi=Math.max(...p.map(z=>z.high)),lo=Math.min(...p.map(z=>z.low)),A=ATR(a,i),av=a.slice(i-20,i).reduce((q,z)=>q+z.volume,0)/20;
+let L=x.low<lo&&x.close>lo&&x.close>x.low+(x.high-x.low)*.55,S=x.high>hi&&x.close<hi&&x.close<x.low+(x.high-x.low)*.45;
+if(L){if(pos?.side==='SHORT')out.push({time:x.time,type:'EXIT',side:'SHORT',price:x.close});out.push({time:x.time,type:'LONG',price:x.close});pos={side:'LONG',entry:x.close,best:x.close,A}}
+else if(S){if(pos?.side==='LONG')out.push({time:x.time,type:'EXIT',side:'LONG',price:x.close});out.push({time:x.time,type:'SHORT',price:x.close});pos={side:'SHORT',entry:x.close,best:x.close,A}}
+if(x.close>hi&&x.volume>av*1.35)bo={side:'L',level:hi,end:i+8,used:false};if(x.close<lo&&x.volume>av*1.35)bo={side:'S',level:lo,end:i+8,used:false};
+if(bo&&!bo.used&&i<=bo.end){if(bo.side==='L'&&x.low<=bo.level*1.012&&x.close>bo.level){out.push({time:x.time,type:'RETEST L',price:x.close});bo.used=true}if(bo.side==='S'&&x.high>=bo.level*.988&&x.close<bo.level){out.push({time:x.time,type:'RETEST S',price:x.close});bo.used=true}}
+if(pos){if(pos.side==='LONG'){pos.best=Math.max(pos.best,x.high);if(pos.best-pos.entry>=.8*pos.A&&pos.best-x.close>=1.15*pos.A){out.push({time:x.time,type:'EXIT',side:'LONG',price:x.close});pos=null}}else{pos.best=Math.min(pos.best,x.low);if(pos.entry-pos.best>=.8*pos.A&&x.close-pos.best>=1.15*pos.A){out.push({time:x.time,type:'EXIT',side:'SHORT',price:x.close});pos=null}}}}
+return {out,pos}}
+function calcMA(n,t){let z=[],e=null,k=2/(n+1);for(let i=0;i<rows.length;i++){let v;if(t==='EMA'){e=e==null?rows[i].close:rows[i].close*k+e*(1-k);if(i>=n-1)v=e}else if(i>=n-1)v=rows.slice(i-n+1,i+1).reduce((q,x)=>q+x.close,0)/n;if(v!=null)z.push({time:rows[i].time,value:v})}return z}
+function drawMA(){maSeries.forEach(x=>{try{chart.removeSeries(x)}catch(e){}});maSeries=[];ma.forEach(m=>{let z=chart.addLineSeries({lineWidth:2,color:m.c||'#f1c75b',priceLineVisible:false,lastValueVisible:false,title:m.t+m.n});z.setData(calcMA(m.n,m.t));maSeries.push(z)});$('tags').innerHTML=ma.map((m,i)=>`<span class="tag" data-i="${i}" style="border-color:${m.c||'#f1c75b'};color:${m.c||'#f1c75b'}">${m.t}${m.n} ×</span>`).join('');document.querySelectorAll('[data-i]').forEach(x=>x.onclick=()=>{ma.splice(+x.dataset.i,1);save();drawMA()})}
+function save(){localStorage.setItem('stock-ma-000500',JSON.stringify(ma))}
+async function init(){try{
+let r=await fetch('/api/stock/gaon?v=43',{cache:'no-store'});if(!r.ok)throw Error('API '+r.status);let j=await r.json();rows=j.rows||[];if(!rows.length)throw Error(j.error||'주가 데이터 0건');
+if(!window.LightweightCharts)throw Error('차트 라이브러리 로딩 실패');
+$('state').textContent='● '+(j.source||'DATA');$('state').style.color='#35d7e5';$('last').textContent=won(rows.at(-1).close);$('bars').textContent=rows.length+'봉';
+chart=LightweightCharts.createChart($('chart'),{layout:{background:{color:'#0a0f18'},textColor:'#8d99ad'},grid:{vertLines:{color:'#151d2a'},horzLines:{color:'#151d2a'}},rightPriceScale:{borderColor:'#253044'},timeScale:{borderColor:'#253044'}});
+candle=chart.addCandlestickSeries({upColor:'#2fd58b',downColor:'#ff5c70',borderVisible:false,wickUpColor:'#2fd58b',wickDownColor:'#ff5c70'});volume=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'vol'});chart.priceScale('vol').applyOptions({scaleMargins:{top:.82,bottom:0}});
+candle.setData(rows);volume.setData(rows.map(x=>({time:x.time,value:x.volume,color:x.close>=x.open?'rgba(47,213,139,.25)':'rgba(255,92,112,.25)'})));
+let q=signals(rows),sg=q.out;let mk=sg.map(s=>({time:s.time,position:s.type==='LONG'||s.type==='RETEST L'?'belowBar':s.type==='SHORT'||s.type==='RETEST S'?'aboveBar':s.side==='LONG'?'aboveBar':'belowBar',color:s.type==='LONG'?'#4f8cff':s.type==='SHORT'?'#ff4f64':s.type.startsWith('RETEST')?'#35d7e5':'#d7dee9',shape:s.type==='LONG'?'arrowUp':s.type==='SHORT'?'arrowDown':'circle',text:s.type==='EXIT'?'X '+s.side:s.type}));candle.setMarkers(mk.sort((a,b)=>a.time-b.time));chart.timeScale().fitContent();
+$('lc').textContent=sg.filter(x=>x.type==='LONG').length;$('sc').textContent=sg.filter(x=>x.type==='SHORT').length;$('pos').textContent=q.pos?.side||'FLAT';
+$('list').innerHTML=sg.slice().reverse().slice(0,80).map(s=>`<div class="item"><span>${new Date(s.time*1000).toLocaleDateString('ko-KR')}</span><b class="${s.type==='LONG'?'blue':s.type==='SHORT'?'red':s.type.startsWith('RETEST')?'cyan':''}">${s.type==='EXIT'?'X '+s.side:s.type}</b><span>${won(s.price)}</span></div>`).join('');
+try{ma=JSON.parse(localStorage.getItem('stock-ma-000500')||'[]')}catch(e){}drawMA();new ResizeObserver(()=>chart.applyOptions({width:$('chart').clientWidth})).observe($('chart'));
+}catch(e){$('state').textContent='ERROR';$('state').style.color='#ff4f64';$('list').innerHTML='<div class="mut" style="padding:10px">'+e.message+'</div>';console.error(e)}}
+$('indBtn').onclick=()=>$('ind').classList.toggle('open');$('add').onclick=()=>{let n=Math.max(2,Math.min(500,+$('len').value||20)),t=$('typ').value;let c=$('maColor').value;if(!ma.some(x=>x.n===n&&x.t===t))ma.push({n,t,c});save();drawMA()};$('volC').onchange=()=>{if(volume)volume.applyOptions({visible:$('volC').checked})};
 init();
-
-// ---- USER INDICATORS v4.1 ----
-let userMA=[],maSeries=[],userVWAP=null;
-const INDKEY='marketTerminalIndicators:'+location.pathname;
-function indData(){
-  if(typeof cache!=='undefined' && typeof cur!=='undefined' && cache[cur]) return cache[cur];
-  return window.__stockRows||[];
-}
-function calcMA(a,n,type){
- let out=[],ema=null,k=2/(n+1);
- for(let i=0;i<a.length;i++){
-   let v;
-   if(type==='EMA'){ema=ema==null?a[i].close:a[i].close*k+ema*(1-k);if(i>=n-1)v=ema}
-   else if(i>=n-1){let sum=0;for(let j=i-n+1;j<=i;j++)sum+=a[j].close;v=sum/n}
-   if(v!=null)out.push({time:a[i].time,value:v});
- } return out;
-}
-function calcUserVWAP(a){
- let out=[],pv=0,v=0,lastDay='';
- for(const x of a){
-   let d=new Date(x.time*1000).toISOString().slice(0,10);
-   if(d!==lastDay){pv=0;v=0;lastDay=d}
-   let q=x.volume||1;pv+=((x.high+x.low+x.close)/3)*q;v+=q;out.push({time:x.time,value:pv/v});
- } return out;
-}
-function loadInd(){try{let x=JSON.parse(localStorage.getItem(INDKEY)||'{}');userMA=x.ma||[];$('vwapChk').checked=!!x.vwap;$('volChk').checked=x.vol!==false}catch(e){}}
-function saveInd(){localStorage.setItem(INDKEY,JSON.stringify({ma:userMA,vwap:$('vwapChk').checked,vol:$('volChk').checked}))}
-function drawInd(){
- if(!chart||!candle)return; let a=indData(); if(!a.length)return;
- for(const x of maSeries)try{chart.removeSeries(x)}catch(e){} maSeries=[];
- userMA.forEach((m,i)=>{let z=chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:m.type+m.n});z.setData(calcMA(a,m.n,m.type));maSeries.push(z)});
- if(userVWAP){try{chart.removeSeries(userVWAP)}catch(e){}userVWAP=null}
- if($('vwapChk').checked){userVWAP=chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'VWAP'});userVWAP.setData(calcUserVWAP(a))}
- if(typeof vol!=='undefined'&&vol)vol.applyOptions({visible:$('volChk').checked});
- if(typeof volume!=='undefined'&&volume)volume.applyOptions({visible:$('volChk').checked});
- $('indTags').innerHTML=userMA.map((m,i)=>`<span class="indTag" data-rm="${i}">${m.type}${m.n} ×</span>`).join('');
- document.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{userMA.splice(+x.dataset.rm,1);saveInd();drawInd()});
-}
-function initInd(){
- loadInd();
- $('indBtn').onclick=()=>$('indPanel').classList.toggle('open');
- $('addMA').onclick=()=>{let n=Math.max(2,Math.min(500,+$('maLen').value||20)),type=$('maType').value;if(!userMA.some(x=>x.n===n&&x.type===type))userMA.push({n,type});saveInd();drawInd()};
- $('vwapChk').onchange=$('volChk').onchange=()=>{saveInd();drawInd()};
- setTimeout(drawInd,1200);
-}
-window.__initIndicators=initInd;
 </script></body></html>
