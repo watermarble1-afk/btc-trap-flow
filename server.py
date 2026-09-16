@@ -32,7 +32,10 @@ scalp_last_signal_ts=0
 macro_arm=None
 macro_prev_d10=0.0
 macro_last_signal_ts=0
-ma_context_last_ts={"SCALP":0,"CORE":0,"MACRO":0}
+ma_context_last_ts={"SCALP":0,"5M":0,"15M":0,"1H":0,"4H":0}
+tf_arms={e:None for e in ("5M","15M","1H","4H")}
+tf_prev_d10={e:0.0 for e in ("5M","15M","1H","4H")}
+tf_last_signal_ts={e:0 for e in ("5M","15M","1H","4H")}
 scalp_prev_d10=0.0
 status={"public":"starting","business":"starting","started":int(time.time()*1000)}
 
@@ -68,6 +71,15 @@ def db():
     evcols={r[1] for r in c.execute("PRAGMA table_info(position_events)").fetchall()}
     if "engine" not in evcols:c.execute("ALTER TABLE position_events ADD COLUMN engine TEXT DEFAULT 'CORE'")
     c.execute("UPDATE position_events SET engine='CORE' WHERE engine IS NULL OR engine=''")
+    # v6.26: split legacy paired engines into independent timeframe engines.
+    c.execute("UPDATE signals SET engine='5M' WHERE engine='CORE'")
+    c.execute("UPDATE signals SET engine='1H' WHERE engine='MACRO'")
+    c.execute("UPDATE position_events SET engine='5M' WHERE engine='CORE'")
+    c.execute("UPDATE position_events SET engine='1H' WHERE engine='MACRO'")
+    c.execute("UPDATE engine_positions SET engine='5M' WHERE engine='CORE' AND NOT EXISTS (SELECT 1 FROM engine_positions x WHERE x.engine='5M')")
+    c.execute("DELETE FROM engine_positions WHERE engine='CORE'")
+    c.execute("UPDATE engine_positions SET engine='1H' WHERE engine='MACRO' AND NOT EXISTS (SELECT 1 FROM engine_positions x WHERE x.engine='1H')")
+    c.execute("DELETE FROM engine_positions WHERE engine='MACRO'")
     # Lightweight schema migration for position-state tracking.
     cols={r[1] for r in c.execute("PRAGMA table_info(position_state)").fetchall()}
     if "best_price" not in cols:c.execute("ALTER TABLE position_state ADD COLUMN best_price REAL")
@@ -214,16 +226,18 @@ def save_ma_early_signal(engine,side,score,tf,A,ctx,metrics):
     ma_context_last_ts[engine]=now
 
 def evaluate_ma_context():
-    """Experimental early-location layer. Existing SCALP/CORE/MACRO logic remains intact.
-    Engine mapping: SCALP=3M context, CORE=5M context, MACRO=1H context.
+    """Experimental early-location layer. Independent engine MA/VWAP early-location layer.
+    Engine mapping: SCALP=3M context; 5M/15M/1H/4H each use their own timeframe.
     Requires MA/VWAP reaction plus flow exhaustion/reversal evidence.
     """
     if not last_price or len(trades)<20:return
     now=int(time.time()*1000); w10,w30=flow(10000),flow(30000); inten=flow_intensity(); oi60=oi_delta()
     cfg={
       "SCALP":("3M",atr_tf("1M",30),90000),
-      "CORE":("5M",atr_tf("5M",24),180000),
-      "MACRO":("1H",atr_tf("1H",24),900000),
+      "5M":("5M",atr_tf("5M",24),180000),
+      "15M":("15M",atr_tf("15M",24),300000),
+      "1H":("1H",atr_tf("1H",24),900000),
+      "4H":("4H",atr_tf("4H",24),1800000),
     }
     for engine,(tf,A,cooldown) in cfg.items():
         if now-ma_context_last_ts.get(engine,0)<cooldown:continue
@@ -241,13 +255,13 @@ def evaluate_ma_context():
         elif short_flow and sscore>=62 and sscore>=lscore+8:
             save_ma_early_signal(engine,"SHORT",min(sscore,100),tf,A,ctx,metrics)
 
-def position_event(event,side,price,signal_id=None,note="",engine="CORE"):
+def position_event(event,side,price,signal_id=None,note="",engine="5M"):
     c=db()
     c.execute("INSERT INTO position_events(ts,event,side,price,signal_id,note,engine) VALUES(?,?,?,?,?,?,?)",
               (int(time.time()*1000),event,side,price,signal_id,note,engine))
     c.commit();c.close()
 
-def current_position(engine="CORE"):
+def current_position(engine="5M"):
     c=db();c.row_factory=sqlite3.Row
     row=c.execute("SELECT * FROM engine_positions WHERE engine=?",(engine,)).fetchone()
     c.close()
@@ -259,7 +273,7 @@ def all_positions():
     out=[dict(x) for x in rows]
     # Backward compatibility: if an old CORE position exists only in legacy table,
     # expose it instead of making the UI look empty.
-    if not any(x.get("engine")=="CORE" for x in out):
+    if False:  # v6.26 legacy CORE fallback retired
         legacy=c.execute("SELECT * FROM position_state WHERE id=1").fetchone()
         if legacy and legacy["side"]:
             d=dict(legacy);d["engine"]="CORE";d.setdefault("best_price",d.get("entry"))
@@ -269,7 +283,7 @@ def all_positions():
     return out
 
 def set_position(engine,side,entry,signal_id,atr_value=None):
-    now=int(time.time()*1000);A=atr_value or (atr_tf("1M",30) if engine=="SCALP" else atr_tf("1H",24) if engine=="MACRO" else atr5())
+    now=int(time.time()*1000);A=atr_value or (atr_tf("1M",30) if engine=="SCALP" else atr_tf(engine,24) if engine in ("5M","15M","1H","4H") else atr5())
     c=db()
     c.execute("""INSERT INTO engine_positions(engine,side,entry,opened_ts,signal_id,updated_ts,best_price,atr_open,worst_price,mfe,mae)
                  VALUES(?,?,?,?,?,?,?,?,?,?,?)
@@ -305,8 +319,8 @@ def apply_position_signal(engine,side,price,signal_id,atr_value=None):
     set_position(engine,side,price,signal_id,atr_value)
     position_event("SWITCH",side,price,signal_id,"same-engine opposite signal",engine)
 
-def save_signal(name,side,score,level,ext,metrics,engine="CORE",atr_value=None):
-    global last_signal_ts,trap_arm,scalp_last_signal_ts,scalp_arm,macro_last_signal_ts,macro_arm
+def save_signal(name,side,score,level,ext,metrics,engine="5M",atr_value=None):
+    global scalp_last_signal_ts,scalp_arm,tf_last_signal_ts,tf_arms
     p=last_price; A=atr_value or atr5()
     if side=="LONG":
         sl=min(ext,level-.22*A); risk=max(p-sl,.35*A); tp1=p+1.5*risk; tp2=p+2.3*risk
@@ -314,8 +328,7 @@ def save_signal(name,side,score,level,ext,metrics,engine="CORE",atr_value=None):
         sl=max(ext,level+.22*A); risk=max(sl-p,.35*A); tp1=p-1.5*risk; tp2=p-2.3*risk
     if (side=="LONG" and p<=sl) or (side=="SHORT" and p>=sl):
         if engine=="SCALP": scalp_arm=None
-        elif engine=="CORE": trap_arm=None
-        elif engine=="MACRO": macro_arm=None
+        elif engine in tf_arms: tf_arms[engine]=None
         return
     now=int(time.time()*1000)
     c=db();cur=c.execute("""INSERT INTO signals(ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flow,book,status,engine)
@@ -326,47 +339,51 @@ def save_signal(name,side,score,level,ext,metrics,engine="CORE",atr_value=None):
 
     # IMPORTANT: signal benchmark and actual research position are separate.
     apply_position_signal(engine,side,p,signal_id,A)
-    if engine=="CORE":
-        last_signal_ts=now;trap_arm=None
-    elif engine=="SCALP":
+    if engine=="SCALP":
         scalp_last_signal_ts=now;scalp_arm=None
-    elif engine=="MACRO":
-        macro_last_signal_ts=now;macro_arm=None
+    elif engine in tf_arms:
+        tf_last_signal_ts[engine]=now;tf_arms[engine]=None
+
+def evaluate_tf_engine(engine):
+    """Independent timeframe engine: its own candles, liquidity, ATR, arm, signals and position."""
+    if engine not in ("5M","15M","1H","4H") or not last_price or len(trades)<20:return
+    H,L=liquidity_tf(engine,100 if engine in ("5M","15M") else 80,30 if engine in ("5M","15M") else 20)
+    if H is None:return
+    A=atr_tf(engine,24); c=list(candles[engine])[-1] if candles[engine] else None
+    if not c:return
+    w10,w30=flow(10000),flow(30000); oi60=oi_delta(); inten=flow_intensity(); now=int(time.time()*1000)
+    arm=tf_arms.get(engine); prev=tf_prev_d10.get(engine,0.0)
+    slow=engine in ("1H","4H")
+    sweep=.035 if slow else .04; closebuf=.10 if slow else .08
+    refresh=30*60*1000 if engine=="4H" else 15*60*1000 if engine=="1H" else 180000 if engine=="15M" else 120000
+    expiry=60*60*1000 if engine=="4H" else 45*60*1000 if engine=="1H" else 300000 if engine=="15M" else 150000
+    cooldown=30*60*1000 if engine=="4H" else 20*60*1000 if engine=="1H" else 180000 if engine=="15M" else 90000
+    if c["high"]>H+sweep*A and c["close"]<H+closebuf*A:
+        if not arm or arm["dir"]!="S" or now-arm["ts"]>refresh: arm={"dir":"S","level":H,"ext":c["high"],"ts":now,"peak":w30["ratio"]}
+    if c["low"]<L-sweep*A and c["close"]>L-closebuf*A:
+        if not arm or arm["dir"]!="L" or now-arm["ts"]>refresh: arm={"dir":"L","level":L,"ext":c["low"],"ts":now,"peak":w30["ratio"]}
+    if arm and now-arm["ts"]>expiry: arm=None
+    tf_arms[engine]=arm
+    if arm and now-tf_last_signal_ts.get(engine,0)>cooldown:
+        reclaim_buf=.025 if slow else .03
+        hot_thr=.08 if slow else .12; d30thr=.10 if slow else .16; prevthr=.12 if slow else .18
+        flipthr=.05 if slow else .08; flipdelta=.09 if slow else .14
+        if arm["dir"]=="L":
+            reclaim=last_price>arm["level"]+reclaim_buf*A
+            hot=arm["peak"]<-hot_thr or w30["ratio"]<-d30thr or prev<-prevthr
+            flip=w10["ratio"]>flipthr and w10["ratio"]-prev>flipdelta
+            score=35+(20 if hot else 0)+(25 if flip else 0)+(10 if oi60<-.010 else 0)+(5 if inten>1.0 else 0)+(5 if book_imb>-.20 else 0)
+            if reclaim and hot and flip and score>=80: save_signal(f"{engine} L","LONG",score,arm["level"],arm["ext"],{"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},engine,A)
+        else:
+            reclaim=last_price<arm["level"]-reclaim_buf*A
+            hot=arm["peak"]>hot_thr or w30["ratio"]>d30thr or prev>prevthr
+            flip=w10["ratio"]<-flipthr and prev-w10["ratio"]>flipdelta
+            score=35+(20 if hot else 0)+(25 if flip else 0)+(10 if oi60<-.010 else 0)+(5 if inten>1.0 else 0)+(5 if book_imb<.20 else 0)
+            if reclaim and hot and flip and score>=80: save_signal(f"{engine} S","SHORT",score,arm["level"],arm["ext"],{"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},engine,A)
+    tf_prev_d10[engine]=w10["ratio"]
 
 def evaluate():
-    global trap_arm,prev_d10
-    if not last_price or len(trades)<20:return
-    H,L=liquidity15()
-    if H is None:return
-    A=atr5(); c=list(candles["5M"])[-1] if candles["5M"] else None
-    w10,w30=flow(10000),flow(30000); oi60=oi_delta(); inten=flow_intensity(); now=int(time.time()*1000)
-
-    if c and c["high"]>H+.04*A and c["close"]<H+.08*A:
-        if not trap_arm or trap_arm["dir"]!="S" or now-trap_arm["ts"]>120000:
-            trap_arm={"dir":"S","level":H,"ext":c["high"],"ts":now,"peak":w30["ratio"]}
-    if c and c["low"]<L-.04*A and c["close"]>L-.08*A:
-        if not trap_arm or trap_arm["dir"]!="L" or now-trap_arm["ts"]>120000:
-            trap_arm={"dir":"L","level":L,"ext":c["low"],"ts":now,"peak":w30["ratio"]}
-    if trap_arm and now-trap_arm["ts"]>150000:trap_arm=None
-
-    if trap_arm and now-last_signal_ts>90000:
-        if trap_arm["dir"]=="L":
-            reclaim=last_price>trap_arm["level"]+.03*A
-            hot=trap_arm["peak"]<-.12 or w30["ratio"]<-.16 or prev_d10<-.18
-            flip=w10["ratio"]>.08 and w10["ratio"]-prev_d10>.14
-            score=35+(20 if hot else 0)+(25 if flip else 0)+(10 if oi60<-.015 else 0)+(5 if inten>1.05 else 0)+(5 if book_imb>-.18 else 0)
-            if reclaim and hot and flip and score>=80:
-                save_signal("TRAP L","LONG",score,trap_arm["level"],trap_arm["ext"],
-                            {"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb})
-        else:
-            reclaim=last_price<trap_arm["level"]-.03*A
-            hot=trap_arm["peak"]>.12 or w30["ratio"]>.16 or prev_d10>.18
-            flip=w10["ratio"]<-.08 and prev_d10-w10["ratio"]>.14
-            score=35+(20 if hot else 0)+(25 if flip else 0)+(10 if oi60<-.015 else 0)+(5 if inten>1.05 else 0)+(5 if book_imb<.18 else 0)
-            if reclaim and hot and flip and score>=80:
-                save_signal("TRAP S","SHORT",score,trap_arm["level"],trap_arm["ext"],
-                            {"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb})
-    prev_d10=w10["ratio"]
+    evaluate_tf_engine("5M")
 
 def evaluate_scalp():
     """SCALP engine: 3M liquidity/structure + 1M sweep/reclaim + micro-flow flip."""
@@ -406,42 +423,11 @@ def evaluate_scalp():
 
 
 
+
 def evaluate_macro():
-    """MACRO engine: 4H liquidity/structure + 1H sweep/reclaim + slower flow confirmation."""
-    global macro_arm,macro_prev_d10
-    if not last_price or len(trades)<20:return
-    H,L=liquidity_tf("4H",80,20)
-    if H is None:return
-    A=atr_tf("1H",24); c=list(candles["1H"])[-1] if candles["1H"] else None
-    if not c:return
-    w10,w30=flow(10000),flow(30000);oi60=oi_delta();inten=flow_intensity();now=int(time.time()*1000)
-
-    if c["high"]>H+.035*A and c["close"]<H+.10*A:
-        if not macro_arm or macro_arm["dir"]!="S" or now-macro_arm["ts"]>30*60*1000:
-            macro_arm={"dir":"S","level":H,"ext":c["high"],"ts":now,"peak":w30["ratio"]}
-    if c["low"]<L-.035*A and c["close"]>L-.10*A:
-        if not macro_arm or macro_arm["dir"]!="L" or now-macro_arm["ts"]>30*60*1000:
-            macro_arm={"dir":"L","level":L,"ext":c["low"],"ts":now,"peak":w30["ratio"]}
-    if macro_arm and now-macro_arm["ts"]>45*60*1000:macro_arm=None
-
-    if macro_arm and now-macro_last_signal_ts>20*60*1000:
-        if macro_arm["dir"]=="L":
-            reclaim=last_price>macro_arm["level"]+.025*A
-            hot=macro_arm["peak"]<-.08 or w30["ratio"]<-.10 or macro_prev_d10<-.12
-            flip=w10["ratio"]>.05 and w10["ratio"]-macro_prev_d10>.09
-            score=35+(20 if hot else 0)+(25 if flip else 0)+(10 if oi60<-.010 else 0)+(5 if inten>1.00 else 0)+(5 if book_imb>-.22 else 0)
-            if reclaim and hot and flip and score>=80:
-                save_signal("MACRO L","LONG",score,macro_arm["level"],macro_arm["ext"],
-                    {"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},"MACRO",A)
-        else:
-            reclaim=last_price<macro_arm["level"]-.025*A
-            hot=macro_arm["peak"]>.08 or w30["ratio"]>.10 or macro_prev_d10>.12
-            flip=w10["ratio"]<-.05 and macro_prev_d10-w10["ratio"]>.09
-            score=35+(20 if hot else 0)+(25 if flip else 0)+(10 if oi60<-.010 else 0)+(5 if inten>1.00 else 0)+(5 if book_imb<.22 else 0)
-            if reclaim and hot and flip and score>=80:
-                save_signal("MACRO S","SHORT",score,macro_arm["level"],macro_arm["ext"],
-                    {"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},"MACRO",A)
-    macro_prev_d10=w10["ratio"]
+    evaluate_tf_engine("1H")
+    evaluate_tf_engine("15M")
+    evaluate_tf_engine("4H")
 
 
 def position_path_extremes(pos):
@@ -541,9 +527,9 @@ def manage_position_reversal():
             opposite_side="LONG"
 
         # Larger timeframe needs more persistence before switching.
-        pressure_threshold=55 if engine=="SCALP" else 60 if engine=="CORE" else 65
-        switch_threshold=80 if engine=="SCALP" else 82 if engine=="CORE" else 85
-        min_pressure_ms=12000 if engine=="SCALP" else 25000 if engine=="CORE" else 60000
+        pressure_threshold=55 if engine=="SCALP" else 60 if engine in ("5M","15M") else 65
+        switch_threshold=80 if engine=="SCALP" else 82 if engine in ("5M","15M") else 85
+        min_pressure_ms=12000 if engine=="SCALP" else 25000 if engine=="5M" else 35000 if engine=="15M" else 60000 if engine=="1H" else 90000
 
         new_state=old_state
         new_psince=psince
@@ -572,7 +558,7 @@ def manage_position_reversal():
 
         # STRUCTURE INVALIDATION: EXIT-only; never forces an opposite entry.
         # During the SCALP guard, only the wider emergency threshold is active.
-        structure_exit_atr = 0.85 if engine=="SCALP" else 1.00 if engine=="CORE" else 1.35
+        structure_exit_atr = 0.85 if engine=="SCALP" else 1.00 if engine in ("5M","15M") else 1.35
         structure_blocked = scalp_guard and adverse < 1.25
         if adverse >= structure_exit_atr and not structure_blocked:
             old_signal=pos["signal_id"]
@@ -586,7 +572,7 @@ def manage_position_reversal():
         persisted = new_state=="PRESSURE" and new_psince and now-int(new_psince)>=min_pressure_ms
 
         # Strong reversal: EXIT old side + SWITCH to opposite side.
-        switch_accept = adverse>=0.38 if engine=="SCALP" else adverse>=0.45 if engine=="CORE" else adverse>=0.55
+        switch_accept = adverse>=0.38 if engine=="SCALP" else adverse>=0.45 if engine in ("5M","15M") else adverse>=0.55
         if persisted and pscore>=switch_threshold and switch_accept and not scalp_guard:
             old_signal=pos["signal_id"]
             note=(f"FLOW SWITCH score={pscore} d10={d10:.3f} d30={d30:.3f} "
@@ -599,9 +585,9 @@ def manage_position_reversal():
 
         # EXIT-only: current thesis is invalid enough to stop holding, but opposite side
         # is not strong enough for an immediate reverse position.
-        exit_threshold=65 if engine=="SCALP" else 70 if engine=="CORE" else 75
-        exit_ms=8000 if engine=="SCALP" else 18000 if engine=="CORE" else 45000
-        exit_accept=adverse>=0.22 if engine=="SCALP" else adverse>=0.28 if engine=="CORE" else adverse>=0.38
+        exit_threshold=65 if engine=="SCALP" else 70 if engine in ("5M","15M") else 75
+        exit_ms=8000 if engine=="SCALP" else 18000 if engine=="5M" else 25000 if engine=="15M" else 45000 if engine=="1H" else 60000
+        exit_accept=adverse>=0.22 if engine=="SCALP" else adverse>=0.28 if engine in ("5M","15M") else adverse>=0.38
         exit_persisted = new_state=="PRESSURE" and new_psince and now-int(new_psince)>=exit_ms
         if exit_persisted and pscore>=exit_threshold and exit_accept and not scalp_guard:
             old_signal=pos["signal_id"]
@@ -726,7 +712,7 @@ def live():
 @app.get("/api/signals")
 def signals(limit:int=100, engine:str="ALL"):
     c=db();c.row_factory=sqlite3.Row
-    if engine.upper() in ("CORE","SCALP","MACRO"):
+    if engine.upper() in ("SCALP","5M","15M","1H","4H"):
         rows=[dict(x) for x in c.execute("SELECT * FROM signals WHERE engine=? ORDER BY ts DESC LIMIT ?",(engine.upper(),min(limit,1000))).fetchall()]
     else:
         rows=[dict(x) for x in c.execute("SELECT * FROM signals ORDER BY ts DESC LIMIT ?",(min(limit,1000),)).fetchall()]
@@ -736,7 +722,7 @@ def signals(limit:int=100, engine:str="ALL"):
 def stats():
     c=db();c.row_factory=sqlite3.Row
     out={}
-    for eng in ("SCALP","CORE","MACRO"):
+    for eng in ("SCALP","5M","15M","1H","4H"):
         r=c.execute("""SELECT COUNT(*) total,
           SUM(CASE WHEN status='WIN' THEN 1 ELSE 0 END) wins,
           SUM(CASE WHEN status='LOSS' THEN 1 ELSE 0 END) losses,
@@ -762,8 +748,8 @@ async def api_record_signal(request: Request):
     x=await request.json()
     name=str(x.get("name") or "").strip()
     side=str(x.get("side") or x.get("dir") or "").upper()
-    engine=str(x.get("engine") or "CORE").upper()
-    if side not in ("LONG","SHORT") or engine not in ("SCALP","CORE","MACRO") or not name:
+    engine=str(x.get("engine") or "5M").upper()
+    if side not in ("LONG","SHORT") or engine not in ("SCALP","5M","15M","1H","4H") or not name:
         return {"ok":False,"error":"invalid signal"}
     ts=int(x.get("ts") or time.time()*1000)
     entry=float(x.get("entry") or last_price or 0)
@@ -787,14 +773,14 @@ async def api_record_signal(request: Request):
         # If the signal already exists but its engine position is missing,
         # rebuild the position instead of returning early and leaving the UI FLAT.
         if not current_position(engine):
-            A=atr_tf("1M",30) if engine=="SCALP" else atr_tf("1H",24) if engine=="MACRO" else atr5()
+            A=atr_tf("1M",30) if engine=="SCALP" else atr_tf(engine,24) if engine in ("5M","15M","1H","4H") else atr5()
             apply_position_signal(engine,side,entry,sid,A)
         return {"ok":True,"id":sid,"deduped":True,"position_recovered":bool(current_position(engine))}
     cur=c.execute("""INSERT INTO signals(ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flow,book,status,engine)
                      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'OPEN',?)""",
                   (ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flowv,bookv,engine))
     sid=cur.lastrowid;c.commit();c.close()
-    A=atr_tf("1M",30) if engine=="SCALP" else atr_tf("1H",24) if engine=="MACRO" else atr5()
+    A=atr_tf("1M",30) if engine=="SCALP" else atr_tf(engine,24) if engine in ("5M","15M","1H","4H") else atr5()
     apply_position_signal(engine,side,entry,sid,A)
     return {"ok":True,"id":sid,"deduped":False}
 
@@ -806,7 +792,7 @@ def recover_missing_positions():
     Never resurrect an engine whose latest lifecycle event is EXIT.
     """
     c=db(); c.row_factory=sqlite3.Row
-    for engine in ("SCALP","CORE","MACRO"):
+    for engine in ("SCALP","5M","15M","1H","4H"):
         if current_position(engine):
             continue
         ev=c.execute("""SELECT * FROM position_events WHERE engine=?
@@ -825,7 +811,7 @@ def recover_missing_positions():
         entry=float(a["price"] or ev["price"] or last_price or 0)
         side=str(a["side"] or ev["side"])
         sid=a["signal_id"]
-        A=atr_tf("1M",30) if engine=="SCALP" else atr_tf("1H",24) if engine=="MACRO" else atr5()
+        A=atr_tf("1M",30) if engine=="SCALP" else atr_tf(engine,24) if engine in ("5M","15M","1H","4H") else atr5()
         set_position(engine,side,entry,sid,A)
         # Restore original open timestamp rather than pretending recovery is a new trade.
         c2=db()
@@ -843,10 +829,10 @@ def api_position_performance():
     exits=c.execute("""SELECT * FROM position_events WHERE event='EXIT'
                        ORDER BY ts DESC,id DESC LIMIT 2000""").fetchall()
     rows=[]
-    buckets={e:{"closed":0,"wins":0,"losses":0} for e in ("SCALP","CORE","MACRO")}
+    buckets={e:{"closed":0,"wins":0,"losses":0} for e in ("SCALP","5M","15M","1H","4H")}
     wins=losses=0
     for ex in exits:
-        engine=ex["engine"] or "CORE"
+        engine=ex["engine"] or "5M"
         op=c.execute("""SELECT * FROM position_events
                         WHERE engine=? AND event IN ('OPEN','SWITCH') AND ts<=?
                         ORDER BY ts DESC,id DESC LIMIT 1""",(engine,ex["ts"])).fetchone()

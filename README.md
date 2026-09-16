@@ -1,14 +1,16 @@
-# v6.25 UI + POSITION RETURN PATCH
+# BTC Trap Flow v6.26 — FIVE ENGINE
 
-Base: v6.24 MA/VWAP Context.
+Independent research engines:
+- SCALP = 1M execution + 3M structure (paired)
+- 5M = independent 5M engine / position
+- 15M = independent 15M engine / position
+- 1H = independent 1H engine / position
+- 4H = independent 4H engine / position
 
-Changes only to display/UI behavior:
-- Replaces AUTO signal-view button with `신호 제거`.
-- `신호 제거` hides all chart markers (SCALP/TRAP/MACRO/MA EARLY/POS/X/SWITCH) without deleting DB/history.
-- SCALP/TRAP/MACRO/ALL restores marker views.
-- Open engine position card shows live return from that position's own entry price.
-- LONG return = (current-entry)/entry; SHORT return = (entry-current)/entry.
-- Live position return refreshes every 500ms from current market price.
-- Shows both percentage and dollar-per-1-BTC price move: `현재수익률 +0.123% · 현재손익 +$93.4`.
-- Desktop and mobile both patched.
-- Signal/entry/exit logic unchanged from v6.24.
+Each engine has its own liquidity/pivots, ATR, signal arm/cooldown, MA/VWAP context, position lifecycle, MFE/MAE and live entry-based return. Other-engine signals cannot close or switch its position.
+
+Legacy CORE history migrates to 5M; legacy MACRO history migrates to 1H so old records are retained. New 15M/4H engines start collecting independently.
+
+UI: separate filters for SCALP, 5M, 15M, 1H, 4H, ALL, plus Signal Hide. PC and mobile included.
+
+Research only; no real orders are placed.

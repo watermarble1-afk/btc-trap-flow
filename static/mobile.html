@@ -60,7 +60,7 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
 <div class="top">
   <div>
     <h1>BTC OKX RADAR v19 · MOBILE FULL</h1>
-    <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 신호 엔진은 5M 진입 / 15M 위치 / 1H·4H 구조</div>
+    <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 신호 엔진은 1M/3M SCALP만 묶고 5M · 15M · 1H · 4H는 완전 독립</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
 </div>
@@ -91,12 +91,12 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
  <div style="font-size:9px;color:#7f8ba0;margin-top:7px">예: 5·20·60·120·240 또는 직접 숫자 입력 · 설정은 이 브라우저에 저장</div>
 </div></div><div id="enginePanel" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:7px;border:1px solid #263247;border-radius:8px;background:#0b111b">
 <b style="font-size:10px">SIGNAL ENGINE</b>
-<button class="btn engBtn" data-eng="NONE">신호 제거</button><button class="btn engBtn" data-eng="SCALP">SCALP 1M/3M</button><button class="btn engBtn" data-eng="CORE">TRAP 5M/15M</button><button class="engbtn" data-eng="MACRO">추세 1H/4H</button><button class="btn engBtn" data-eng="ALL">ALL</button>
-<span id="scalpStat" style="font-size:10px;color:#8d99ad">SCALP —</span><span id="coreStat" style="font-size:10px;color:#8d99ad">5/15 —</span><span id="macroStat" style="font-size:10px;color:#8d99ad">1H/4H —</span>
+<button class="btn engBtn" data-eng="NONE">신호 제거</button><button class="btn engBtn" data-eng="SCALP">SCALP 1M/3M</button><button class="btn engBtn" data-eng="5M">5M</button><button class="btn engBtn" data-eng="15M">15M</button><button class="btn engBtn" data-eng="1H">1H</button><button class="btn engBtn" data-eng="4H">4H</button><button class="btn engBtn" data-eng="ALL">ALL</button>
+<span id="scalpStat" style="font-size:10px;color:#8d99ad">1/3M —</span><span id="m5Stat" style="font-size:10px;color:#8d99ad">5M —</span><span id="m15Stat" style="font-size:10px;color:#8d99ad">15M —</span><span id="h1Stat" style="font-size:10px;color:#8d99ad">1H —</span><span id="h4Stat" style="font-size:10px;color:#8d99ad">4H —</span>
 <div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">신호 제거 = 차트 마커만 숨김 · DB/거래기록은 그대로 보존</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
 <span style="color:#35d98a">● SCALP L</span><span style="color:#ff78b4">● SCALP S</span>
 <span style="color:#4f8cff">● TRAP L</span><span style="color:#ff4f64">● TRAP S</span>
-<span style="color:#27c2a4">● 1H/4H L</span><span style="color:#d95bd1">● 1H/4H S</span><span style="color:#d7dee9">● X 종료</span></div>
+<span style="color:#48a9ff">● 15M L/S</span><span style="color:#27c2a4">● 1H L/S</span><span style="color:#c86cff">● 4H L/S</span><span style="color:#d7dee9">● X 종료</span></div>
 </div><div style="font-size:10px;color:#8d99ad;margin:3px 0">TIMEFRAME · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO</div><div class="hoverPctBar" id="hoverPctBar">봉에 마우스를 올리면 해당 봉의 등락률이 표시됩니다.</div><div id="chart"></div>
   <div class="legend">
     <span><b class="blue">TRAP L / LONG</b> 저점 sweep + 매도 체결 과열 + 가격 실패 + flow 반전</span>
@@ -104,7 +104,7 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
     <span><b style="color:#35d7e5">RETEST</b> 청록</span><span><b style="color:#c7d0dd">X</b> 포지션 정리</span><span><b class="purple">VWAP</b> 선택 봉 기준 앵커 VWAP</span>
   </div>
   <div class="warn">
-    1M·3M·5M·15M·1H·4H·1D 차트를 자유롭게 볼 수 있습니다. 신호 엔진 자체는 5M 진입 / 15M 위치 / 1H·4H 구조를 그대로 사용합니다. VWAP은 1M~4H는 UTC 일간 앵커, 1D는 월간 앵커입니다. 실제 trades / OI / books 데이터는 페이지를 연 뒤부터 쌓이며 발생한 신호만 저장합니다.
+    1M·3M·5M·15M·1H·4H·1D 차트를 자유롭게 볼 수 있습니다. 신호 엔진은 1M/3M SCALP만 묶고, 5M·15M·1H·4H는 각각 자기 캔들·유동성·MA/VWAP·포지션을 독립적으로 사용합니다. VWAP은 1M~4H는 UTC 일간 앵커, 1D는 월간 앵커입니다. 실제 trades / OI / books 데이터는 페이지를 연 뒤부터 쌓이며 발생한 신호만 저장합니다.
   </div>
 </section>
 
@@ -560,7 +560,7 @@ function emitSignal(name,dir,score,level,ext,A,m){
     tp1=p-1.5*risk;
     tp2=liq.L&&liq.L<p-0.7*risk?liq.L:p-2.3*risk;
   }
-  let sig={id:Date.now()+'_'+name,name,dir,engine:'CORE',score,entry:p,sl,tp1,tp2,ts:Date.now(),time:Math.floor(Date.now()/1000),status:'OPEN',
+  let sig={id:Date.now()+'_'+name,name,dir,engine:'5M',score,entry:p,sl,tp1,tp2,ts:Date.now(),time:Math.floor(Date.now()/1000),status:'OPEN',
     metrics:{d10:m.w10.ratio,d30:m.w30.ratio,oi60:m.oi60,int:m.int,book:m.book}};
   saved.push(sig);saved=saved.slice(-120);persist();lastSignalAt=Date.now();liveSignal=sig;trapArm=null;retestArm=null;
   renderedMarkers.push(sig);renderMarkers();renderSignal(sig);renderHistory();
@@ -621,6 +621,9 @@ function renderLiveState(liq,A,w10,w30,oi60,int,nearH,nearL){
     if(text==='WAIT'){$('entry').textContent='—';$('sl').textContent='—';$('tp1').textContent='—';$('tp2').textContent='—'}
   }
 }
+function engLabel(e){e=e||'5M';return e==='SCALP'?'1/3M':e;}
+function engBracket(e){return '['+engLabel(e)+']';}
+function engColor(e,side){if(e==='SCALP')return side==='LONG'?'#35d98a':'#ff78b4';if(e==='5M')return side==='LONG'?'#4f8cff':'#ff4f64';if(e==='15M')return side==='LONG'?'#48a9ff':'#ff6b6b';if(e==='1H')return side==='LONG'?'#27c2a4':'#d95bd1';return side==='LONG'?'#19d3c5':'#c86cff';}
 let positionPerf={closed:0,wins:0,losses:0,winrate:null,engines:{}};
 let engineView='ALL';
 function allSaved(){
@@ -639,12 +642,12 @@ function renderHistory(){
   renderTradeLedger();
   updateDailyMove();
   const sigRows=allSaved().map(s=>({
-    kind:'SIGNAL',ts:Number(s.ts),time:s.time,dir:s.dir,engine:s.engine||'CORE',
+    kind:'SIGNAL',ts:Number(s.ts),time:s.time,dir:s.dir,engine:s.engine||'5M',
     name:s.name,price:Number(s.entry),status:s.status
   }));
   const posRows=positionEvents.filter(e=>['OPEN','EXIT','SWITCH'].includes(String(e.event||'').toUpperCase())).map(e=>({
     kind:'POSITION',ts:Number(e.ts),time:e.time,dir:e.side,event:String(e.event||'').toUpperCase(),
-    price:Number(e.price),note:e.note||'',engine:e.engine||'CORE'
+    price:Number(e.price),note:e.note||'',engine:e.engine||'5M'
   }));
   const rows=[...sigRows,...posRows].sort((a,b)=>b.ts-a.ts).slice(0,24);
   $('history').innerHTML=rows.length?rows.map(x=>{
@@ -652,13 +655,13 @@ function renderHistory(){
     if(x.kind==='POSITION'){
       const isExit=x.event==='EXIT';
       const c=isExit?'#d1d5db':(x.dir==='LONG'?'#00e5ff':'#ffd400');
-      const tf=x.engine==='SCALP'?'1/3M':x.engine==='MACRO'?'1H/4H':'5/15M';
+      const tf=engLabel(x.engine);
       const reason=/STRUCTURE INVALIDATION/i.test(x.note)?'STRUCTURE':/FLOW SWITCH/i.test(x.note)||/opposite signal \/ switch/i.test(x.note)?'SWITCH':/FLOW EXIT/i.test(x.note)?'FLOW':'EXIT';
       const label=isExit?`X ${tf} ${x.dir==='LONG'?'L':'S'} · ${reason}`:(x.event==='SWITCH'?`${tf} SWITCH → ${x.dir==='LONG'?'L':'S'}`:`${tf} POS ${x.dir==='LONG'?'L':'S'}`);
       return `<div class="histrow"><span>${tm}</span><b style="color:${c}">${label} · $${fmt(x.price)}</b><span class="tiny">${x.event}</span></div>`;
     }
-    const c=x.engine==='SCALP'?(x.dir==='LONG'?'#35d98a':'#ff78b4'):x.engine==='MACRO'?(x.dir==='LONG'?'#27c2a4':'#d95bd1'):(x.dir==='LONG'?'#4f8cff':'#ff4f64');
-    const tf=x.engine==='SCALP'?'[1/3M]':x.engine==='MACRO'?'[1H/4H]':'[5/15M]';
+    const c=engColor(x.engine,x.dir);
+    const tf=engBracket(x.engine);
     return `<div class="histrow"><span>${tm}</span><b style="color:${c}">${tf} ${x.name}</b><span class="tiny">SIGNAL</span></div>`;
   }).join(''):'<div class="tiny">아직 없음</div>';
 }
@@ -668,17 +671,17 @@ function renderMarkers(){
   let marks=[];
 
   // Signal markers: direction color never changes with 포지션 성과.
-  let effective=engineView==='AUTO'?((cur==='1M'||cur==='3M')?'SCALP':(cur==='5M'||cur==='15M')?'CORE':(cur==='1H'||cur==='4H')?'MACRO':'ALL'):engineView;
-  for(const s of allSaved().filter(s=>s.time>=from && (effective==='ALL'||(s.engine||'CORE')===effective))){
+  let effective=engineView==='AUTO'?((cur==='1M'||cur==='3M')?'SCALP':['5M','15M','1H','4H'].includes(cur)?cur:'ALL'):engineView;
+  for(const s of allSaved().filter(s=>s.time>=from && (effective==='ALL'||(s.engine||'5M')===effective))){
     const isRetest=(s.name||'').includes('RETEST');
     const isMA=(s.name||'').includes('MA EARLY');
-    const color=isMA?'#f2c94c':isRetest?'#b56cff':(s.engine==='SCALP'?(s.dir==='LONG'?'#35d98a':'#ff78b4'):s.engine==='MACRO'?(s.dir==='LONG'?'#27c2a4':'#d95bd1'):(s.dir==='LONG'?'#4f8cff':'#ff4f64'));
+    const color=isMA?'#f2c94c':isRetest?'#b56cff':(engColor(s.engine,s.dir));
     marks.push({
       time:s.time,
       position:s.dir==='LONG'?'belowBar':'aboveBar',
       color,
       shape:s.dir==='LONG'?'arrowUp':'arrowDown',
-      text:((s.engine==='SCALP'?'[1/3M] ':s.engine==='MACRO'?'[1H/4H] ':'[5/15M] ')+(s.name||((s.dir==='LONG')?'TRAP L':'TRAP S')))
+      text:((engBracket(s.engine)+' ')+(s.name||((s.dir==='LONG')?'TRAP L':'TRAP S')))
     });
   }
 
@@ -686,8 +689,8 @@ function renderMarkers(){
   for(const e of positionEvents.filter(e=>e.time>=from)){
     const ev=String(e.event||'').toUpperCase();
     if(!['OPEN','EXIT','SWITCH'].includes(ev)) continue;
-    if(effective!=='ALL' && (e.engine||'CORE')!==effective) continue;
-    const tf=(e.engine||'CORE')==='SCALP'?'1/3':(e.engine||'CORE')==='MACRO'?'1H/4H':'5/15';
+    if(effective!=='ALL' && (e.engine||'5M')!==effective) continue;
+    const tf=engLabel(e.engine);
     if(ev==='EXIT'){
       const reason=/STRUCTURE INVALIDATION/i.test(e.note||'')?'STRUCT':/FLOW SWITCH/i.test(e.note||'')||/opposite signal \/ switch/i.test(e.note||'')?'SW':/FLOW EXIT/i.test(e.note||'')?'FLOW':'EXIT';
       marks.push({
@@ -702,8 +705,8 @@ function renderMarkers(){
         shape:isL?'arrowUp':'arrowDown',
         text:(()=>{
           let base=(ev==='SWITCH'?'◆ '+tf+' SW→':'◆ '+tf+' POS ')+(isL?'L':'S')+' $'+fmt(e.price);
-          const eng=e.engine||'CORE';
-          const op=(liveEnginePositions||[]).find(p=>(p.engine||'CORE')===eng && p.side===e.side && Math.abs(Number(p.entry||0)-Number(e.price||0))<0.11);
+          const eng=e.engine||'5M';
+          const op=(liveEnginePositions||[]).find(p=>(p.engine||'5M')===eng && p.side===e.side && Math.abs(Number(p.entry||0)-Number(e.price||0))<0.11);
           if(op){
             const now=Number(currentPrice()||0), ent=Number(op.entry||0);
             if(now>0&&ent>0){
@@ -740,7 +743,7 @@ function renderTradeLedger(){
   const closeReason=(note='')=>/STRUCTURE INVALIDATION/i.test(note)?'STRUCTURE':/FLOW SWITCH/i.test(note)||/opposite signal \/ switch/i.test(note)?'SWITCH':/FLOW EXIT/i.test(note)?'FLOW':'EXIT';
   for(const e of ev){
     const type=String(e.event||'').toUpperCase();
-    const engine=e.engine||'CORE';
+    const engine=e.engine||'5M';
     if(type==='OPEN'){
       // Never overwrite another engine's position. If duplicate OPEN exists for the same
       // engine, preserve the prior row as an audit anomaly instead of silently losing it.
@@ -773,8 +776,8 @@ function renderTradeLedger(){
     const hold=mins>=1440?`${Math.floor(mins/1440)}일 ${Math.floor((mins%1440)/60)}시간`:mins>=60?`${Math.floor(mins/60)}시간 ${mins%60}분`:`${mins}분`;
     let pct=null;
     if(r.exit!=null&&r.entry){pct=(r.side==='SHORT'?(r.entry-r.exit):(r.exit-r.entry))/r.entry*100}
-    const eng=r.engine==='SCALP'?'1/3M':r.engine==='MACRO'?'1H/4H':'5/15M';
-    const col=(r.name||'').includes('MA EARLY')?'#f2c94c':r.side==='LONG'?(r.engine==='SCALP'?'#35d98a':r.engine==='MACRO'?'#27c2a4':'#4f8cff'):(r.engine==='SCALP'?'#ff78b4':r.engine==='MACRO'?'#d95bd1':'#ff4f64');
+    const eng=engLabel(r.engine);
+    const col=(r.name||'').includes('MA EARLY')?'#f2c94c':engColor(r.engine,r.side);
     const bad=String(r.reason||'').startsWith('AUDIT:');
     return `<tr style="border-top:1px solid #1f2a3a">
       <td style="padding:7px 6px">${new Date(r.ts).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
@@ -797,7 +800,7 @@ async function syncServer(){
     serverSaved=(Array.isArray(sigs)?sigs:[]).map(x=>({
       id:'srv_'+x.id,name:x.name,dir:x.side,score:x.score,entry:x.entry,sl:x.sl,tp1:x.tp1,tp2:x.tp2,
       ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000),status:x.status,closed:x.closed_ts,
-      metrics:{d10:x.d10,d30:x.d30,oi60:x.oi60,int:x.flow,book:x.book},source:'SERVER',engine:x.engine||'CORE'
+      metrics:{d10:x.d10,d30:x.d30,oi60:x.oi60,int:x.flow,book:x.book},source:'SERVER',engine:x.engine||'5M'
     }));
     const latestServer=[...serverSaved].sort((a,b)=>b.ts-a.ts)[0];
     if(latestServer && Date.now()-latestServer.ts<15*60*1000){
@@ -808,8 +811,7 @@ async function syncServer(){
     positionPerf=stats||{closed:0,wins:0,losses:0,winrate:null,engines:{}};
     const pe=positionPerf.engines||{};
     if($('scalpStat')){let q=pe.SCALP||{};$('scalpStat').textContent=`1/3M POS ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':Number(q.winrate).toFixed(1)+'%'}`;}
-    if($('coreStat')){let q=pe.CORE||{};$('coreStat').textContent=`5/15M POS ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':Number(q.winrate).toFixed(1)+'%'}`;}
-    if($('macroStat')){let q=pe.MACRO||{};$('macroStat').textContent=`1H/4H POS ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':Number(q.winrate).toFixed(1)+'%'}`;}
+    for(const [id,e] of [['m5Stat','5M'],['m15Stat','15M'],['h1Stat','1H'],['h4Stat','4H']]){if($(id)){let q=pe[e]||{};$(id).textContent=`${e} POS ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':Number(q.winrate).toFixed(1)+'%'}`;}}
 
     positionEvents=(Array.isArray(events)?events:[]).map(x=>({
       ...x,ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000)
@@ -819,8 +821,8 @@ async function syncServer(){
       const ps=Array.isArray(positions)?positions:[];
       liveEnginePositions=ps;
       ep.innerHTML=ps.length?ps.map(p=>{
-        const tf=p.engine==='SCALP'?'1/3M':p.engine==='MACRO'?'1H/4H':'5/15M';
-        const col=p.side==='LONG'?(p.engine==='SCALP'?'#35d98a':p.engine==='MACRO'?'#27c2a4':'#4f8cff'):(p.engine==='SCALP'?'#ff78b4':p.engine==='MACRO'?'#d95bd1':'#ff4f64');
+        const tf=engLabel(p.engine);
+        const col=engColor(p.engine,p.side);
         const mins=Math.max(0,Math.floor((Date.now()-Number(p.opened_ts))/60000));
         const hold=mins>=60?`${Math.floor(mins/60)}시간 ${mins%60}분`:`${mins}분`;
         const st=p.state||'HOLD', ps=Number(p.pressure_score||0);
