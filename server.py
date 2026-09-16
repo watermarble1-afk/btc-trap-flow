@@ -537,7 +537,15 @@ async def api_record_signal(request: Request):
                      WHERE engine=? AND name=? AND side=? AND ABS(ts-?)<5000
                      ORDER BY id DESC LIMIT 1""",(engine,name,side,ts)).fetchone()
     if dup:
-        c.close(); return {"ok":True,"id":dup[0],"deduped":True}
+        sid=dup[0]
+        c.close()
+        # A saved signal and an actual research position are separate records.
+        # If the signal already exists but its engine position is missing,
+        # rebuild the position instead of returning early and leaving the UI FLAT.
+        if not current_position(engine):
+            A=atr_tf("1M",30) if engine=="SCALP" else atr_tf("1H",24) if engine=="MACRO" else atr5()
+            apply_position_signal(engine,side,entry,sid,A)
+        return {"ok":True,"id":sid,"deduped":True,"position_recovered":bool(current_position(engine))}
     cur=c.execute("""INSERT INTO signals(ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flow,book,status,engine)
                      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'OPEN',?)""",
                   (ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flowv,bookv,engine))
@@ -546,8 +554,46 @@ async def api_record_signal(request: Request):
     apply_position_signal(engine,side,entry,sid,A)
     return {"ok":True,"id":sid,"deduped":False}
 
+
+def recover_missing_positions():
+    """Self-heal engine_positions from the append-only lifecycle log.
+    If an engine has no mutable active row but its latest lifecycle event is
+    OPEN/CONFIRM/HOLD/PRESSURE/SWITCH (not EXIT), recreate the active row.
+    Never resurrect an engine whose latest lifecycle event is EXIT.
+    """
+    c=db(); c.row_factory=sqlite3.Row
+    for engine in ("SCALP","CORE","MACRO"):
+        if current_position(engine):
+            continue
+        ev=c.execute("""SELECT * FROM position_events WHERE engine=?
+                        ORDER BY ts DESC,id DESC LIMIT 1""",(engine,)).fetchone()
+        if not ev or str(ev["event"]).upper()=="EXIT":
+            continue
+        if str(ev["event"]).upper() not in ("OPEN","CONFIRM","HOLD","PRESSURE","SWITCH"):
+            continue
+
+        # Prefer the original OPEN/SWITCH for entry/side; fall back to latest event.
+        anchor=c.execute("""SELECT * FROM position_events
+                            WHERE engine=? AND event IN ('OPEN','SWITCH')
+                            AND ts<=? ORDER BY ts DESC,id DESC LIMIT 1""",
+                         (engine,ev["ts"])).fetchone()
+        a=anchor or ev
+        entry=float(a["price"] or ev["price"] or last_price or 0)
+        side=str(a["side"] or ev["side"])
+        sid=a["signal_id"]
+        A=atr_tf("1M",30) if engine=="SCALP" else atr_tf("1H",24) if engine=="MACRO" else atr5()
+        set_position(engine,side,entry,sid,A)
+        # Restore original open timestamp rather than pretending recovery is a new trade.
+        c2=db()
+        c2.execute("""UPDATE engine_positions SET opened_ts=?,updated_ts=?,
+                      state='HOLD' WHERE engine=?""",
+                   (int(a["ts"]),int(ev["ts"]),engine))
+        c2.commit(); c2.close()
+    c.close()
+
 @app.get("/api/position-audit")
 def api_position_audit():
+    recover_missing_positions()
     c=db();c.row_factory=sqlite3.Row
     ev=[dict(x) for x in c.execute("SELECT * FROM position_events ORDER BY ts DESC LIMIT 50").fetchall()]
     c.close()
@@ -555,6 +601,7 @@ def api_position_audit():
 
 @app.get("/api/positions")
 def api_positions():
+    recover_missing_positions()
     return all_positions()
 
 @app.get("/api/position-events")

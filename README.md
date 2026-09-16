@@ -21,3 +21,15 @@ SCALP pressure 55 / switch 80 / persistence 12s
 CORE pressure 60 / switch 82 / persistence 25s
 MACRO pressure 65 / switch 85 / persistence 60s
 These are experimental heuristics, not validated probabilities.
+
+
+## v6.5 refresh persistence fix
+- Fixed deduped browser signals returning before actual position recovery.
+- `/api/positions` and `/api/position-audit` self-heal missing mutable position rows
+  from the append-only lifecycle event log.
+- Latest lifecycle event EXIT => never resurrect.
+- Latest lifecycle event OPEN/CONFIRM/HOLD/PRESSURE/SWITCH with no later EXIT
+  => active position is restored.
+- Recovery preserves original OPEN/SWITCH timestamp and entry.
+- Entry signal logic is unchanged.
+- Benchmark WIN/LOSS still cannot close an actual position.
