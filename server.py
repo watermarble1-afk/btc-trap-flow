@@ -50,6 +50,16 @@ def db():
     c.execute("""CREATE TABLE IF NOT EXISTS position_state(
       id INTEGER PRIMARY KEY CHECK(id=1), side TEXT, entry REAL, opened_ts INTEGER,
       signal_id INTEGER, updated_ts INTEGER)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS engine_positions(
+      engine TEXT PRIMARY KEY, side TEXT, entry REAL, opened_ts INTEGER,
+      signal_id INTEGER, updated_ts INTEGER, best_price REAL, atr_open REAL)""")
+    epcols={r[1] for r in c.execute("PRAGMA table_info(engine_positions)").fetchall()}
+    if "worst_price" not in epcols:c.execute("ALTER TABLE engine_positions ADD COLUMN worst_price REAL")
+    if "mfe" not in epcols:c.execute("ALTER TABLE engine_positions ADD COLUMN mfe REAL DEFAULT 0")
+    if "mae" not in epcols:c.execute("ALTER TABLE engine_positions ADD COLUMN mae REAL DEFAULT 0")
+    evcols={r[1] for r in c.execute("PRAGMA table_info(position_events)").fetchall()}
+    if "engine" not in evcols:c.execute("ALTER TABLE position_events ADD COLUMN engine TEXT DEFAULT 'CORE'")
+    c.execute("UPDATE position_events SET engine='CORE' WHERE engine IS NULL OR engine=''")
     # Lightweight schema migration for position-state tracking.
     cols={r[1] for r in c.execute("PRAGMA table_info(position_state)").fetchall()}
     if "best_price" not in cols:c.execute("ALTER TABLE position_state ADD COLUMN best_price REAL")
@@ -125,72 +135,79 @@ def liquidity_tf(tf,lookback=80,local_n=24):
     local=a[-local_n:]
     return H or max(x["high"] for x in local), L or min(x["low"] for x in local)
 
-def position_event(event,side,price,signal_id=None,note=""):
+def position_event(event,side,price,signal_id=None,note="",engine="CORE"):
     c=db()
-    c.execute("INSERT INTO position_events(ts,event,side,price,signal_id,note) VALUES(?,?,?,?,?,?)",
-              (int(time.time()*1000),event,side,price,signal_id,note))
+    c.execute("INSERT INTO position_events(ts,event,side,price,signal_id,note,engine) VALUES(?,?,?,?,?,?,?)",
+              (int(time.time()*1000),event,side,price,signal_id,note,engine))
     c.commit();c.close()
 
-def current_position():
+def current_position(engine="CORE"):
     c=db();c.row_factory=sqlite3.Row
-    row=c.execute("SELECT * FROM position_state WHERE id=1").fetchone()
+    row=c.execute("SELECT * FROM engine_positions WHERE engine=?",(engine,)).fetchone()
     c.close()
     return dict(row) if row else None
 
-def set_position(side,entry,signal_id):
-    now=int(time.time()*1000);A=atr5();c=db()
-    c.execute("""INSERT INTO position_state(id,side,entry,opened_ts,signal_id,updated_ts,best_price,atr_open)
-                 VALUES(1,?,?,?,?,?,?,?)
-                 ON CONFLICT(id) DO UPDATE SET side=excluded.side,entry=excluded.entry,
+def all_positions():
+    c=db();c.row_factory=sqlite3.Row
+    rows=c.execute("SELECT * FROM engine_positions ORDER BY opened_ts").fetchall();c.close()
+    return [dict(x) for x in rows]
+
+def set_position(engine,side,entry,signal_id,atr_value=None):
+    now=int(time.time()*1000);A=atr_value or (atr_tf("1M",30) if engine=="SCALP" else atr_tf("1H",24) if engine=="MACRO" else atr5())
+    c=db()
+    c.execute("""INSERT INTO engine_positions(engine,side,entry,opened_ts,signal_id,updated_ts,best_price,atr_open,worst_price,mfe,mae)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                 ON CONFLICT(engine) DO UPDATE SET side=excluded.side,entry=excluded.entry,
                  opened_ts=excluded.opened_ts,signal_id=excluded.signal_id,updated_ts=excluded.updated_ts,
-                 best_price=excluded.best_price,atr_open=excluded.atr_open""",
-              (side,entry,now,signal_id,now,entry,A))
+                 best_price=excluded.best_price,atr_open=excluded.atr_open,worst_price=excluded.worst_price,
+                 mfe=0,mae=0""",
+              (engine,side,entry,now,signal_id,now,entry,A,entry,0,0))
     c.commit();c.close()
 
-def clear_position():
-    c=db();c.execute("DELETE FROM position_state WHERE id=1");c.commit();c.close()
+def clear_position(engine):
+    c=db();c.execute("DELETE FROM engine_positions WHERE engine=?",(engine,));c.commit();c.close()
 
-def apply_position_signal(side,price,signal_id):
-    """Position-state layer. Same-side TRAP confirms; opposite TRAP switches."""
-    pos=current_position()
+def apply_position_signal(engine,side,price,signal_id,atr_value=None):
+    """Each timeframe engine owns its own position. Other-engine signals never kill it."""
+    pos=current_position(engine)
     if not pos:
-        set_position(side,price,signal_id)
-        position_event("OPEN",side,price,signal_id,"TRAP entry")
+        set_position(engine,side,price,signal_id,atr_value)
+        position_event("OPEN",side,price,signal_id,"engine entry",engine)
         return
     if pos["side"]==side:
-        position_event("CONFIRM",side,price,signal_id,"same-direction TRAP")
-        c=db();c.execute("UPDATE position_state SET updated_ts=? WHERE id=1",(int(time.time()*1000),))
-        c.commit();c.close()
+        position_event("CONFIRM",side,price,signal_id,"same-engine confirmation",engine)
+        c=db();c.execute("UPDATE engine_positions SET updated_ts=? WHERE engine=?",
+                         (int(time.time()*1000),engine));c.commit();c.close()
         return
-    old=pos["side"]
-    position_event("EXIT",old,price,signal_id,"opposite TRAP / switch")
-    clear_position()
-    set_position(side,price,signal_id)
-    position_event("SWITCH",side,price,signal_id,"opposite TRAP")
+    # Only an opposite signal from THE SAME engine can switch this engine.
+    position_event("EXIT",pos["side"],price,signal_id,"same-engine opposite signal / switch",engine)
+    clear_position(engine)
+    set_position(engine,side,price,signal_id,atr_value)
+    position_event("SWITCH",side,price,signal_id,"same-engine opposite signal",engine)
 
 def save_signal(name,side,score,level,ext,metrics,engine="CORE",atr_value=None):
-    global last_signal_ts,trap_arm
+    global last_signal_ts,trap_arm,scalp_last_signal_ts,scalp_arm
     p=last_price; A=atr_value or atr5()
     if side=="LONG":
         sl=min(ext,level-.22*A); risk=max(p-sl,.35*A); tp1=p+1.5*risk; tp2=p+2.3*risk
     else:
         sl=max(ext,level+.22*A); risk=max(sl-p,.35*A); tp1=p-1.5*risk; tp2=p-2.3*risk
-    # Reject an already-invalid signal at creation.
     if (side=="LONG" and p<=sl) or (side=="SHORT" and p>=sl):
-        trap_arm=None
+        if engine=="SCALP": scalp_arm=None
+        elif engine=="CORE": trap_arm=None
         return
     now=int(time.time()*1000)
     c=db();cur=c.execute("""INSERT INTO signals(ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flow,book,status,engine)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'OPEN',?)""",
       (now,name,side,p,sl,tp1,tp2,score,metrics["d10"],metrics["d30"],
        metrics["oi60"],metrics["flow"],metrics["book"],engine))
-    signal_id=cur.lastrowid
-    c.commit();c.close()
+    signal_id=cur.lastrowid;c.commit();c.close()
+
+    # IMPORTANT: signal benchmark and actual research position are separate.
+    apply_position_signal(engine,side,p,signal_id,A)
     if engine=="CORE":
-        apply_position_signal(side,p,signal_id)
         last_signal_ts=now;trap_arm=None
-    else:
-        global scalp_last_signal_ts,scalp_arm
+    elif engine=="SCALP":
         scalp_last_signal_ts=now;scalp_arm=None
 
 def evaluate():
@@ -265,42 +282,75 @@ def evaluate_scalp():
     scalp_prev_d10=w10["ratio"]
 
 def manage_position_reversal():
-    """Exit only after a meaningful favorable move and a confirmed counter-flow retrace.
-    X on chart means this state exit, not WIN/LOSS."""
+    """TP-less research position manager.
+    Positions survive ordinary adverse movement. We continuously record MFE/MAE.
+    EXIT requires evidence that a move had developed and order-flow/price behavior
+    has materially reversed. Each engine is independent.
+    """
     if not last_price:return
-    pos=current_position()
-    if not pos or pos.get("side") not in ("LONG","SHORT"):return
-    A=pos.get("atr_open") or atr5()
-    best=pos.get("best_price") or pos["entry"]
-    w10=flow(10000)["ratio"]; w30=flow(30000)["ratio"]
+    d10=flow(10000)["ratio"]; d30=flow(30000)["ratio"]
+    intensity=flow_intensity(); oi=oi_delta(60000); book=book_imbalance()
+    now=int(time.time()*1000)
 
-    if pos["side"]=="SHORT":
-        new_best=min(best,last_price)
-        favorable=pos["entry"]-new_best
-        retrace=last_price-new_best
-        reversal=(favorable>=0.80*A and retrace>=0.45*A and w10>=0.12 and w30>=0.04)
-    else:
-        new_best=max(best,last_price)
-        favorable=new_best-pos["entry"]
-        retrace=new_best-last_price
-        reversal=(favorable>=0.80*A and retrace>=0.45*A and w10<=-0.12 and w30<=-0.04)
+    for pos in all_positions():
+        engine=pos["engine"]; side=pos["side"]; entry=float(pos["entry"])
+        A=float(pos.get("atr_open") or 1.0)
+        best=float(pos.get("best_price") or entry)
+        worst=float(pos.get("worst_price") or entry)
 
-    if new_best!=best:
-        c=db();c.execute("UPDATE position_state SET best_price=?,updated_ts=? WHERE id=1",
-                         (new_best,int(time.time()*1000)));c.commit();c.close()
+        if side=="LONG":
+            best=max(best,last_price); worst=min(worst,last_price)
+            mfe=max(0.0,best-entry); mae=max(0.0,entry-worst)
+            retrace=max(0.0,best-last_price)
+            # Larger engines need a more developed move before flow-based exit.
+            if engine=="SCALP":
+                developed=mfe>=0.35*A
+                flow_turn=(d10<=-0.18 and d30<=-0.05 and intensity>=0.75)
+                price_fail=retrace>=0.32*A
+            elif engine=="MACRO":
+                developed=mfe>=0.80*A
+                flow_turn=(d10<=-0.12 and d30<=-0.06 and intensity>=0.80)
+                price_fail=retrace>=0.50*A
+            else:
+                developed=mfe>=0.55*A
+                flow_turn=(d10<=-0.14 and d30<=-0.05 and intensity>=0.78)
+                price_fail=retrace>=0.40*A
+        else:
+            best=min(best,last_price); worst=max(worst,last_price)
+            mfe=max(0.0,entry-best); mae=max(0.0,worst-entry)
+            retrace=max(0.0,last_price-best)
+            if engine=="SCALP":
+                developed=mfe>=0.35*A
+                flow_turn=(d10>=0.18 and d30>=0.05 and intensity>=0.75)
+                price_fail=retrace>=0.32*A
+            elif engine=="MACRO":
+                developed=mfe>=0.80*A
+                flow_turn=(d10>=0.12 and d30>=0.06 and intensity>=0.80)
+                price_fail=retrace>=0.50*A
+            else:
+                developed=mfe>=0.55*A
+                flow_turn=(d10>=0.14 and d30>=0.05 and intensity>=0.78)
+                price_fail=retrace>=0.40*A
 
-    if reversal:
-        position_event("EXIT",pos["side"],last_price,pos["signal_id"],"confirmed reversal")
-        clear_position()
+        c=db()
+        c.execute("""UPDATE engine_positions
+                     SET best_price=?,worst_price=?,mfe=?,mae=?,updated_ts=?
+                     WHERE engine=?""",(best,worst,mfe,mae,now,engine))
+        c.commit();c.close()
+
+        # No TP exit. A benchmark WIN/LOSS never reaches this branch.
+        if developed and flow_turn and price_fail:
+            note=f"FLOW EXIT d10={d10:.3f} d30={d30:.3f} flow={intensity:.2f} oi60={oi:.4f} book={book:.3f} mfe={mfe:.1f} mae={mae:.1f}"
+            position_event("EXIT",side,last_price,pos["signal_id"],note,engine)
+            clear_position(engine)
 
 def update_outcomes():
+    """LEGACY BENCHMARK ONLY: fixed TP1-vs-SL. Never closes/removes a research position."""
     if not last_price:return
-    now=int(time.time()*1000)
-    c=db()
+    now=int(time.time()*1000);c=db()
     rows=c.execute("SELECT id,ts,side,sl,tp1 FROM signals WHERE status='OPEN'").fetchall()
     for i,created_ts,side,sl,tp1 in rows:
-        if now<=created_ts:
-            continue
+        if now<=created_ts:continue
         st=None
         if side=="LONG":
             if last_price<=sl:st="LOSS"
@@ -310,19 +360,6 @@ def update_outcomes():
             elif last_price<=tp1:st="WIN"
         if st:c.execute("UPDATE signals SET status=?,closed_ts=? WHERE id=?",(st,now,i))
     c.commit();c.close()
-
-    # Position state is separate from benchmark WIN/LOSS.
-    pos=current_position()
-    if pos:
-        c=db()
-        sig=c.execute("SELECT sl FROM signals WHERE id=?",(pos["signal_id"],)).fetchone()
-        c.close()
-        if sig:
-            sl=sig[0]
-            stopped=(pos["side"]=="LONG" and last_price<=sl) or (pos["side"]=="SHORT" and last_price>=sl)
-            if stopped:
-                position_event("EXIT",pos["side"],last_price,pos["signal_id"],"invalidation")
-                clear_position()
 
 async def seed():
     async with httpx.AsyncClient(timeout=15) as h:
@@ -433,6 +470,10 @@ def stats():
 @app.get("/api/position")
 def position():
     return current_position() or {"side":"FLAT"}
+
+@app.get("/api/positions")
+def api_positions():
+    return all_positions()
 
 @app.get("/api/position-events")
 def position_events(limit:int=300):

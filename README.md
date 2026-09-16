@@ -1,15 +1,18 @@
-# v5.7 HARD FIX
+# v6 FLOW EXIT RESEARCH
 
-Fixed:
-- Server falsely showing OFFLINE even while the direct OKX chart moved.
-  Cause: frontend stats code referenced `st.MACRO` instead of `stats.MACRO`, throwing inside syncServer.
-- Restored server signal history and position event/X rendering after sync.
-- Added the requested right-side position/trade table using the actual page `.box` structure.
-- Chart markers no longer show dollar amounts; X is clean.
-- Trade table shows entry, exit, holding time and return for real recorded CORE position events.
-- Fixed candle hover %: OHLC, previous-candle %, candle body %, high-low range %.
-- Fixed today's daily candle dollar move and percentage from daily open.
-- AUTO now maps 1H/4H to MACRO.
-- Fixed malformed external Lightweight Charts script tag that had swallowed older inline hover code.
+Actual research positions:
+- SCALP 1/3M, CORE 5/15M, MACRO 1H/4H are independent.
+- No TP-based position exit.
+- Same-engine same-direction signal = CONFIRM/HOLD.
+- Other-engine opposite signals do not close the position.
+- Same-engine opposite signal can EXIT/SWITCH that engine.
+- Otherwise exit requires: developed favorable excursion + meaningful retrace + opposite 10s/30s order-flow.
+- MFE and MAE are persisted while each position is open.
+- Every OPEN / CONFIRM / EXIT / SWITCH is persisted in position_events.
 
-No SQLite schema reset or DB deletion is performed.
+Benchmark:
+- Legacy TP1 1.5R vs SL WIN/LOSS remains for comparison only.
+- Benchmark WIN/LOSS never closes an actual research position.
+
+This is a first research heuristic, not validated trading performance.
+No DB reset.

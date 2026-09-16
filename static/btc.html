@@ -134,6 +134,11 @@ body.embedded-btc header{position:relative!important}
   </div>
 
   <div class="box">
+<h3>엔진별 현재 포지션 <span class="tiny">TP 없음 · FLOW 변곡까지 HOLD</span></h3>
+<div id="enginePositions" class="tiny">불러오는 중…</div>
+</div>
+
+<div class="box">
     <h3>포지션 / 거래 기록</h3>
     <div style="overflow:auto;max-height:260px">
       <table style="width:100%;border-collapse:collapse;font-size:10px">
@@ -146,7 +151,7 @@ body.embedded-btc header{position:relative!important}
   </div>
 
   <div class="box">
-    <h3>라이브 신호 기록 <span style="font-size:8px;font-weight:400"><span style="color:#35d98a">●1/3 L</span> <span style="color:#4f8cff">●5/15 L</span> <span style="color:#ff78b4">●1/3 S</span> <span style="color:#ff4f64">●5/15 S</span></span></h3>
+    <h3>라이브 신호 기록 <span class="tiny">WIN/LOSS = 고정 TP/SL 벤치마크 · 실제 포지션 종료는 X</span> <span style="font-size:8px;font-weight:400"><span style="color:#35d98a">●1/3 L</span> <span style="color:#4f8cff">●5/15 L</span> <span style="color:#ff78b4">●1/3 S</span> <span style="color:#ff4f64">●5/15 S</span></span></h3>
     <div class="history" id="history"><div class="tiny">아직 없음</div></div>
   </div>
 </aside>
@@ -633,7 +638,7 @@ function renderHistory(){
     }
     const c=x.engine==='SCALP'?(x.dir==='LONG'?'#35d98a':'#ff78b4'):x.engine==='MACRO'?(x.dir==='LONG'?'#27c2a4':'#d95bd1'):(x.dir==='LONG'?'#4f8cff':'#ff4f64');
     const tf=x.engine==='SCALP'?'[1/3M]':x.engine==='MACRO'?'[1H/4H]':'[5/15M]';
-    return `<div class="histrow"><span>${tm}</span><b style="color:${c}">${tf} ${x.name} · 진입 $${fmt(x.price)}</b><span class="${x.status==='WIN'?'green':x.status==='LOSS'?'red':'yellow'}">${x.status}</span></div>`;
+    return `<div class="histrow"><span>${tm}</span><b style="color:${c}">${tf} ${x.name} · 진입 $${fmt(x.price)}</b><span class="${x.status==='WIN'?'green':x.status==='LOSS'?'red':'yellow'}">${x.status==='OPEN'?'벤치 OPEN':'벤치 '+x.status}</span></div>`;
   }).join(''):'<div class="tiny">아직 없음</div>';
 }
 function renderMarkers(){

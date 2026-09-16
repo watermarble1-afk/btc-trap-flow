@@ -18,13 +18,14 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
 .marketline{padding:12px 0;border-bottom:1px solid var(--line)}.marketline b{display:block;margin-bottom:5px}
 .note{padding:12px;border:1px dashed #31465e;border-radius:10px;color:var(--mut);font-size:12px;line-height:1.5}
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.newsgrid{grid-template-columns:1fr}.status{display:none}}
+.ledger{width:100%;border-collapse:collapse;font-size:12px}.ledger th{position:sticky;top:0;background:#0d1722;color:#91a5ba;text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);white-space:nowrap}.ledger td{padding:10px 8px;border-bottom:1px solid #1d2a39;white-space:nowrap}.ledger tr:hover td{background:#122131}.pos{color:var(--g)}.neg{color:var(--r)}
 </style></head><body>
 <header><div class="brand">MY MARKET TERMINAL <em>v2</em></div>
 <nav><button class="tab on" data-p="btc">BTC</button><button class="tab" data-p="stocks">주식</button><button class="tab" data-p="news">NEWS</button><button class="tab" data-p="lab">SIGNAL LAB</button></nav>
 <div class="status">BTC SERVER <span id="srv" class="live">● CHECK</span></div></header>
 <main>
-<section id="btc" class="page on"><iframe src="btc.html?v=57"></iframe></section>
-<section id="stocks" class="page"><iframe src="stock.html?v=57"></iframe></section>
+<section id="btc" class="page on"><iframe src="btc.html?v=60"></iframe></section>
+<section id="stocks" class="page"><iframe src="stock.html?v=60"></iframe></section>
 <section id="news" class="page">
  <div class="newsbar">
   <button class="chip on" data-cat="all">전체</button><button class="chip" data-cat="btc">BTC·CRYPTO</button>
@@ -39,12 +40,27 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
   </div>
  </div>
 </section>
-<section id="lab" class="page"><div class="grid">
- <div class="card"><h3>저장 신호</h3><div id="tot" class="big">0</div></div>
- <div class="card"><h3>WIN</h3><div id="win" class="big">0</div></div>
- <div class="card"><h3>LOSS</h3><div id="loss" class="big">0</div></div>
- <div class="card"><h3>OPEN</h3><div id="open" class="big">0</div></div>
- </div></section>
+<section id="lab" class="page">
+ <div class="grid">
+  <div class="card"><h3>저장 신호</h3><div id="tot" class="big">0</div></div>
+  <div class="card"><h3>WIN</h3><div id="win" class="big">0</div></div>
+  <div class="card"><h3>LOSS</h3><div id="loss" class="big">0</div></div>
+  <div class="card"><h3>OPEN</h3><div id="open" class="big">0</div></div>
+ </div>
+ <div class="card" style="margin-top:12px">
+  <h3>실제 포지션 목록 · OPEN → HOLD → FLOW EXIT / SWITCH · TP 청산 없음</h3>
+  <div id="labFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+   <button class="chip on" data-lf="ALL">전체</button><button class="chip" data-lf="CORE">5/15M</button>
+   <button class="chip" data-lf="SCALP">1/3M</button><button class="chip" data-lf="MACRO">1H/4H</button>
+   <button class="chip" data-lf="LONG">LONG</button><button class="chip" data-lf="SHORT">SHORT</button>
+  </div>
+  <div style="overflow:auto"><table class="ledger"><thead><tr><th>진입 시간</th><th>엔진</th><th>방향</th><th>진입가</th><th>청산가</th><th>청산 시간</th><th>보유시간</th><th>수익률</th><th>상태</th></tr></thead><tbody id="positionsBody"><tr><td colspan="9">불러오는 중…</td></tr></tbody></table></div>
+ </div>
+ <div class="card" style="margin-top:12px">
+  <h3>신호 벤치마크 기록 · WIN/LOSS는 TP/SL 비교용이며 실제 포지션 청산과 무관</h3>
+  <div style="overflow:auto;max-height:600px"><table class="ledger"><thead><tr><th>발생 시간</th><th>엔진</th><th>방향</th><th>신호</th><th>진입가</th><th>SL</th><th>TP1</th><th>TP2</th><th>SCORE</th><th>결과</th></tr></thead><tbody id="signalsBody"><tr><td colspan="10">불러오는 중…</td></tr></tbody></table></div>
+ </div>
+</section>
 </main>
 <script>
 const API='https://web-production-f1747.up.railway.app';
@@ -81,10 +97,47 @@ async function loadRSS(){
  const seen=new Set(); NEWS=all.sort((a,b)=>b.ts-a.ts).filter(x=>!seen.has(x.title)&&(seen.add(x.title),true)).slice(0,40);
  if(!NEWS.length)feed.innerHTML='<div class="note">브라우저에서 뉴스 피드 연결이 막혔음. 다음 단계에서 Railway 서버 뉴스 수집기로 옮기면 24시간 안정적으로 받을 수 있다.</div>'; else renderNews();
 }
+let LABSIG=[], LABPOS=[], LF='ALL';
+function fmtN(v){return Number(v||0).toLocaleString('en-US',{maximumFractionDigits:1})}
+function eng(e){return e==='SCALP'?'1/3M':e==='MACRO'?'1H/4H':'5/15M'}
+function buildPositions(ev){
+ const rows=[];let o=null;
+ [...ev].sort((a,b)=>Number(a.ts)-Number(b.ts)).forEach(e=>{
+  const t=String(e.event||'').toUpperCase();
+  if(t==='OPEN'){o={ts:+e.ts,engine:e.engine||'CORE',side:e.side,entry:+e.price}}
+  else if(t==='SWITCH'){if(o)rows.push({...o,exit:+e.price,exitTs:+e.ts,status:'SWITCH'});o={ts:+e.ts,engine:e.engine||'CORE',side:e.side,entry:+e.price}}
+  else if(t==='EXIT'&&o){rows.push({...o,exit:+e.price,exitTs:+e.ts,status:'EXIT'});o=null}
+ });
+ if(o)rows.push({...o,status:'OPEN'});
+ return rows.reverse();
+}
+function match(r){
+ if(LF==='ALL')return true;if(['CORE','SCALP','MACRO'].includes(LF))return (r.engine||'CORE')===LF;
+ return r.side===LF||r.dir===LF;
+}
+function renderLab(){
+ const pos=LABPOS.filter(match);
+ positionsBody.innerHTML=pos.length?pos.map(r=>{
+  const ms=(r.exitTs||Date.now())-r.ts,m=Math.max(0,Math.floor(ms/60000));
+  const hold=m>=1440?`${Math.floor(m/1440)}일 ${Math.floor((m%1440)/60)}시간`:m>=60?`${Math.floor(m/60)}시간 ${m%60}분`:`${m}분`;
+  const pct=r.exit&&r.entry?((r.side==='SHORT'?r.entry-r.exit:r.exit-r.entry)/r.entry*100):null;
+  return `<tr><td>${new Date(r.ts).toLocaleString('ko-KR')}</td><td>${eng(r.engine)}</td><td class="${r.side==='LONG'?'pos':'neg'}">${r.side}</td><td>$${fmtN(r.entry)}</td><td>${r.exit?'$'+fmtN(r.exit):'—'}</td><td>${r.exitTs?new Date(r.exitTs).toLocaleString('ko-KR'):'—'}</td><td>${hold}</td><td class="${pct==null?'':pct>=0?'pos':'neg'}">${pct==null?'—':(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td><td>${r.status}</td></tr>`
+ }).join(''):'<tr><td colspan="9">해당 포지션 기록 없음</td></tr>';
+ const sig=LABSIG.filter(match);
+ signalsBody.innerHTML=sig.length?sig.map(x=>`<tr><td>${new Date(+x.ts).toLocaleString('ko-KR')}</td><td>${eng(x.engine||'CORE')}</td><td class="${x.dir==='LONG'?'pos':'neg'}">${x.dir}</td><td>${x.name}</td><td>$${fmtN(x.entry)}</td><td>$${fmtN(x.sl)}</td><td>$${fmtN(x.tp1)}</td><td>$${fmtN(x.tp2)}</td><td>${x.score??'—'}</td><td class="${x.status==='WIN'?'pos':x.status==='LOSS'?'neg':''}">${x.status}</td></tr>`).join(''):'<tr><td colspan="10">해당 신호 기록 없음</td></tr>';
+}
+document.querySelectorAll('[data-lf]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-lf]').forEach(x=>x.classList.remove('on'));b.classList.add('on');LF=b.dataset.lf;renderLab()});
 async function syncServer(){
  try{
-  const [live,sigs]=await Promise.all([fetch(API+'/api/live',{cache:'no-store'}).then(r=>r.json()),fetch(API+'/api/signals?limit=100',{cache:'no-store'}).then(r=>r.json())]);
-  srv.textContent='● LIVE'; const a=Array.isArray(sigs)?sigs:[];tot.textContent=a.length;win.textContent=a.filter(x=>x.status==='WIN').length;loss.textContent=a.filter(x=>x.status==='LOSS').length;open.textContent=a.filter(x=>x.status==='OPEN').length;
+  const [live,sigs,events]=await Promise.all([
+   fetch(API+'/api/live',{cache:'no-store'}).then(r=>r.json()),
+   fetch(API+'/api/signals?limit=1000',{cache:'no-store'}).then(r=>r.json()),
+   fetch(API+'/api/position-events?limit=1000',{cache:'no-store'}).then(r=>r.json())
+  ]);
+  srv.textContent='● LIVE';srv.style.color='var(--g)';
+  LABSIG=Array.isArray(sigs)?sigs:[];LABPOS=buildPositions(Array.isArray(events)?events:[]);
+  tot.textContent=LABSIG.length;win.textContent=LABSIG.filter(x=>x.status==='WIN').length;loss.textContent=LABSIG.filter(x=>x.status==='LOSS').length;open.textContent=LABSIG.filter(x=>x.status==='OPEN').length;
+  renderLab();
  }catch(e){srv.textContent='● OFFLINE';srv.style.color='var(--r)'}
 }
 refresh.onclick=loadRSS; loadRSS();syncServer();setInterval(syncServer,5000);setInterval(loadRSS,300000);
