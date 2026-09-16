@@ -155,7 +155,7 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
     <div style="overflow:auto;max-height:260px">
       <table style="width:100%;border-collapse:collapse;font-size:10px">
         <thead><tr style="color:#8d99ad;text-align:left">
-          <th style="padding:6px">시간</th><th>엔진</th><th>방향</th><th>진입가</th><th>청산가</th><th>보유</th><th>결과</th>
+          <th style="padding:6px">시간</th><th>엔진</th><th>방향</th><th>진입가</th><th>청산가</th><th>보유</th><th>종료사유</th><th>결과</th>
         </tr></thead>
         <tbody id="tradeLedger"><tr><td colspan="7" class="tiny" style="padding:8px">기록 불러오는 중…</td></tr></tbody>
       </table>
@@ -643,7 +643,7 @@ function renderHistory(){
   }));
   const posRows=positionEvents.filter(e=>['OPEN','EXIT','SWITCH'].includes(String(e.event||'').toUpperCase())).map(e=>({
     kind:'POSITION',ts:Number(e.ts),time:e.time,dir:e.side,event:String(e.event||'').toUpperCase(),
-    price:Number(e.price),note:e.note||''
+    price:Number(e.price),note:e.note||'',engine:e.engine||'CORE'
   }));
   const rows=[...sigRows,...posRows].sort((a,b)=>b.ts-a.ts).slice(0,24);
   $('history').innerHTML=rows.length?rows.map(x=>{
@@ -651,8 +651,10 @@ function renderHistory(){
     if(x.kind==='POSITION'){
       const isExit=x.event==='EXIT';
       const c=isExit?'#d1d5db':(x.dir==='LONG'?'#00e5ff':'#ffd400');
-      const label=isExit?'X 청산':(x.event==='SWITCH'?'SWITCH '+(x.dir==='LONG'?'L':'S'):'포지션 '+(x.dir==='LONG'?'L':'S'));
-      return `<div class="histrow"><span>${tm}</span><b style="color:${c}">${label} · $${fmt(x.price)}</b><span class="tiny">${isExit?'EXIT':x.event}</span></div>`;
+      const tf=x.engine==='SCALP'?'1/3M':x.engine==='MACRO'?'1H/4H':'5/15M';
+      const reason=/STRUCTURE INVALIDATION/i.test(x.note)?'STRUCTURE':/FLOW SWITCH/i.test(x.note)||/opposite signal \/ switch/i.test(x.note)?'SWITCH':/FLOW EXIT/i.test(x.note)?'FLOW':'EXIT';
+      const label=isExit?`X ${tf} ${x.dir==='LONG'?'L':'S'} · ${reason}`:(x.event==='SWITCH'?`${tf} SWITCH → ${x.dir==='LONG'?'L':'S'}`:`${tf} POS ${x.dir==='LONG'?'L':'S'}`);
+      return `<div class="histrow"><span>${tm}</span><b style="color:${c}">${label} · $${fmt(x.price)}</b><span class="tiny">${x.event}</span></div>`;
     }
     const c=x.engine==='SCALP'?(x.dir==='LONG'?'#35d98a':'#ff78b4'):x.engine==='MACRO'?(x.dir==='LONG'?'#27c2a4':'#d95bd1'):(x.dir==='LONG'?'#4f8cff':'#ff4f64');
     const tf=x.engine==='SCALP'?'[1/3M]':x.engine==='MACRO'?'[1H/4H]':'[5/15M]';
@@ -682,10 +684,12 @@ function renderMarkers(){
     const ev=String(e.event||'').toUpperCase();
     if(!['OPEN','EXIT','SWITCH'].includes(ev)) continue;
     if(effective!=='ALL' && (e.engine||'CORE')!==effective) continue;
+    const tf=(e.engine||'CORE')==='SCALP'?'1/3':(e.engine||'CORE')==='MACRO'?'1H/4H':'5/15';
     if(ev==='EXIT'){
+      const reason=/STRUCTURE INVALIDATION/i.test(e.note||'')?'STRUCT':/FLOW SWITCH/i.test(e.note||'')||/opposite signal \/ switch/i.test(e.note||'')?'SW':/FLOW EXIT/i.test(e.note||'')?'FLOW':'EXIT';
       marks.push({
         time:e.time, position:e.side==='LONG'?'aboveBar':'belowBar',
-        color:'#d1d5db', shape:'circle', text:'X'
+        color:'#d1d5db', shape:'circle', text:'X '+tf+' '+(e.side==='LONG'?'L':'S')+' '+reason
       });
     }else{
       const isL=e.side==='LONG';
@@ -693,7 +697,7 @@ function renderMarkers(){
         time:e.time, position:isL?'belowBar':'aboveBar',
         color:isL?'#00e5ff':'#ffd400',
         shape:isL?'arrowUp':'arrowDown',
-        text:(ev==='SWITCH'?'◆ SW ':'◆ POS ')+(isL?'L':'S')+' $'+fmt(e.price)
+        text:(ev==='SWITCH'?'◆ '+tf+' SW→':'◆ '+tf+' POS ')+(isL?'L':'S')+' $'+fmt(e.price)
       });
     }
   }
@@ -717,36 +721,54 @@ function renderTradeLedger(){
   const el=$('tradeLedger'); if(!el)return;
   const ev=[...(positionEvents||[])].sort((a,b)=>Number(a.ts)-Number(b.ts));
   const rows=[];
-  let open=null;
+  const openByEngine={};
+  const closeReason=(note='')=>/STRUCTURE INVALIDATION/i.test(note)?'STRUCTURE':/FLOW SWITCH/i.test(note)||/opposite signal \/ switch/i.test(note)?'SWITCH':/FLOW EXIT/i.test(note)?'FLOW':'EXIT';
   for(const e of ev){
     const type=String(e.event||'').toUpperCase();
-    if(type==='OPEN'||type==='SWITCH'){
-      if(type==='SWITCH'&&open){
-        rows.push({...open,exit:Number(e.price),exitTs:Number(e.ts)});
+    const engine=e.engine||'CORE';
+    if(type==='OPEN'){
+      // Never overwrite another engine's position. If duplicate OPEN exists for the same
+      // engine, preserve the prior row as an audit anomaly instead of silently losing it.
+      if(openByEngine[engine]) rows.push({...openByEngine[engine],exit:null,exitTs:null,reason:'AUDIT: DUP OPEN'});
+      openByEngine[engine]={ts:Number(e.ts),engine,side:e.side,entry:Number(e.price),openEvent:'OPEN'};
+    } else if(type==='EXIT'){
+      const op=openByEngine[engine];
+      if(op){
+        rows.push({...op,exit:Number(e.price),exitTs:Number(e.ts),reason:closeReason(e.note||''),exitNote:e.note||''});
+        delete openByEngine[engine];
+      } else {
+        // Keep orphan exits visible so lifecycle corruption can never disappear from UI.
+        rows.push({ts:Number(e.ts),engine,side:e.side,entry:null,exit:Number(e.price),exitTs:Number(e.ts),reason:'AUDIT: ORPHAN EXIT',exitNote:e.note||''});
       }
-      open={ts:Number(e.ts),engine:e.engine||'CORE',side:e.side,entry:Number(e.price)};
-    } else if(type==='EXIT'&&open){
-      rows.push({...open,exit:Number(e.price),exitTs:Number(e.ts)}); open=null;
+    } else if(type==='SWITCH'){
+      // Normal server lifecycle writes EXIT(old) then SWITCH(new). SWITCH is the new entry.
+      // Legacy logs without the preceding EXIT are still closed visibly, never silently.
+      if(openByEngine[engine]){
+        const op=openByEngine[engine];
+        rows.push({...op,exit:Number(e.price),exitTs:Number(e.ts),reason:'SWITCH(legacy)'});
+      }
+      openByEngine[engine]={ts:Number(e.ts),engine,side:e.side,entry:Number(e.price),openEvent:'SWITCH'};
     }
   }
-  if(open) rows.push({...open,exit:null,exitTs:null});
-  rows.reverse();
-  if(!rows.length){el.innerHTML='<tr><td colspan="7" class="tiny" style="padding:8px">아직 포지션 기록 없음</td></tr>';return}
-  el.innerHTML=rows.slice(0,30).map(r=>{
+  Object.values(openByEngine).forEach(op=>rows.push({...op,exit:null,exitTs:null,reason:'OPEN'}));
+  rows.sort((a,b)=>b.ts-a.ts);
+  if(!rows.length){el.innerHTML='<tr><td colspan="8" class="tiny" style="padding:8px">아직 포지션 기록 없음</td></tr>';return}
+  el.innerHTML=rows.slice(0,40).map(r=>{
     const held=(r.exitTs||Date.now())-r.ts, mins=Math.max(0,Math.floor(held/60000));
     const hold=mins>=1440?`${Math.floor(mins/1440)}일 ${Math.floor((mins%1440)/60)}시간`:mins>=60?`${Math.floor(mins/60)}시간 ${mins%60}분`:`${mins}분`;
     let pct=null;
     if(r.exit!=null&&r.entry){pct=(r.side==='SHORT'?(r.entry-r.exit):(r.exit-r.entry))/r.entry*100}
     const eng=r.engine==='SCALP'?'1/3M':r.engine==='MACRO'?'1H/4H':'5/15M';
     const col=r.side==='LONG'?(r.engine==='SCALP'?'#35d98a':r.engine==='MACRO'?'#27c2a4':'#4f8cff'):(r.engine==='SCALP'?'#ff78b4':r.engine==='MACRO'?'#d95bd1':'#ff4f64');
+    const bad=String(r.reason||'').startsWith('AUDIT:');
     return `<tr style="border-top:1px solid #1f2a3a">
       <td style="padding:7px 6px">${new Date(r.ts).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
       <td>${eng}</td><td style="color:${col};font-weight:800">${r.side==='LONG'?'L':'S'}</td>
-      <td>$${fmt(r.entry)}</td><td>${r.exit==null?'보유중':'$'+fmt(r.exit)}</td><td>${hold}</td>
-      <td style="color:${pct==null?'#f0c84b':pct>=0?'#35d98a':'#ff5c70'}">${pct==null?'OPEN':(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td></tr>`;
+      <td>${r.entry==null?'—':'$'+fmt(r.entry)}</td><td>${r.exit==null?'보유중':'$'+fmt(r.exit)}</td><td>${hold}</td>
+      <td style="color:${bad?'#f0c84b':'#aab6c8'};font-weight:700">${r.reason||'—'}</td>
+      <td style="color:${pct==null?'#f0c84b':pct>=0?'#35d98a':'#ff5c70'}">${pct==null?(bad?'AUDIT':'OPEN'):(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td></tr>`;
   }).join('');
 }
-
 async function syncServer(){
   try{
     const [live,sigs,pos,events,stats,positions]=await Promise.all([
