@@ -106,3 +106,10 @@ These are experimental heuristics, not validated probabilities.
 - Persisted extremes are merged, so values never shrink after a restart.
 - Reversal manager refreshes reconstructed excursions before HOLD/PRESSURE/X/SWITCH decisions.
 - RETEST color separation from v6.12 is retained.
+
+## v6.14 EXIT / SWITCH split
+- Keeps existing pressure scoring and entry logic.
+- EXIT-only: SCALP 65/8s/0.22ATR; CORE 70/18s/0.28ATR; MACRO 75/45s/0.38ATR.
+- SWITCH remains stronger: SCALP 80/12s/0.38ATR; CORE 82/25s/0.45ATR; MACRO 85/60s/0.55ATR.
+- Strong SWITCH is evaluated first. Otherwise EXIT-only writes X and leaves engine flat/WAIT.
+- v6.13 restart-safe MFE/MAE reconstruction and v6.12 RETEST color are retained.

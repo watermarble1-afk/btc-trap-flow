@@ -420,17 +420,32 @@ def manage_position_reversal():
         c.commit();c.close()
 
         persisted = new_state=="PRESSURE" and new_psince and now-int(new_psince)>=min_pressure_ms
-        # SWITCH only after strong, persistent opposite flow + actual price acceptance.
-        price_accept = adverse>=0.38 if engine=="SCALP" else adverse>=0.45 if engine=="CORE" else adverse>=0.55
-        if persisted and pscore>=switch_threshold and price_accept:
+
+        # Strong reversal: EXIT old side + SWITCH to opposite side.
+        switch_accept = adverse>=0.38 if engine=="SCALP" else adverse>=0.45 if engine=="CORE" else adverse>=0.55
+        if persisted and pscore>=switch_threshold and switch_accept:
             old_signal=pos["signal_id"]
             note=(f"FLOW SWITCH score={pscore} d10={d10:.3f} d30={d30:.3f} "
                   f"flow={intensity:.2f} oi60={oi:.4f} book={book:.3f} mfe={mfe:.1f} mae={mae:.1f}")
-            # Explicitly close old side, then create the opposite position at the same price.
             position_event("EXIT",side,last_price,old_signal,note,engine)
             clear_position(engine,"FLOW_SWITCH")
             set_position(engine,opposite_side,last_price,None,A)
             position_event("SWITCH",opposite_side,last_price,None,note,engine)
+            continue
+
+        # EXIT-only: current thesis is invalid enough to stop holding, but opposite side
+        # is not strong enough for an immediate reverse position.
+        exit_threshold=65 if engine=="SCALP" else 70 if engine=="CORE" else 75
+        exit_ms=8000 if engine=="SCALP" else 18000 if engine=="CORE" else 45000
+        exit_accept=adverse>=0.22 if engine=="SCALP" else adverse>=0.28 if engine=="CORE" else adverse>=0.38
+        exit_persisted = new_state=="PRESSURE" and new_psince and now-int(new_psince)>=exit_ms
+        if exit_persisted and pscore>=exit_threshold and exit_accept:
+            old_signal=pos["signal_id"]
+            note=(f"FLOW EXIT score={pscore} d10={d10:.3f} d30={d30:.3f} "
+                  f"flow={intensity:.2f} oi60={oi:.4f} book={book:.3f} mfe={mfe:.1f} mae={mae:.1f}")
+            position_event("EXIT",side,last_price,old_signal,note,engine)
+            clear_position(engine,"FLOW_EXIT")
+            continue
 
 def update_outcomes():
     """LEGACY BENCHMARK ONLY: fixed TP1-vs-SL. Never closes/removes a research position."""
