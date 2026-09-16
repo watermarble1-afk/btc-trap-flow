@@ -1,0 +1,94 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>MY MARKET TERMINAL v2</title>
+<style>
+:root{--bg:#071019;--p:#0d1722;--p2:#111e2b;--line:#223247;--txt:#e8f0f7;--mut:#8293a6;--g:#31d394;--r:#ff6678;--b:#6ba8ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,sans-serif}
+header{height:62px;display:flex;align-items:center;padding:0 18px;border-bottom:1px solid var(--line);gap:18px;position:sticky;top:0;z-index:20;background:#071019f5}
+.brand{font-weight:900}.brand em{font-style:normal;color:var(--g);font-size:10px;margin-left:7px}
+nav{display:flex;gap:7px}.tab,.chip,.btn{border:1px solid var(--line);background:#0c1620;color:#a9b7c6;border-radius:8px;padding:8px 12px;cursor:pointer}
+.tab.on,.chip.on{background:#16273a;color:white;border-color:#3b5878}.status{margin-left:auto;color:var(--mut);font-size:12px}.live{color:var(--g)}
+main{padding:14px;max-width:1600px;margin:auto}.page{display:none}.page.on{display:block}
+iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;background:#071019}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.card{background:var(--p);border:1px solid var(--line);border-radius:12px;padding:14px}
+.card h3{margin:0 0 10px;color:#9fb0c2;font-size:12px}.big{font-size:23px;font-weight:850}.mut{color:var(--mut);font-size:12px}
+.stockbox{min-height:500px;display:grid;place-items:center;text-align:center;color:var(--mut)}
+.newsbar{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px}.newsgrid{display:grid;grid-template-columns:1.5fr 1fr;gap:10px}
+.newsitem{display:block;text-decoration:none;color:inherit;padding:14px;border-bottom:1px solid var(--line)}.newsitem:hover{background:#122131}
+.newsitem h4{font-size:15px;margin:6px 0;line-height:1.35}.meta{font-size:11px;color:var(--mut)}.badge{font-size:10px;padding:3px 7px;border:1px solid #35506d;border-radius:10px;color:#a9c4e0}
+.marketline{padding:12px 0;border-bottom:1px solid var(--line)}.marketline b{display:block;margin-bottom:5px}
+.note{padding:12px;border:1px dashed #31465e;border-radius:10px;color:var(--mut);font-size:12px;line-height:1.5}
+@media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.newsgrid{grid-template-columns:1fr}.status{display:none}}
+</style></head><body>
+<header><div class="brand">MY MARKET TERMINAL <em>v2</em></div>
+<nav><button class="tab on" data-p="btc">BTC</button><button class="tab" data-p="stocks">주식</button><button class="tab" data-p="news">NEWS</button><button class="tab" data-p="lab">SIGNAL LAB</button></nav>
+<div class="status">BTC SERVER <span id="srv" class="live">● CHECK</span></div></header>
+<main>
+<section id="btc" class="page on"><iframe src="btc.html"></iframe></section>
+<section id="stocks" class="page">
+ <div class="card"><h3>STOCK TERMINAL · 별도 모듈</h3>
+ <div class="stockbox"><div><div class="big">주식 차트는 BTC와 완전히 분리</div><p>미국 지수 · 한국주식 · 미국 개별주식 검색형 차트를 여기에 붙인다.</p><div class="note">현재는 가짜 시세를 넣지 않았다. 다음 단계에서 실제 주식 데이터 공급원을 연결하면 종목검색/캔들/거래량을 추가할 수 있다.</div></div></div></div>
+</section>
+<section id="news" class="page">
+ <div class="newsbar">
+  <button class="chip on" data-cat="all">전체</button><button class="chip" data-cat="btc">BTC·CRYPTO</button>
+  <button class="chip" data-cat="macro">글로벌 시황</button><button class="chip" data-cat="rates">금리·채권</button>
+  <button class="chip" data-cat="stocks">증시</button><button class="btn" id="refresh">↻ 새로고침</button>
+ </div>
+ <div class="newsgrid">
+  <div class="card"><h3>LIVE NEWS FEED</h3><div id="feed"><div class="note">뉴스 불러오는 중…</div></div></div>
+  <div>
+   <div class="card"><h3>시장 맥락</h3><div id="context" class="mut">최신 헤드라인을 불러오면 BTC/거시/증시를 분리해서 보여준다.</div></div>
+   <div class="card" style="margin-top:10px"><h3>뉴스 원칙</h3><div class="note">기사 제목·출처·시간을 우선 표시한다. 뉴스 방향을 자동 매수/매도 신호로 쓰지 않고, 가격 움직임의 배경 확인용으로 둔다.</div></div>
+  </div>
+ </div>
+</section>
+<section id="lab" class="page"><div class="grid">
+ <div class="card"><h3>저장 신호</h3><div id="tot" class="big">0</div></div>
+ <div class="card"><h3>WIN</h3><div id="win" class="big">0</div></div>
+ <div class="card"><h3>LOSS</h3><div id="loss" class="big">0</div></div>
+ <div class="card"><h3>OPEN</h3><div id="open" class="big">0</div></div>
+ </div></section>
+</main>
+<script>
+const API='https://web-production-f1747.up.railway.app';
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));b.classList.add('on');document.querySelectorAll('.page').forEach(x=>x.classList.remove('on'));document.getElementById(b.dataset.p).classList.add('on')});
+let CAT='all', NEWS=[];
+document.querySelectorAll('.chip').forEach(b=>b.onclick=()=>{document.querySelectorAll('.chip').forEach(x=>x.classList.remove('on'));b.classList.add('on');CAT=b.dataset.cat;renderNews()});
+function classify(t){
+ t=t.toLowerCase();
+ if(/bitcoin|btc|crypto|ethereum|ether|xrp|solana/.test(t))return'btc';
+ if(/yield|bond|treasury|fed|rate|inflation/.test(t))return'rates';
+ if(/stock|wall street|nasdaq|s&p|equity|shares/.test(t))return'stocks';
+ return'macro';
+}
+function esc(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function renderNews(){
+ const a=NEWS.filter(x=>CAT==='all'||x.cat===CAT);
+ feed.innerHTML=a.length?a.map(x=>`<a class="newsitem" href="${x.link}" target="_blank" rel="noopener"><span class="badge">${x.cat.toUpperCase()}</span><h4>${esc(x.title)}</h4><div class="meta">${esc(x.source)} · ${esc(x.time)}</div></a>`).join(''):'<div class="note">해당 분류 뉴스가 없음.</div>';
+}
+async function loadRSS(){
+ feed.innerHTML='<div class="note">최신 뉴스 불러오는 중…</div>';
+ const feeds=[
+  ['CoinDesk','https://www.coindesk.com/arc/outboundfeeds/rss/'],
+  ['Reuters Markets','https://news.google.com/rss/search?q=Reuters+markets+stocks+bonds+oil&hl=en-US&gl=US&ceid=US:en'],
+  ['Bitcoin','https://news.google.com/rss/search?q=Bitcoin+crypto+market&hl=en-US&gl=US&ceid=US:en']
+ ];
+ let all=[];
+ for(const [source,url] of feeds){
+  try{
+   const proxy='https://api.rss2json.com/v1/api.json?rss_url='+encodeURIComponent(url);
+   const j=await fetch(proxy,{cache:'no-store'}).then(r=>r.json());
+   (j.items||[]).slice(0,15).forEach(i=>all.push({title:i.title,link:i.link,source,time:new Date(i.pubDate).toLocaleString('ko-KR'),ts:+new Date(i.pubDate),cat:classify(i.title)}));
+  }catch(e){}
+ }
+ const seen=new Set(); NEWS=all.sort((a,b)=>b.ts-a.ts).filter(x=>!seen.has(x.title)&&(seen.add(x.title),true)).slice(0,40);
+ if(!NEWS.length)feed.innerHTML='<div class="note">브라우저에서 뉴스 피드 연결이 막혔음. 다음 단계에서 Railway 서버 뉴스 수집기로 옮기면 24시간 안정적으로 받을 수 있다.</div>'; else renderNews();
+}
+async function syncServer(){
+ try{
+  const [live,sigs]=await Promise.all([fetch(API+'/api/live',{cache:'no-store'}).then(r=>r.json()),fetch(API+'/api/signals?limit=100',{cache:'no-store'}).then(r=>r.json())]);
+  srv.textContent='● LIVE'; const a=Array.isArray(sigs)?sigs:[];tot.textContent=a.length;win.textContent=a.filter(x=>x.status==='WIN').length;loss.textContent=a.filter(x=>x.status==='LOSS').length;open.textContent=a.filter(x=>x.status==='OPEN').length;
+ }catch(e){srv.textContent='● OFFLINE';srv.style.color='var(--r)'}
+}
+refresh.onclick=loadRSS; loadRSS();syncServer();setInterval(syncServer,5000);setInterval(loadRSS,300000);
+</script></body></html>

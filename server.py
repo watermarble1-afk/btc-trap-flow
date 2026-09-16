@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import httpx, websockets
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 INST="BTC-USDT-SWAP"
 PUB="wss://ws.okx.com:8443/ws/v5/public"
@@ -244,3 +245,10 @@ def stats():
     c=db()
     rows=c.execute("SELECT status,COUNT(*) FROM signals GROUP BY status").fetchall();c.close()
     return {k:v for k,v in rows}
+
+
+# Web terminal. Keep this mount at the end so /api/* routes take priority.
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+if STATIC_DIR.exists():
+    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="terminal")
+

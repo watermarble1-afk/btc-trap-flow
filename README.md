@@ -1,13 +1,17 @@
-# BTC Trap Flow Collector
+# BTC Trap Flow + MY MARKET TERMINAL v2
 
-24/7 OKX BTC-USDT-SWAP public-data collector and TRAP signal recorder.
+Railway deployment bundle.
 
-Railway:
-- Start command is provided by `Procfile`.
-- For persistent SQLite storage, attach a Railway Volume mounted at `/data`.
-- Health endpoint: `/`
-- Live data: `/api/live`
-- Signals: `/api/signals`
-- Stats: `/api/stats`
+Upload/replace these in the existing GitHub repository:
+- server.py
+- requirements.txt
+- Procfile
+- static/index.html
+- static/btc.html
 
-No OKX API key is required because this uses public market data only.
+Important:
+- Keep the existing Railway volume mounted at /data.
+- Existing API endpoints remain under /api/*.
+- The old root health page moves to /api/status.
+- The public root / now serves MY MARKET TERMINAL.
+- No OKX private API key or trading permission is used.
