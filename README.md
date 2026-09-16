@@ -122,3 +122,12 @@ These are experimental heuristics, not validated probabilities.
   - CORE EXIT: pressure >=70, >=18s, adverse >=0.28 ATR -> X and FLAT/WAIT.
   - CORE SWITCH: pressure >=82, >=25s, adverse >=0.45 ATR -> X + opposite position.
 - Existing MFE/MAE reconstruction remains unchanged.
+
+## v6.16 STRUCTURE INVALIDATION
+- Adds a flow-independent emergency thesis invalidation for research positions.
+- SCALP exits at 0.75 ATR adverse from entry.
+- CORE exits at 1.00 ATR adverse from entry.
+- MACRO exits at 1.35 ATR adverse from entry.
+- This produces X -> FLAT/WAIT only; it does NOT automatically reverse.
+- Flow EXIT and stronger SWITCH logic from v6.15 remain available before/alongside this backstop.
+- Purpose: a position can no longer remain HOLD indefinitely merely because momentary Delta/Book pressure cools after a decisive adverse price expansion.

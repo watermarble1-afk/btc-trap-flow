@@ -419,6 +419,19 @@ def manage_position_reversal():
                   (best,worst,mfe,mae,new_state,new_psince,pscore,now,engine))
         c.commit();c.close()
 
+        # STRUCTURE INVALIDATION: do not let short-lived flow cooling keep a broken
+        # position alive. This is EXIT-only; it never forces an opposite entry.
+        # Uses the position's original ATR so the rule is stable across restarts.
+        structure_exit_atr = 0.75 if engine=="SCALP" else 1.00 if engine=="CORE" else 1.35
+        if adverse >= structure_exit_atr:
+            old_signal=pos["signal_id"]
+            note=(f"STRUCTURE INVALIDATION adverse={adverse:.2f}ATR score={pscore} "
+                  f"d10={d10:.3f} d30={d30:.3f} flow={intensity:.2f} "
+                  f"oi60={oi:.4f} book={book:.3f} mfe={mfe:.1f} mae={mae:.1f}")
+            position_event("EXIT",side,last_price,old_signal,note,engine)
+            clear_position(engine,"STRUCTURE_INVALIDATION")
+            continue
+
         persisted = new_state=="PRESSURE" and new_psince and now-int(new_psince)>=min_pressure_ms
 
         # Strong reversal: EXIT old side + SWITCH to opposite side.
