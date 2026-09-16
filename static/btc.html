@@ -797,7 +797,12 @@ async function syncServer(){
         const hold=mins>=60?`${Math.floor(mins/60)}시간 ${mins%60}분`:`${mins}분`;
         const st=p.state||'HOLD', ps=Number(p.pressure_score||0);
         const stColor=st==='PRESSURE'?'#f0c84b':'#35d98a';
-        return `<div style="padding:7px 0;border-bottom:1px solid #1f2a3a"><b style="color:${col}">${tf} ${p.side}</b> · 진입 $${fmt(p.entry)} · <b style="color:${stColor}">${st}</b> ${hold}<br><span class="tiny">반대압력 ${ps.toFixed(0)} · MFE +$${fmt(Number(p.mfe||0))} · MAE -$${fmt(Number(p.mae||0))}</span></div>`;
+        const nowPx=Number(currentPrice()||live?.price||0), ent=Number(p.entry||0);
+        const pnlPct=(nowPx>0&&ent>0)?((p.side==='LONG'?(nowPx-ent):(ent-nowPx))/ent*100):0;
+        const pnlUsd=(nowPx>0&&ent>0)?(p.side==='LONG'?(nowPx-ent):(ent-nowPx)):0;
+        const pnlColor=pnlPct>0?'#35d98a':pnlPct<0?'#ff4f64':'#9aa7b8';
+        const pnlSign=pnlPct>0?'+':'';
+        return `<div style="padding:7px 0;border-bottom:1px solid #1f2a3a"><b style="color:${col}">${tf} ${p.side}</b> · 진입 $${fmt(p.entry)} · <b style="color:${stColor}">${st}</b> ${hold}<br><b style="color:${pnlColor}">현재손익 ${pnlSign}${pnlPct.toFixed(3)}% (${pnlUsd>=0?'+':'-'}$${fmt(Math.abs(pnlUsd))})</b><br><span class="tiny">반대압력 ${ps.toFixed(0)} · MFE +$${fmt(Number(p.mfe||0))} · MAE -$${fmt(Number(p.mae||0))}</span></div>`;
       }).join(''):`<span style="color:#f0c84b">현재 열린 포지션 없음</span><br><span class="tiny">포지션 종료는 반드시 X(EXIT) 이벤트가 기록되어야 합니다.</span>`;
     }
     let st=$('srvState'); if(st){st.textContent=(live?.status?.public==='live'&&live?.status?.business==='live')?'● LIVE':'● CONNECTED';st.style.color='#2fd58b'}

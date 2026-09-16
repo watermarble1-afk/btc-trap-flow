@@ -151,3 +151,10 @@ Fix:
 - Mobile exposes the full desktop-side information: structure/liquidity, order flow, current target, engine positions, trade ledger and live signal history.
 - Bottom navigation: Chart / Structure / Orders / Target / Position / Records.
 - No trading/signal-engine logic changes in this patch.
+
+## v6.21 LIVE POSITION RETURN
+- Open positions now show live unrealized return (%) and BTC price-distance ($).
+- LONG: (current-entry)/entry, SHORT: (entry-current)/entry.
+- Green positive / red negative.
+- This is underlying BTC move return, not leverage-adjusted account PnL.
+- Applied to desktop and mobile position cards. Signal/position logic unchanged.
