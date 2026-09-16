@@ -355,7 +355,7 @@ def manage_position_reversal():
     """
     if not last_price:return
     d10=flow(10000)["ratio"]; d30=flow(30000)["ratio"]
-    intensity=flow_intensity(); oi=oi_delta(60000); book=book_imbalance()
+    intensity=flow_intensity(); oi=oi_delta(60000); book=book_imb
     now=int(time.time()*1000)
     # Ensure reversal logic uses restart-safe, reconstructed MFE/MAE.
     update_position_excursions()
@@ -497,7 +497,11 @@ async def public_loop():
                         elif ch=="books5":
                             b=sum(float(x[1]) for x in d.get("bids",[]));a=sum(float(x[1]) for x in d.get("asks",[]))
                             book_imb=(b-a)/(b+a) if b+a else 0
-                    manage_position_reversal();evaluate();evaluate_scalp();update_outcomes()
+                    try:
+                        manage_position_reversal()
+                    except Exception as e:
+                        print("position_manager",repr(e))
+                    evaluate();evaluate_scalp();update_outcomes()
         except Exception as e:
             status["public"]="reconnecting";print("public",e);await asyncio.sleep(2)
 

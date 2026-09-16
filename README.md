@@ -113,3 +113,12 @@ These are experimental heuristics, not validated probabilities.
 - SWITCH remains stronger: SCALP 80/12s/0.38ATR; CORE 82/25s/0.45ATR; MACRO 85/60s/0.55ATR.
 - Strong SWITCH is evaluated first. Otherwise EXIT-only writes X and leaves engine flat/WAIT.
 - v6.13 restart-safe MFE/MAE reconstruction and v6.12 RETEST color are retained.
+
+## v6.15 PRESSURE ENGINE FIX
+- Fixed fatal position-manager bug: `book_imbalance()` did not exist.
+- Position manager now reads the same live `book_imb` value used by `/api/live` and the UI.
+- Wrapped `manage_position_reversal()` in its own exception boundary so a future position-manager error cannot force the OKX public WebSocket to reconnect.
+- v6.14 EXIT-only / SWITCH split remains unchanged:
+  - CORE EXIT: pressure >=70, >=18s, adverse >=0.28 ATR -> X and FLAT/WAIT.
+  - CORE SWITCH: pressure >=82, >=25s, adverse >=0.45 ATR -> X + opposite position.
+- Existing MFE/MAE reconstruction remains unchanged.
