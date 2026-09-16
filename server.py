@@ -368,26 +368,57 @@ def position_events(limit:int=300):
 
 @app.get("/api/stock/gaon")
 async def stock_gaon():
-    """Gaon Cable (000500.KS) daily OHLCV for the research chart."""
-    url="https://query1.finance.yahoo.com/v8/finance/chart/000500.KS"
-    params={"range":"2y","interval":"1d","events":"history","includeAdjustedClose":"true"}
+    """Gaon Cable 000500 daily OHLCV. Primary source + Yahoo fallback."""
     headers={"User-Agent":"Mozilla/5.0"}
+    errors=[]
+    # Primary: public daily-history JSON.
     try:
-        async with httpx.AsyncClient(timeout=15.0,headers=headers) as client:
-            r=await client.get(url,params=params)
-            r.raise_for_status()
-            j=r.json()
-        result=j["chart"]["result"][0]
-        q=result["indicators"]["quote"][0]
-        ts=result.get("timestamp") or []
+        url="https://aikstockdata.com/data/public/s/000500_history.json"
+        async with httpx.AsyncClient(timeout=15.0,headers=headers,follow_redirects=True) as client:
+            r=await client.get(url);r.raise_for_status();j=r.json()
+        raw=j if isinstance(j,list) else (j.get("history") or j.get("data") or j.get("prices") or [])
+        rows=[]
+        for x in raw:
+            if not isinstance(x,dict): continue
+            ds=x.get("date") or x.get("trade_date") or x.get("dt")
+            o=x.get("open") or x.get("open_price"); h=x.get("high") or x.get("high_price")
+            l=x.get("low") or x.get("low_price"); c=x.get("close") or x.get("close_price")
+            v=x.get("volume") or x.get("vol") or 0
+            if not ds or None in (o,h,l,c): continue
+            import datetime as _dt
+            if isinstance(ds,(int,float)):
+                t=int(ds/1000 if ds>10_000_000_000 else ds)
+            else:
+                ds=str(ds).replace(".","-").replace("/","-")
+                t=int(_dt.datetime.fromisoformat(ds[:10]).replace(tzinfo=_dt.timezone.utc).timestamp())
+            def num(z):
+                if isinstance(z,str): z=z.replace(",","")
+                return float(z)
+            rows.append({"time":t,"open":num(o),"high":num(h),"low":num(l),"close":num(c),"volume":num(v or 0)})
+        rows=sorted({x["time"]:x for x in rows}.values(),key=lambda x:x["time"])
+        if len(rows)>=30:
+            return {"symbol":"000500","name":"가온전선","currency":"KRW","source":"public-history","rows":rows}
+        errors.append("primary rows="+str(len(rows)))
+    except Exception as e:
+        errors.append("primary: "+str(e))
+
+    # Fallback: Yahoo chart.
+    try:
+        url="https://query1.finance.yahoo.com/v8/finance/chart/000500.KS"
+        params={"range":"2y","interval":"1d","events":"history","includeAdjustedClose":"true"}
+        async with httpx.AsyncClient(timeout=15.0,headers=headers,follow_redirects=True) as client:
+            r=await client.get(url,params=params);r.raise_for_status();j=r.json()
+        result=j["chart"]["result"][0];q=result["indicators"]["quote"][0];ts=result.get("timestamp") or []
         rows=[]
         for i,t in enumerate(ts):
-            o=q["open"][i];h=q["high"][i];l=q["low"][i];c=q["close"][i];v=q["volume"][i]
-            if None in (o,h,l,c): continue
-            rows.append({"time":int(t),"open":o,"high":h,"low":l,"close":c,"volume":v or 0})
-        return {"symbol":"000500.KS","name":"가온전선","currency":"KRW","rows":rows}
+            vals=(q["open"][i],q["high"][i],q["low"][i],q["close"][i])
+            if any(v is None for v in vals):continue
+            rows.append({"time":int(t),"open":vals[0],"high":vals[1],"low":vals[2],"close":vals[3],"volume":q["volume"][i] or 0})
+        if rows:return {"symbol":"000500.KS","name":"가온전선","currency":"KRW","source":"yahoo-fallback","rows":rows}
+        errors.append("yahoo rows=0")
     except Exception as e:
-        return {"symbol":"000500.KS","name":"가온전선","currency":"KRW","rows":[],"error":str(e)}
+        errors.append("yahoo: "+str(e))
+    return {"symbol":"000500","name":"가온전선","currency":"KRW","rows":[],"error":" | ".join(errors)}
 
 # Web terminal. Keep this mount at the end so /api/* routes take priority.
 STATIC_DIR = Path(__file__).resolve().parent / "static"

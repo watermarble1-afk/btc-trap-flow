@@ -4,7 +4,53 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BTC OKX Radar v18.1 · POSITION v3.1</title>
-<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js">
+// ---- USER INDICATORS v4.1 ----
+let userMA=[],maSeries=[],userVWAP=null;
+const INDKEY='marketTerminalIndicators:'+location.pathname;
+function indData(){
+  if(typeof cache!=='undefined' && typeof cur!=='undefined' && cache[cur]) return cache[cur];
+  return window.__stockRows||[];
+}
+function calcMA(a,n,type){
+ let out=[],ema=null,k=2/(n+1);
+ for(let i=0;i<a.length;i++){
+   let v;
+   if(type==='EMA'){ema=ema==null?a[i].close:a[i].close*k+ema*(1-k);if(i>=n-1)v=ema}
+   else if(i>=n-1){let sum=0;for(let j=i-n+1;j<=i;j++)sum+=a[j].close;v=sum/n}
+   if(v!=null)out.push({time:a[i].time,value:v});
+ } return out;
+}
+function calcUserVWAP(a){
+ let out=[],pv=0,v=0,lastDay='';
+ for(const x of a){
+   let d=new Date(x.time*1000).toISOString().slice(0,10);
+   if(d!==lastDay){pv=0;v=0;lastDay=d}
+   let q=x.volume||1;pv+=((x.high+x.low+x.close)/3)*q;v+=q;out.push({time:x.time,value:pv/v});
+ } return out;
+}
+function loadInd(){try{let x=JSON.parse(localStorage.getItem(INDKEY)||'{}');userMA=x.ma||[];$('vwapChk').checked=!!x.vwap;$('volChk').checked=x.vol!==false}catch(e){}}
+function saveInd(){localStorage.setItem(INDKEY,JSON.stringify({ma:userMA,vwap:$('vwapChk').checked,vol:$('volChk').checked}))}
+function drawInd(){
+ if(!chart||!candle)return; let a=indData(); if(!a.length)return;
+ for(const x of maSeries)try{chart.removeSeries(x)}catch(e){} maSeries=[];
+ userMA.forEach((m,i)=>{let z=chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:m.type+m.n});z.setData(calcMA(a,m.n,m.type));maSeries.push(z)});
+ if(userVWAP){try{chart.removeSeries(userVWAP)}catch(e){}userVWAP=null}
+ if($('vwapChk').checked){userVWAP=chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'VWAP'});userVWAP.setData(calcUserVWAP(a))}
+ if(typeof vol!=='undefined'&&vol)vol.applyOptions({visible:$('volChk').checked});
+ if(typeof volume!=='undefined'&&volume)volume.applyOptions({visible:$('volChk').checked});
+ $('indTags').innerHTML=userMA.map((m,i)=>`<span class="indTag" data-rm="${i}">${m.type}${m.n} ×</span>`).join('');
+ document.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{userMA.splice(+x.dataset.rm,1);saveInd();drawInd()});
+}
+function initInd(){
+ loadInd();
+ $('indBtn').onclick=()=>$('indPanel').classList.toggle('open');
+ $('addMA').onclick=()=>{let n=Math.max(2,Math.min(500,+$('maLen').value||20)),type=$('maType').value;if(!userMA.some(x=>x.n===n&&x.type===type))userMA.push({n,type});saveInd();drawInd()};
+ $('vwapChk').onchange=$('volChk').onchange=()=>{saveInd();drawInd()};
+ setTimeout(drawInd,1200);
+}
+setTimeout(initInd,300);
+</script>
 <style>
 :root{--bg:#070a10;--p:#0e1420;--line:#20293a;--txt:#e9eef7;--muted:#8d99ad;--g:#2fd58b;--r:#ff5c70;--y:#f1c75b;--b:#6da7ff;--c:#b37cff}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,sans-serif}
@@ -25,7 +71,16 @@ h1{font-size:20px;margin:0}.sub{font-size:11px;color:var(--muted);margin-top:3px
 body.embedded-btc{margin:0!important}
 body.embedded-btc header{position:relative!important}
 </style>
-</head>
+
+<style>
+.indBtn{border:1px solid #2b3850;background:#151d2b;color:#d8e1ee;padding:7px 12px;border-radius:7px;cursor:pointer;font-weight:700}
+.indPanel{display:none;position:absolute;z-index:50;top:42px;left:10px;width:330px;background:#0d1420;border:1px solid #2a3850;border-radius:10px;padding:10px;box-shadow:0 12px 30px #0008}
+.indPanel.open{display:block}.indRow{display:grid;grid-template-columns:72px 1fr 64px;gap:6px;align-items:center;margin:6px 0;font-size:11px}
+.indPanel input,.indPanel select{background:#111a28;color:#e8eef7;border:1px solid #2a3850;border-radius:6px;padding:6px;min-width:0}
+.indPanel button{background:#172338;color:#e8eef7;border:1px solid #31415c;border-radius:6px;padding:6px;cursor:pointer}
+.indTags{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}.indTag{font-size:10px;border:1px solid #31415c;border-radius:99px;padding:4px 7px;cursor:pointer}
+.chartTools{position:relative;display:flex;gap:6px;align-items:center;margin-bottom:7px}
+</style></head>
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
@@ -50,7 +105,16 @@ body.embedded-btc header{position:relative!important}
   <div class="buttons"><button data-tf="1M">1M</button><button data-tf="3M">3M</button><button data-tf="5M" class="on">5M</button><button data-tf="15M">15M</button><button data-tf="1H">1H</button><button data-tf="4H">4H</button><button data-tf="1D">1D</button></div>
   
 <div id="serverSyncBox" style="margin:8px 0;padding:9px 12px;border:1px solid #263249;border-radius:10px;background:#101622;font-size:12px"><b>24H SERVER</b> · <span id="srvState">연결 확인중…</span> · 저장 신호 <b id="srvCount">0</b> · <span id="srvLast">-</span></div>
-<div id="chart"></div>
+<div class="chartTools"><button class="indBtn" id="indBtn">⚙ 지표 설정</button>
+<div class="indPanel" id="indPanel">
+ <b style="font-size:12px">차트 지표</b>
+ <div class="indRow"><span>이평선</span><input id="maLen" type="number" min="2" max="500" value="20"><select id="maType"><option>SMA</option><option>EMA</option></select></div>
+ <button id="addMA">+ 이평선 추가</button>
+ <div class="indTags" id="indTags"></div>
+ <div style="height:1px;background:#263249;margin:10px 0"></div>
+ <div class="indRow"><span>기타</span><label><input type="checkbox" id="vwapChk"> VWAP</label><label><input type="checkbox" id="volChk" checked> 거래량</label></div>
+ <div style="font-size:9px;color:#7f8ba0;margin-top:7px">예: 5·20·60·120·240 또는 직접 숫자 입력 · 설정은 이 브라우저에 저장</div>
+</div></div><div id="chart"></div>
   <div class="legend">
     <span><b class="blue">TRAP L / LONG</b> 저점 sweep + 매도 체결 과열 + 가격 실패 + flow 반전</span>
     <span><b class="red">TRAP S / SHORT</b> 고점 sweep + 매수 체결 과열 + 가격 실패 + flow 반전</span>
@@ -635,7 +699,7 @@ function renderChart(full=true){
   volume.setData(a.map(x=>({time:x.time,value:x.volume,color:x.close>=x.open?'rgba(47,213,139,.30)':'rgba(255,92,112,.30)'})));
   vwapSeries.setData(calcVWAP(a,cur));
   $('price').textContent='$'+fmt(a.at(-1).close);renderMarkers();renderContext();
-  if(full){let i=Math.max(0,a.length-420);chart.timeScale().setVisibleRange({from:a[i].time,to:a.at(-1).time})}
+  try{drawInd()}catch(e){};if(full){let i=Math.max(0,a.length-420);chart.timeScale().setVisibleRange({from:a[i].time,to:a.at(-1).time})}
 }
 function initChart(){
   chart=LightweightCharts.createChart($('chart'),{
@@ -666,5 +730,51 @@ async function boot(){
   $('status').textContent='WebSocket 연결 중…';
 }
 boot().then(()=>{syncServer();setInterval(syncServer,5000)}).catch(e=>{$('status').textContent='오류: '+e.message});
+
+// ---- USER INDICATORS v4.1 ----
+let userMA=[],maSeries=[],userVWAP=null;
+const INDKEY='marketTerminalIndicators:'+location.pathname;
+function indData(){
+  if(typeof cache!=='undefined' && typeof cur!=='undefined' && cache[cur]) return cache[cur];
+  return window.__stockRows||[];
+}
+function calcMA(a,n,type){
+ let out=[],ema=null,k=2/(n+1);
+ for(let i=0;i<a.length;i++){
+   let v;
+   if(type==='EMA'){ema=ema==null?a[i].close:a[i].close*k+ema*(1-k);if(i>=n-1)v=ema}
+   else if(i>=n-1){let sum=0;for(let j=i-n+1;j<=i;j++)sum+=a[j].close;v=sum/n}
+   if(v!=null)out.push({time:a[i].time,value:v});
+ } return out;
+}
+function calcUserVWAP(a){
+ let out=[],pv=0,v=0,lastDay='';
+ for(const x of a){
+   let d=new Date(x.time*1000).toISOString().slice(0,10);
+   if(d!==lastDay){pv=0;v=0;lastDay=d}
+   let q=x.volume||1;pv+=((x.high+x.low+x.close)/3)*q;v+=q;out.push({time:x.time,value:pv/v});
+ } return out;
+}
+function loadInd(){try{let x=JSON.parse(localStorage.getItem(INDKEY)||'{}');userMA=x.ma||[];$('vwapChk').checked=!!x.vwap;$('volChk').checked=x.vol!==false}catch(e){}}
+function saveInd(){localStorage.setItem(INDKEY,JSON.stringify({ma:userMA,vwap:$('vwapChk').checked,vol:$('volChk').checked}))}
+function drawInd(){
+ if(!chart||!candle)return; let a=indData(); if(!a.length)return;
+ for(const x of maSeries)try{chart.removeSeries(x)}catch(e){} maSeries=[];
+ userMA.forEach((m,i)=>{let z=chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:m.type+m.n});z.setData(calcMA(a,m.n,m.type));maSeries.push(z)});
+ if(userVWAP){try{chart.removeSeries(userVWAP)}catch(e){}userVWAP=null}
+ if($('vwapChk').checked){userVWAP=chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'VWAP'});userVWAP.setData(calcUserVWAP(a))}
+ if(typeof vol!=='undefined'&&vol)vol.applyOptions({visible:$('volChk').checked});
+ if(typeof volume!=='undefined'&&volume)volume.applyOptions({visible:$('volChk').checked});
+ $('indTags').innerHTML=userMA.map((m,i)=>`<span class="indTag" data-rm="${i}">${m.type}${m.n} ×</span>`).join('');
+ document.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{userMA.splice(+x.dataset.rm,1);saveInd();drawInd()});
+}
+function initInd(){
+ loadInd();
+ $('indBtn').onclick=()=>$('indPanel').classList.toggle('open');
+ $('addMA').onclick=()=>{let n=Math.max(2,Math.min(500,+$('maLen').value||20)),type=$('maType').value;if(!userMA.some(x=>x.n===n&&x.type===type))userMA.push({n,type});saveInd();drawInd()};
+ $('vwapChk').onchange=$('volChk').onchange=()=>{saveInd();drawInd()};
+ setTimeout(drawInd,1200);
+}
+setTimeout(initInd,300);
 </script>
 </body></html>

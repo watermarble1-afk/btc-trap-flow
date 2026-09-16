@@ -1,9 +1,8 @@
-# MY MARKET TERMINAL v4 — 가온전선 주식창 v1
+# MY MARKET TERMINAL v4.2 — Gaon chart fix
 
-Added:
-- 주식 탭에 가온전선(000500) 일봉 캔들/거래량
-- 과거 LONG(파랑), SHORT(빨강), RETEST(청록), EXIT X
-- 과거 신호 목록과 현재 연구 상태
-- `/api/stock/gaon` server-side stock-data proxy
-- 주식 신호는 BTC TRAP 엔진과 별개의 1차 연구용 가격행동 로직
-- 기존 BTC 서버/DB/포지션 기능 유지
+- 가온전선 일봉 데이터: 공개 history JSON을 1순위로 사용
+- Yahoo Finance는 fallback
+- 주식 지표 설정 초기화가 chart 생성 전에 실행되던 race condition 수정
+- 데이터 실패 시 화면에 오류 원인 표시
+- BTC/주식 지표 설정 기능 유지
+- 기존 BTC DB 및 position state 유지
