@@ -69,3 +69,11 @@ These are experimental heuristics, not validated probabilities.
 - Closed actual positions determine W/L and win rate.
 - Open actual positions are shown as holdings and are excluded from win rate.
 - Ordinary signal benchmark outcomes are not the cumulative performance metric.
+
+
+## v6.9 actual position stats wiring fix
+- Fixed v6.8: the title changed but `renderForward()` was still counting historical signal benchmark WIN/LOSS.
+- Top card is now `포지션 누적 성과` and reads only `/api/position-performance`.
+- 1/3M, 5/15M, 1H/4H header stats now also use closed actual positions per engine.
+- Open positions do not count as W/L.
+- Ordinary signal benchmark statuses no longer feed displayed win rate.

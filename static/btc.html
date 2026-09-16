@@ -60,7 +60,7 @@ body.embedded-btc header{position:relative!important}
   <div class="card"><div class="lbl">FLOW 강도</div><div class="val" id="flow">WARMING</div></div>
   <div class="card"><div class="lbl">OI 변화</div><div class="val" id="oi">—</div></div>
   <div class="card"><div class="lbl">BOOK 5단계</div><div class="val" id="book">—</div></div>
-  <div class="card"><div class="lbl">포지션 누적 검증</div><div class="val" id="fwd">0W / 0L</div></div>
+  <div class="card"><div class="lbl">포지션 누적 성과</div><div class="val" id="fwd">0W / 0L</div></div>
 </div>
 
 <div class="grid">
@@ -608,6 +608,7 @@ function renderLiveState(liq,A,w10,w30,oi60,int,nearH,nearL){
     if(text==='WAIT'){$('entry').textContent='—';$('sl').textContent='—';$('tp1').textContent='—';$('tp2').textContent='—'}
   }
 }
+let positionPerf={closed:0,wins:0,losses:0,winrate:null,engines:{}};
 let engineView='AUTO';
 function allSaved(){
   let m=new Map();
@@ -616,8 +617,9 @@ function allSaved(){
   return [...m.values()].sort((a,b)=>a.ts-b.ts);
 }
 function renderForward(){
-  let z=allSaved(),w=z.filter(x=>x.status==='WIN').length,l=z.filter(x=>x.status==='LOSS').length;
-  $('fwd').textContent=w+'W / '+l+'L';
+  const p=positionPerf||{};
+  const wr=p.winrate==null?'—':Number(p.winrate).toFixed(1)+'%';
+  $('fwd').textContent=`${p.wins||0}W / ${p.losses||0}L · ${wr}`;
 }
 function renderHistory(){
   renderForward();
@@ -750,9 +752,11 @@ async function syncServer(){
       renderSignal(latestServer);
     }
     livePosition=pos||{side:'FLAT'};
-    if($('scalpStat')){let q=stats?.SCALP||{};$('scalpStat').textContent=`1/3M SCALP ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':q.winrate+'%'}`;}
-    if($('coreStat')){let q=stats?.CORE||{};$('coreStat').textContent=`5/15M TRAP ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':q.winrate+'%'}`;
-    const m=stats?.MACRO||{}; $('macroStat').textContent=`1H/4H ${m.wins||0}W/${m.losses||0}L · ${m.winrate==null?'—':m.winrate+'%'}`;}
+    positionPerf=stats||{closed:0,wins:0,losses:0,winrate:null,engines:{}};
+    const pe=positionPerf.engines||{};
+    if($('scalpStat')){let q=pe.SCALP||{};$('scalpStat').textContent=`1/3M POS ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':Number(q.winrate).toFixed(1)+'%'}`;}
+    if($('coreStat')){let q=pe.CORE||{};$('coreStat').textContent=`5/15M POS ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':Number(q.winrate).toFixed(1)+'%'}`;}
+    if($('macroStat')){let q=pe.MACRO||{};$('macroStat').textContent=`1H/4H POS ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':Number(q.winrate).toFixed(1)+'%'}`;}
 
     positionEvents=(Array.isArray(events)?events:[]).map(x=>({
       ...x,ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000)
