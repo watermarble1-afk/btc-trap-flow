@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>가온전선 · STOCK SIGNAL LAB v1</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root{--bg:#070a10;--p:#0e1420;--line:#20293a;--txt:#e9eef7;--mut:#8d99ad;--blue:#4f8cff;--red:#ff4f64;--cyan:#35d7e5;--x:#d7dee9;--y:#f1c75b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{padding:12px;max-width:1700px;margin:auto}.top{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
+h1{font-size:19px;margin:0}.sub{font-size:11px;color:var(--mut);margin-top:3px}.pill{border:1px solid var(--line);background:#111927;padding:7px 10px;border-radius:8px;font-size:11px}
+.cards{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:10px 0}.card,.panel{background:var(--p);border:1px solid var(--line);border-radius:11px}.card{padding:9px}.lbl{font-size:10px;color:var(--mut)}.val{font-weight:800;font-size:16px;margin-top:3px}
+.grid{display:grid;grid-template-columns:minmax(0,2fr) 360px;gap:10px}.panel{padding:10px}#chart{height:690px}.legend{font-size:10px;color:var(--mut);display:flex;gap:13px;flex-wrap:wrap;margin-top:6px}
+.blue{color:var(--blue)}.red{color:var(--red)}.cyan{color:var(--cyan)}.x{color:var(--x)}.yellow{color:var(--y)}
+.row{display:flex;justify-content:space-between;border-bottom:1px solid #192130;padding:7px 2px;font-size:11px}.row:last-child{border:0}
+.siglist{max-height:420px;overflow:auto}.sig{display:grid;grid-template-columns:78px 1fr 70px;gap:6px;padding:7px 2px;border-bottom:1px solid #192130;font-size:10px}.note{font-size:10px;line-height:1.6;color:var(--mut)}
+@media(max-width:850px){.cards{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}#chart{height:520px}}
+</style></head><body><div class="wrap">
+<div class="top"><div><h1>가온전선 <span class="yellow">000500</span> · STOCK SIGNAL LAB v1</h1>
+<div class="sub">1차 연구판 · 일봉 OHLCV 기반 과거 LONG / SHORT / RETEST / EXIT(X)</div></div><div class="pill" id="state">DATA LOADING…</div></div>
+<div class="cards">
+<div class="card"><div class="lbl">최근 종가</div><div class="val" id="last">—</div></div>
+<div class="card"><div class="lbl">과거 신호</div><div class="val" id="cnt">—</div></div>
+<div class="card"><div class="lbl">LONG</div><div class="val blue" id="lc">—</div></div>
+<div class="card"><div class="lbl">SHORT</div><div class="val red" id="sc">—</div></div>
+<div class="card"><div class="lbl">현재 연구 상태</div><div class="val" id="pos">FLAT</div></div>
+</div>
+<div class="grid"><section class="panel"><div id="chart"></div>
+<div class="legend"><span class="blue"><b>LONG ▲</b> 저점 유동성 sweep 후 reclaim</span><span class="red"><b>SHORT ▼</b> 고점 유동성 sweep 후 reject</span><span class="cyan"><b>RETEST</b> 돌파 후 첫 되돌림</span><span class="x"><b>X</b> 반대 변곡/추적청산</span></div>
+</section><aside>
+<div class="panel"><b style="font-size:12px">연구 로직</b><p class="note">직전 10거래일 고가/저가를 유동성 기준으로 보고, 당일 꼬리가 레벨을 넘었다가 종가가 다시 안쪽으로 들어오면 TRAP 후보로 기록합니다. 신호 후 포지션은 반대 신호 또는 ATR 기반 추적 변곡에서 X로 종료합니다. 이 v1은 과거 패턴 검증용이며 수익확률을 뜻하지 않습니다.</p></div>
+<div class="panel" style="margin-top:8px"><b style="font-size:12px">과거 신호</b><div class="siglist" id="list"></div></div>
+</aside></div></div>
+<script>
+const $=id=>document.getElementById(id), fmt=n=>Math.round(n||0).toLocaleString('ko-KR')+'원';
+let chart,candle,vol;
+function atr(a,i,n=14){if(i<1)return 0;let s=0,k=0;for(let j=Math.max(1,i-n+1);j<=i;j++){let p=a[j-1].close,x=a[j];s+=Math.max(x.high-x.low,Math.abs(x.high-p),Math.abs(x.low-p));k++}return k?s/k:0}
+function analyze(a){
+ let sig=[],pos=null,breakout=null;
+ for(let i=20;i<a.length;i++){
+   let x=a[i], prev=a.slice(i-10,i), hi=Math.max(...prev.map(z=>z.high)), lo=Math.min(...prev.map(z=>z.low)), A=atr(a,i);
+   let avgV=a.slice(i-20,i).reduce((q,z)=>q+(z.volume||0),0)/20;
+   let longTrap=x.low<lo && x.close>lo && x.close>x.low+(x.high-x.low)*.55;
+   let shortTrap=x.high>hi && x.close<hi && x.close<x.low+(x.high-x.low)*.45;
+   if(longTrap){sig.push({i,time:x.time,type:'LONG',price:x.close}); if(pos?.side==='SHORT')sig.push({i,time:x.time,type:'EXIT',side:'SHORT',price:x.close}); pos={side:'LONG',entry:x.close,best:x.close,A};}
+   else if(shortTrap){sig.push({i,time:x.time,type:'SHORT',price:x.close}); if(pos?.side==='LONG')sig.push({i,time:x.time,type:'EXIT',side:'LONG',price:x.close}); pos={side:'SHORT',entry:x.close,best:x.close,A};}
+   if(x.close>hi && x.volume>avgV*1.35)breakout={side:'LONG',level:hi,until:i+8,used:false};
+   if(x.close<lo && x.volume>avgV*1.35)breakout={side:'SHORT',level:lo,until:i+8,used:false};
+   if(breakout && i<=breakout.until && !breakout.used){
+     if(breakout.side==='LONG' && x.low<=breakout.level*1.012 && x.close>breakout.level){sig.push({i,time:x.time,type:'RETEST L',price:x.close});breakout.used=true}
+     if(breakout.side==='SHORT' && x.high>=breakout.level*.988 && x.close<breakout.level){sig.push({i,time:x.time,type:'RETEST S',price:x.close});breakout.used=true}
+   }
+   if(pos){
+     if(pos.side==='LONG'){pos.best=Math.max(pos.best,x.high);if(i>20 && pos.best-pos.entry>=.8*pos.A && pos.best-x.close>=1.15*pos.A){sig.push({i,time:x.time,type:'EXIT',side:'LONG',price:x.close});pos=null}}
+     else{pos.best=Math.min(pos.best,x.low);if(i>20 && pos.entry-pos.best>=.8*pos.A && x.close-pos.best>=1.15*pos.A){sig.push({i,time:x.time,type:'EXIT',side:'SHORT',price:x.close});pos=null}}
+   }
+ }
+ return {sig,pos};
+}
+async function init(){
+ try{
+  let j=await fetch('/api/stock/gaon',{cache:'no-store'}).then(r=>r.json()), a=j.rows||[];
+  if(!a.length)throw new Error(j.error||'no rows');
+  $('state').textContent='● DAILY DATA';$('state').style.color='#35d7e5';$('last').textContent=fmt(a.at(-1).close);
+  chart=LightweightCharts.createChart($('chart'),{layout:{background:{color:'#0a0f18'},textColor:'#8d99ad'},grid:{vertLines:{color:'#151d2a'},horzLines:{color:'#151d2a'}},rightPriceScale:{borderColor:'#253044'},timeScale:{borderColor:'#253044',timeVisible:false}});
+  candle=chart.addCandlestickSeries({upColor:'#2fd58b',downColor:'#ff5c70',borderVisible:false,wickUpColor:'#2fd58b',wickDownColor:'#ff5c70'});
+  vol=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'vol'});chart.priceScale('vol').applyOptions({scaleMargins:{top:.82,bottom:0}});
+  candle.setData(a);vol.setData(a.map(x=>({time:x.time,value:x.volume,color:x.close>=x.open?'rgba(47,213,139,.28)':'rgba(255,92,112,.28)'})));
+  let r=analyze(a), sig=r.sig;
+  let marks=sig.map(s=>({time:s.time,position:s.type==='LONG'||s.type==='RETEST L'?'belowBar':s.type==='SHORT'||s.type==='RETEST S'?'aboveBar':s.side==='LONG'?'aboveBar':'belowBar',
+    color:s.type==='LONG'?'#4f8cff':s.type==='SHORT'?'#ff4f64':s.type.startsWith('RETEST')?'#35d7e5':'#d7dee9',
+    shape:s.type==='LONG'?'arrowUp':s.type==='SHORT'?'arrowDown':s.type.startsWith('RETEST')?'circle':'circle',
+    text:s.type==='EXIT'?'X '+s.side:s.type}));
+  candle.setMarkers(marks.sort((x,y)=>x.time-y.time));chart.timeScale().fitContent();
+  $('cnt').textContent=sig.length;$('lc').textContent=sig.filter(x=>x.type==='LONG').length;$('sc').textContent=sig.filter(x=>x.type==='SHORT').length;
+  $('pos').textContent=r.pos?r.pos.side:'FLAT';$('pos').style.color=r.pos?.side==='LONG'?'#4f8cff':r.pos?.side==='SHORT'?'#ff4f64':'#e9eef7';
+  $('list').innerHTML=sig.slice().reverse().slice(0,60).map(s=>{let d=new Date(s.time*1000).toLocaleDateString('ko-KR');let c=s.type==='LONG'?'blue':s.type==='SHORT'?'red':s.type.startsWith('RETEST')?'cyan':'x';return `<div class="sig"><span>${d}</span><b class="${c}">${s.type==='EXIT'?'X '+s.side:s.type}</b><span>${fmt(s.price)}</span></div>`}).join('');
+  new ResizeObserver(()=>chart.applyOptions({width:$('chart').clientWidth})).observe($('chart'));
+ }catch(e){$('state').textContent='DATA ERROR';$('state').style.color='#ff4f64';$('list').innerHTML='<div class="note">'+e.message+'</div>'}
+}
+init();
+</script></body></html>

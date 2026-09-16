@@ -1,13 +1,9 @@
-# MY MARKET TERMINAL v3.1
+# MY MARKET TERMINAL v4 — 가온전선 주식창 v1
 
-Changes
-- LONG: blue
-- SHORT: red
-- RETEST: cyan
-- X: actual position-state EXIT marker only
-- WIN/LOSS remains only in the separate benchmark/history result column
-- Same-direction TRAP keeps/confirms the current position
-- Opposite TRAP exits and switches
-- Added reversal exit: after >=0.80 ATR favorable excursion, a >=0.45 ATR retrace plus opposite 10s/30s flow confirms EXIT
-- Existing /data database is preserved; position_state schema migrates automatically
-- btc.html cache-busted via ?v=31 for mobile/browser refresh
+Added:
+- 주식 탭에 가온전선(000500) 일봉 캔들/거래량
+- 과거 LONG(파랑), SHORT(빨강), RETEST(청록), EXIT X
+- 과거 신호 목록과 현재 연구 상태
+- `/api/stock/gaon` server-side stock-data proxy
+- 주식 신호는 BTC TRAP 엔진과 별개의 1차 연구용 가격행동 로직
+- 기존 BTC 서버/DB/포지션 기능 유지

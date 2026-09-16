@@ -365,6 +365,30 @@ def position_events(limit:int=300):
     rows=[dict(x) for x in c.execute("SELECT * FROM position_events ORDER BY ts DESC LIMIT ?",(min(limit,500),)).fetchall()]
     c.close();return rows
 
+
+@app.get("/api/stock/gaon")
+async def stock_gaon():
+    """Gaon Cable (000500.KS) daily OHLCV for the research chart."""
+    url="https://query1.finance.yahoo.com/v8/finance/chart/000500.KS"
+    params={"range":"2y","interval":"1d","events":"history","includeAdjustedClose":"true"}
+    headers={"User-Agent":"Mozilla/5.0"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0,headers=headers) as client:
+            r=await client.get(url,params=params)
+            r.raise_for_status()
+            j=r.json()
+        result=j["chart"]["result"][0]
+        q=result["indicators"]["quote"][0]
+        ts=result.get("timestamp") or []
+        rows=[]
+        for i,t in enumerate(ts):
+            o=q["open"][i];h=q["high"][i];l=q["low"][i];c=q["close"][i];v=q["volume"][i]
+            if None in (o,h,l,c): continue
+            rows.append({"time":int(t),"open":o,"high":h,"low":l,"close":c,"volume":v or 0})
+        return {"symbol":"000500.KS","name":"가온전선","currency":"KRW","rows":rows}
+    except Exception as e:
+        return {"symbol":"000500.KS","name":"가온전선","currency":"KRW","rows":[],"error":str(e)}
+
 # Web terminal. Keep this mount at the end so /api/* routes take priority.
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 if STATIC_DIR.exists():
