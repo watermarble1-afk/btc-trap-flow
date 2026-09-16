@@ -33,3 +33,18 @@ These are experimental heuristics, not validated probabilities.
 - Recovery preserves original OPEN/SWITCH timestamp and entry.
 - Entry signal logic is unchanged.
 - Benchmark WIN/LOSS still cannot close an actual position.
+
+
+## v6.6 signal / actual-position visual split
+- Entry detection logic is unchanged.
+- Ordinary SCALP / CORE / RETEST / MACRO signals remain directional research signals.
+- Ordinary live-signal rows no longer display `진입 $price`; their stored benchmark entry
+  remains in SQLite for benchmark research.
+- Actual research-position OPEN/SWITCH events get dedicated chart markers:
+  `POS L` / `POS S`.
+- Actual EXIT remains `X`.
+- Position ledger continues to show the real tracked entry/exit/hold/return.
+- Additional same-direction signals do not create a second same-engine position;
+  they remain confirmation/research observations.
+- Benchmark WIN/LOSS is still separate and never closes the actual position.
+- Position recovery from v6.5 remains enabled.
