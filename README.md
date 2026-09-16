@@ -1,21 +1,22 @@
-# v5.3 Engine Identity Everywhere
+# v5.5 1H / 4H Macro Trend Engine
 
-Color system:
-- SCALP LONG (1M/3M): green
-- CORE/TRAP LONG (5M/15M): blue
-- SCALP SHORT (1M/3M): pink
-- CORE/TRAP SHORT (5M/15M): red
-- EXIT: gray
+Adds a third independent BTC research signal engine:
 
-Chart entry markers:
-- [1/3M] SCALP L / [1/3M] SCALP S
-- [5/15M] TRAP L / [5/15M] TRAP S
-This identifies which engine/timeframe produced every entry.
+MACRO (1H/4H)
+- 4H EMA 8/21 defines broad trend regime.
+- 1H EMA 8/21 confirms trend and supplies pullback/reclaim trigger.
+- Requires 1H pullback toward fast EMA followed by close back in trend direction.
+- Uses 1H ATR to normalize distance/strength.
+- 45 minute signal cooldown.
+- Benchmark signals: MACRO L / MACRO S.
+- Separate MACRO WIN/LOSS stats.
 
-Live/history area:
-- signal records carry engine field from /api/signals
-- displayed signal names include [1/3M] or [5/15M]
-- engine benchmark labels are also explicit
+Display:
+- AUTO: 1M/3M => SCALP, 5M/15M => TRAP, 1H/4H => MACRO, higher TF => ALL.
+- Manual button: 추세 1H/4H.
+- ALL distinguishes all three engines by label, timeframe and color.
+- Live history shows [1H/4H] and entry price.
 
-Existing dual-engine collection, separate stats, AUTO/ALL, X exits, indicator colors,
-candle percentages and stock features are retained.
+Important:
+MACRO is a first research heuristic for broad-trend context, not a validated trading edge.
+Like SCALP, MACRO is benchmark-signal only. The existing actual position/X state machine remains CORE-only.

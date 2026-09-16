@@ -137,12 +137,12 @@ body.embedded-btc header{position:relative!important}
  <div style="font-size:9px;color:#7f8ba0;margin-top:7px">예: 5·20·60·120·240 또는 직접 숫자 입력 · 설정은 이 브라우저에 저장</div>
 </div></div><div id="enginePanel" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:7px;border:1px solid #263247;border-radius:8px;background:#0b111b">
 <b style="font-size:10px">SIGNAL ENGINE</b>
-<button class="btn engBtn" data-eng="AUTO">자동</button><button class="btn engBtn" data-eng="SCALP">SCALP 1M/3M</button><button class="btn engBtn" data-eng="CORE">TRAP 5M/15M</button><button class="btn engBtn" data-eng="ALL">ALL</button>
-<span id="scalpStat" style="font-size:10px;color:#8d99ad">SCALP —</span><span id="coreStat" style="font-size:10px;color:#8d99ad">5/15 —</span>
-<div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">자동 = 1M·3M에서는 SCALP 신호 / 5M·15M에서는 TRAP 신호 / 상위봉에서는 둘 다 표시</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
+<button class="btn engBtn" data-eng="AUTO">자동</button><button class="btn engBtn" data-eng="SCALP">SCALP 1M/3M</button><button class="btn engBtn" data-eng="CORE">TRAP 5M/15M</button><button class="engbtn" data-eng="MACRO">추세 1H/4H</button><button class="btn engBtn" data-eng="ALL">ALL</button>
+<span id="scalpStat" style="font-size:10px;color:#8d99ad">SCALP —</span><span id="coreStat" style="font-size:10px;color:#8d99ad">5/15 —</span><span id="macroStat" style="font-size:10px;color:#8d99ad">1H/4H —</span>
+<div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">자동 = 1M·3M SCALP / 5M·15M TRAP / 1H·4H 큰추세 / 일·주·월은 전체 표시</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
 <span style="color:#35d98a">● SCALP L</span><span style="color:#ff78b4">● SCALP S</span>
 <span style="color:#4f8cff">● TRAP L</span><span style="color:#ff4f64">● TRAP S</span>
-<span style="color:#d7dee9">● X 종료</span></div>
+<span style="color:#27c2a4">● 1H/4H L</span><span style="color:#d95bd1">● 1H/4H S</span><span style="color:#d7dee9">● X 종료</span></div>
 </div><div style="font-size:10px;color:#8d99ad;margin:3px 0">TIMEFRAME · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO</div><div class="hoverPctBar" id="hoverPctBar">봉에 마우스를 올리면 해당 봉의 등락률이 표시됩니다.</div><div id="chart"></div>
   <div class="legend">
     <span><b class="blue">TRAP L / LONG</b> 저점 sweep + 매도 체결 과열 + 가격 실패 + flow 반전</span>
@@ -652,8 +652,27 @@ function renderForward(){
 }
 function renderHistory(){
   renderForward();
-  let a=allSaved().slice(-18).reverse();
-  $('history').innerHTML=a.length?a.map(s=>`<div class="histrow"><span>${new Date(s.ts).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})}</span><b style="color:${(s.name||'').includes('RETEST')?'#35d7e5':(s.dir==='LONG'?'#4f8cff':'#ff4f64')}">${s.dir==='LONG'?'LONG':'SHORT'} · ${s.engine==='SCALP'?'[1/3M] ':'[5/15M] '}${s.name}</b><span class="${s.status==='WIN'?'green':s.status==='LOSS'?'red':'yellow'}">${s.status}</span></div>`).join(''):'<div class="tiny">아직 없음</div>';
+  const sigRows=allSaved().map(s=>({
+    kind:'SIGNAL',ts:Number(s.ts),time:s.time,dir:s.dir,engine:s.engine||'CORE',
+    name:s.name,price:Number(s.entry),status:s.status
+  }));
+  const posRows=positionEvents.filter(e=>['OPEN','EXIT','SWITCH'].includes(String(e.event||'').toUpperCase())).map(e=>({
+    kind:'POSITION',ts:Number(e.ts),time:e.time,dir:e.side,event:String(e.event||'').toUpperCase(),
+    price:Number(e.price),note:e.note||''
+  }));
+  const rows=[...sigRows,...posRows].sort((a,b)=>b.ts-a.ts).slice(0,24);
+  $('history').innerHTML=rows.length?rows.map(x=>{
+    const tm=new Date(x.ts).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
+    if(x.kind==='POSITION'){
+      const isExit=x.event==='EXIT';
+      const c=isExit?'#c7d0dd':(x.dir==='LONG'?'#4f8cff':'#ff4f64');
+      const label=isExit?'X 청산':(x.event==='SWITCH'?'SWITCH '+(x.dir==='LONG'?'L':'S'):'포지션 '+(x.dir==='LONG'?'L':'S'));
+      return `<div class="histrow"><span>${tm}</span><b style="color:${c}">${label} · $${fmt(x.price)}</b><span class="tiny">${isExit?'EXIT':x.event}</span></div>`;
+    }
+    const c=x.engine==='SCALP'?(x.dir==='LONG'?'#35d98a':'#ff78b4'):x.engine==='MACRO'?(x.dir==='LONG'?'#27c2a4':'#d95bd1'):(x.dir==='LONG'?'#4f8cff':'#ff4f64');
+    const tf=x.engine==='SCALP'?'[1/3M]':x.engine==='MACRO'?'[1H/4H]':'[5/15M]';
+    return `<div class="histrow"><span>${tm}</span><b style="color:${c}">${tf} ${x.name} · 진입 $${fmt(x.price)}</b><span class="${x.status==='WIN'?'green':x.status==='LOSS'?'red':'yellow'}">${x.status}</span></div>`;
+  }).join(''):'<div class="tiny">아직 없음</div>';
 }
 function renderMarkers(){
   let from=cache[cur]?.[0]?.time||0;
@@ -663,13 +682,13 @@ function renderMarkers(){
   let effective=engineView==='AUTO'?((cur==='1M'||cur==='3M')?'SCALP':(cur==='5M'||cur==='15M')?'CORE':'ALL'):engineView;
   for(const s of allSaved().filter(s=>s.time>=from && (effective==='ALL'||(s.engine||'CORE')===effective))){
     const isRetest=(s.name||'').includes('RETEST');
-    const color=isRetest?'#35d7e5':(s.dir==='LONG'?'#4f8cff':'#ff4f64');
+    const color=isRetest?'#35d7e5':(s.engine==='SCALP'?(s.dir==='LONG'?'#35d98a':'#ff78b4'):s.engine==='MACRO'?(s.dir==='LONG'?'#27c2a4':'#d95bd1'):(s.dir==='LONG'?'#4f8cff':'#ff4f64'));
     marks.push({
       time:s.time,
       position:s.dir==='LONG'?'belowBar':'aboveBar',
       color,
       shape:s.dir==='LONG'?'arrowUp':'arrowDown',
-      text:((s.engine==='SCALP'?'[1/3M] ':'[5/15M] ')+(s.name||((s.dir==='LONG')?'TRAP L':'TRAP S')))
+      text:((s.engine==='SCALP'?'[1/3M] ':s.engine==='MACRO'?'[1H/4H] ':'[5/15M] ')+(s.name||((s.dir==='LONG')?'TRAP L':'TRAP S'))+' · $'+fmt(s.entry))
     });
   }
 
@@ -678,14 +697,14 @@ function renderMarkers(){
     if(e.event==='EXIT'){
       marks.push({
         time:e.time, position:e.side==='LONG'?'aboveBar':'belowBar',
-        color:'#c7d0dd', shape:'circle', text:'X'
+        color:'#c7d0dd', shape:'circle', text:'X · $'+fmt(e.price)
       });
     }else if(e.event==='SWITCH'){
       marks.push({
         time:e.time, position:e.side==='LONG'?'belowBar':'aboveBar',
         color:e.side==='LONG'?'#4f8cff':'#ff4f64',
         shape:e.side==='LONG'?'arrowUp':'arrowDown',
-        text:'SWITCH '+(e.side==='LONG'?'L':'S')
+        text:'SWITCH '+(e.side==='LONG'?'L':'S')+' · $'+fmt(e.price)
       });
     }
   }
@@ -708,7 +727,8 @@ async function syncServer(){
     }));
     livePosition=pos||{side:'FLAT'};
     if($('scalpStat')){let q=stats?.SCALP||{};$('scalpStat').textContent=`1/3M SCALP ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':q.winrate+'%'}`;}
-    if($('coreStat')){let q=stats?.CORE||{};$('coreStat').textContent=`5/15M TRAP ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':q.winrate+'%'}`;}
+    if($('coreStat')){let q=stats?.CORE||{};$('coreStat').textContent=`5/15M TRAP ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':q.winrate+'%'}`;
+    const m=st.MACRO||{}; $('macroStat').textContent=`1H/4H ${m.wins||0}W/${m.losses||0}L · ${m.winrate==null?'—':m.winrate+'%'}`;}
 
     positionEvents=(Array.isArray(events)?events:[]).map(x=>({
       ...x,ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000)
@@ -717,7 +737,7 @@ async function syncServer(){
     if($('srvCount'))$('srvCount').textContent=serverSaved.length;
     if($('srvLast')){
       const ps=livePosition?.side && livePosition.side!=='FLAT'
-        ? ` · POSITION ${livePosition.side} @ $${fmt(livePosition.entry)}`
+        ? ` · POSITION ${livePosition.side} · 진입 $${fmt(livePosition.entry)}`
         : ' · POSITION FLAT';
       $('srvLast').textContent=(serverSaved.length?`최근 ${serverSaved.at(-1).name} @ $${fmt(serverSaved.at(-1).entry)} · ${serverSaved.at(-1).status}`:`BTC $${fmt(live.price)} · 아직 서버 신호 없음`)+ps;
     }
@@ -840,7 +860,7 @@ async function loadPositionExitMarkers(){
   __positionExitMarkers=a.filter(x=>String(x.event||'').toUpperCase()==='EXIT').map(x=>({
     time:Math.floor(Number(x.ts)>1e12?Number(x.ts)/1000:Number(x.ts)),
     position:String(x.side||'').toUpperCase()==='LONG'?'aboveBar':'belowBar',
-    color:'#d7dee9',shape:'circle',text:'X'
+    color:'#d7dee9',shape:'circle',text:'X · $'+fmt(Number(x.price))
   })).filter(x=>Number.isFinite(x.time));
  }catch(e){console.error('position exit markers',e)}
 }
