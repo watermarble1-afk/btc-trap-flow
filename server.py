@@ -37,6 +37,16 @@ def db():
       closed_ts INTEGER)""")
     c.execute("""CREATE TABLE IF NOT EXISTS snapshots(
       ts INTEGER PRIMARY KEY, price REAL,d10 REAL,d30 REAL,oi60 REAL,flow REAL,book REAL,oi REAL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS position_events(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, event TEXT, side TEXT,
+      price REAL, signal_id INTEGER, note TEXT)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS position_state(
+      id INTEGER PRIMARY KEY CHECK(id=1), side TEXT, entry REAL, opened_ts INTEGER,
+      signal_id INTEGER, updated_ts INTEGER)""")
+    # Lightweight schema migration for position-state tracking.
+    cols={r[1] for r in c.execute("PRAGMA table_info(position_state)").fetchall()}
+    if "best_price" not in cols:c.execute("ALTER TABLE position_state ADD COLUMN best_price REAL")
+    if "atr_open" not in cols:c.execute("ALTER TABLE position_state ADD COLUMN atr_open REAL")
     c.commit(); return c
 
 def median(xs):
@@ -92,6 +102,49 @@ def liquidity15():
     local=a[-24:]
     return H or max(x["high"] for x in local), L or min(x["low"] for x in local)
 
+def position_event(event,side,price,signal_id=None,note=""):
+    c=db()
+    c.execute("INSERT INTO position_events(ts,event,side,price,signal_id,note) VALUES(?,?,?,?,?,?)",
+              (int(time.time()*1000),event,side,price,signal_id,note))
+    c.commit();c.close()
+
+def current_position():
+    c=db();c.row_factory=sqlite3.Row
+    row=c.execute("SELECT * FROM position_state WHERE id=1").fetchone()
+    c.close()
+    return dict(row) if row else None
+
+def set_position(side,entry,signal_id):
+    now=int(time.time()*1000);A=atr5();c=db()
+    c.execute("""INSERT INTO position_state(id,side,entry,opened_ts,signal_id,updated_ts,best_price,atr_open)
+                 VALUES(1,?,?,?,?,?,?,?)
+                 ON CONFLICT(id) DO UPDATE SET side=excluded.side,entry=excluded.entry,
+                 opened_ts=excluded.opened_ts,signal_id=excluded.signal_id,updated_ts=excluded.updated_ts,
+                 best_price=excluded.best_price,atr_open=excluded.atr_open""",
+              (side,entry,now,signal_id,now,entry,A))
+    c.commit();c.close()
+
+def clear_position():
+    c=db();c.execute("DELETE FROM position_state WHERE id=1");c.commit();c.close()
+
+def apply_position_signal(side,price,signal_id):
+    """Position-state layer. Same-side TRAP confirms; opposite TRAP switches."""
+    pos=current_position()
+    if not pos:
+        set_position(side,price,signal_id)
+        position_event("OPEN",side,price,signal_id,"TRAP entry")
+        return
+    if pos["side"]==side:
+        position_event("CONFIRM",side,price,signal_id,"same-direction TRAP")
+        c=db();c.execute("UPDATE position_state SET updated_ts=? WHERE id=1",(int(time.time()*1000),))
+        c.commit();c.close()
+        return
+    old=pos["side"]
+    position_event("EXIT",old,price,signal_id,"opposite TRAP / switch")
+    clear_position()
+    set_position(side,price,signal_id)
+    position_event("SWITCH",side,price,signal_id,"opposite TRAP")
+
 def save_signal(name,side,score,level,ext,metrics):
     global last_signal_ts,trap_arm
     p=last_price; A=atr5()
@@ -99,11 +152,19 @@ def save_signal(name,side,score,level,ext,metrics):
         sl=min(ext,level-.22*A); risk=max(p-sl,.35*A); tp1=p+1.5*risk; tp2=p+2.3*risk
     else:
         sl=max(ext,level+.22*A); risk=max(sl-p,.35*A); tp1=p-1.5*risk; tp2=p-2.3*risk
-    c=db();c.execute("""INSERT INTO signals(ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flow,book,status)
+    # Reject an already-invalid signal at creation.
+    if (side=="LONG" and p<=sl) or (side=="SHORT" and p>=sl):
+        trap_arm=None
+        return
+    now=int(time.time()*1000)
+    c=db();cur=c.execute("""INSERT INTO signals(ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flow,book,status)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'OPEN')""",
-      (int(time.time()*1000),name,side,p,sl,tp1,tp2,score,metrics["d10"],metrics["d30"],
+      (now,name,side,p,sl,tp1,tp2,score,metrics["d10"],metrics["d30"],
        metrics["oi60"],metrics["flow"],metrics["book"]))
-    c.commit();c.close();last_signal_ts=int(time.time()*1000);trap_arm=None
+    signal_id=cur.lastrowid
+    c.commit();c.close()
+    apply_position_signal(side,p,signal_id)
+    last_signal_ts=now;trap_arm=None
 
 def evaluate():
     global trap_arm,prev_d10
@@ -140,11 +201,43 @@ def evaluate():
                             {"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb})
     prev_d10=w10["ratio"]
 
+def manage_position_reversal():
+    """Exit only after a meaningful favorable move and a confirmed counter-flow retrace.
+    X on chart means this state exit, not WIN/LOSS."""
+    if not last_price:return
+    pos=current_position()
+    if not pos or pos.get("side") not in ("LONG","SHORT"):return
+    A=pos.get("atr_open") or atr5()
+    best=pos.get("best_price") or pos["entry"]
+    w10=flow(10000)["ratio"]; w30=flow(30000)["ratio"]
+
+    if pos["side"]=="SHORT":
+        new_best=min(best,last_price)
+        favorable=pos["entry"]-new_best
+        retrace=last_price-new_best
+        reversal=(favorable>=0.80*A and retrace>=0.45*A and w10>=0.12 and w30>=0.04)
+    else:
+        new_best=max(best,last_price)
+        favorable=new_best-pos["entry"]
+        retrace=new_best-last_price
+        reversal=(favorable>=0.80*A and retrace>=0.45*A and w10<=-0.12 and w30<=-0.04)
+
+    if new_best!=best:
+        c=db();c.execute("UPDATE position_state SET best_price=?,updated_ts=? WHERE id=1",
+                         (new_best,int(time.time()*1000)));c.commit();c.close()
+
+    if reversal:
+        position_event("EXIT",pos["side"],last_price,pos["signal_id"],"confirmed reversal")
+        clear_position()
+
 def update_outcomes():
     if not last_price:return
-    c=db(); rows=c.execute("SELECT id,side,sl,tp1 FROM signals WHERE status='OPEN'").fetchall()
     now=int(time.time()*1000)
-    for i,side,sl,tp1 in rows:
+    c=db()
+    rows=c.execute("SELECT id,ts,side,sl,tp1 FROM signals WHERE status='OPEN'").fetchall()
+    for i,created_ts,side,sl,tp1 in rows:
+        if now<=created_ts:
+            continue
         st=None
         if side=="LONG":
             if last_price<=sl:st="LOSS"
@@ -154,6 +247,19 @@ def update_outcomes():
             elif last_price<=tp1:st="WIN"
         if st:c.execute("UPDATE signals SET status=?,closed_ts=? WHERE id=?",(st,now,i))
     c.commit();c.close()
+
+    # Position state is separate from benchmark WIN/LOSS.
+    pos=current_position()
+    if pos:
+        c=db()
+        sig=c.execute("SELECT sl FROM signals WHERE id=?",(pos["signal_id"],)).fetchone()
+        c.close()
+        if sig:
+            sl=sig[0]
+            stopped=(pos["side"]=="LONG" and last_price<=sl) or (pos["side"]=="SHORT" and last_price>=sl)
+            if stopped:
+                position_event("EXIT",pos["side"],last_price,pos["signal_id"],"invalidation")
+                clear_position()
 
 async def seed():
     async with httpx.AsyncClient(timeout=15) as h:
@@ -187,7 +293,7 @@ async def public_loop():
                         elif ch=="books5":
                             b=sum(float(x[1]) for x in d.get("bids",[]));a=sum(float(x[1]) for x in d.get("asks",[]))
                             book_imb=(b-a)/(b+a) if b+a else 0
-                    evaluate();update_outcomes()
+                    evaluate();manage_position_reversal();update_outcomes()
         except Exception as e:
             status["public"]="reconnecting";print("public",e);await asyncio.sleep(2)
 
@@ -247,6 +353,17 @@ def stats():
     rows=c.execute("SELECT status,COUNT(*) FROM signals GROUP BY status").fetchall();c.close()
     return {k:v for k,v in rows}
 
+
+
+@app.get("/api/position")
+def position():
+    return current_position() or {"side":"FLAT"}
+
+@app.get("/api/position-events")
+def position_events(limit:int=300):
+    c=db();c.row_factory=sqlite3.Row
+    rows=[dict(x) for x in c.execute("SELECT * FROM position_events ORDER BY ts DESC LIMIT ?",(min(limit,500),)).fetchall()]
+    c.close();return rows
 
 # Web terminal. Keep this mount at the end so /api/* routes take priority.
 STATIC_DIR = Path(__file__).resolve().parent / "static"

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BTC OKX Radar v18.1 · SERVER SYNC</title>
+<title>BTC OKX Radar v18.1 · POSITION v3.1</title>
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 :root{--bg:#070a10;--p:#0e1420;--line:#20293a;--txt:#e9eef7;--muted:#8d99ad;--g:#2fd58b;--r:#ff5c70;--y:#f1c75b;--b:#6da7ff;--c:#b37cff}
@@ -52,9 +52,9 @@ body.embedded-btc header{position:relative!important}
 <div id="serverSyncBox" style="margin:8px 0;padding:9px 12px;border:1px solid #263249;border-radius:10px;background:#101622;font-size:12px"><b>24H SERVER</b> · <span id="srvState">연결 확인중…</span> · 저장 신호 <b id="srvCount">0</b> · <span id="srvLast">-</span></div>
 <div id="chart"></div>
   <div class="legend">
-    <span><b class="green">TRAP L</b> 저점 sweep + 매도 체결 과열 + 가격 실패 + flow 반전</span>
-    <span><b class="red">TRAP S</b> 고점 sweep + 매수 체결 과열 + 가격 실패 + flow 반전</span>
-    <span><b class="blue">RETEST L/S</b> 진짜 돌파 뒤 첫 눌림 재개</span><span><b class="purple">VWAP</b> 선택 봉 기준 앵커 VWAP</span>
+    <span><b class="blue">TRAP L / LONG</b> 저점 sweep + 매도 체결 과열 + 가격 실패 + flow 반전</span>
+    <span><b class="red">TRAP S / SHORT</b> 고점 sweep + 매수 체결 과열 + 가격 실패 + flow 반전</span>
+    <span><b style="color:#35d7e5">RETEST</b> 청록</span><span><b style="color:#c7d0dd">X</b> 포지션 정리</span><span><b class="purple">VWAP</b> 선택 봉 기준 앵커 VWAP</span>
   </div>
   <div class="warn">
     1M·3M·5M·15M·1H·4H·1D 차트를 자유롭게 볼 수 있습니다. 신호 엔진 자체는 5M 진입 / 15M 위치 / 1H·4H 구조를 그대로 사용합니다. VWAP은 1M~4H는 UTC 일간 앵커, 1D는 월간 앵커입니다. 실제 trades / OI / books 데이터는 페이지를 연 뒤부터 쌓이며 발생한 신호만 저장합니다.
@@ -115,8 +115,10 @@ let trades=[], oiHist=[], book={imb:0,ts:0}, currentOI=null;
 let lastFlowSign=0, prevD10=0, trapArm=null, retestArm=null, liveSignal=null;
 let lastSignalAt=0, renderedMarkers=[];
 let saved=JSON.parse(localStorage.getItem('trapflow_v17_signals')||'[]');
-const SERVER_API='https://web-production-f1747.up.railway.app';
+const SERVER_API=location.origin;
 let serverSaved=[];
+let positionEvents=[];
+let livePosition={side:'FLAT'};
 
 const $=id=>document.getElementById(id);
 const fmt=x=>Number(x).toLocaleString('en-US',{maximumFractionDigits:1});
@@ -509,7 +511,7 @@ function evaluateSaved(){
 }
 function renderSignal(s){
   $('sig').textContent=s.name+' · '+s.score;
-  $('sig').className='signal '+(s.dir==='LONG'?'green':'red');
+  $('sig').style.color=(s.name||'').includes('RETEST')?'#35d7e5':(s.dir==='LONG'?'#4f8cff':'#ff4f64');
   $('entry').textContent='$'+fmt(s.entry);$('sl').textContent='$'+fmt(s.sl);$('tp1').textContent='$'+fmt(s.tp1);$('tp2').textContent='$'+fmt(s.tp2);
   $('why').innerHTML=[
     '실시간 체결 Δ10s '+(s.metrics.d10*100).toFixed(0)+'%',
@@ -517,7 +519,7 @@ function renderSignal(s){
     'OI 60s '+pct(s.metrics.oi60),
     'Flow intensity '+s.metrics.int.toFixed(2)+'×',
     'Book '+(s.metrics.book*100).toFixed(0)+'%'
-  ].map(x=>'✓ '+x).join('<br>');
+  ].map(x=>'· '+x).join('<br>');
 }
 function renderLiveState(liq,A,w10,w30,oi60,int,nearH,nearL){
   $('liqH').textContent=liq.H?'$'+fmt(liq.H):'—';$('liqL').textContent=liq.L?'$'+fmt(liq.L):'—';
@@ -557,33 +559,69 @@ function renderForward(){
 function renderHistory(){
   renderForward();
   let a=allSaved().slice(-18).reverse();
-  $('history').innerHTML=a.length?a.map(s=>`<div class="histrow"><span>${new Date(s.ts).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})}</span><b class="${s.dir==='LONG'?'green':'red'}">${s.name}</b><span class="${s.status==='WIN'?'green':s.status==='LOSS'?'red':'yellow'}">${s.status}</span></div>`).join(''):'<div class="tiny">아직 없음</div>';
+  $('history').innerHTML=a.length?a.map(s=>`<div class="histrow"><span>${new Date(s.ts).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})}</span><b style="color:${(s.name||'').includes('RETEST')?'#35d7e5':(s.dir==='LONG'?'#4f8cff':'#ff4f64')}">${s.dir==='LONG'?'LONG':'SHORT'} · ${s.name}</b><span class="${s.status==='WIN'?'green':s.status==='LOSS'?'red':'yellow'}">${s.status}</span></div>`).join(''):'<div class="tiny">아직 없음</div>';
 }
 function renderMarkers(){
   let from=cache[cur]?.[0]?.time||0;
-  let marks=allSaved().filter(s=>s.time>=from).map(s=>({
-    time:s.time,
-    position:s.dir==='LONG'?'belowBar':'aboveBar',
-    color:s.status==='WIN'?'#2fd58b':s.status==='LOSS'?'#ff5c70':(s.dir==='LONG'?'#4ee6a8':'#ff7184'),
-    shape:s.dir==='LONG'?'arrowUp':'arrowDown',
-    text:s.name+(s.status==='WIN'?' ✓':s.status==='LOSS'?' ✕':'')
-  }));
+  let marks=[];
+
+  // Signal markers: direction color never changes with WIN/LOSS.
+  for(const s of allSaved().filter(s=>s.time>=from)){
+    const isRetest=(s.name||'').includes('RETEST');
+    const color=isRetest?'#35d7e5':(s.dir==='LONG'?'#4f8cff':'#ff4f64');
+    marks.push({
+      time:s.time,
+      position:s.dir==='LONG'?'belowBar':'aboveBar',
+      color,
+      shape:s.dir==='LONG'?'arrowUp':'arrowDown',
+      text:(s.dir==='LONG'?'LONG ▲ ':'SHORT ▼ ')+s.name
+    });
+  }
+
+  // Position layer: X means position closed. It is not a LOSS mark.
+  for(const e of positionEvents.filter(e=>e.time>=from)){
+    if(e.event==='EXIT'){
+      marks.push({
+        time:e.time, position:e.side==='LONG'?'aboveBar':'belowBar',
+        color:'#c7d0dd', shape:'circle', text:'X '+e.side
+      });
+    }else if(e.event==='SWITCH'){
+      marks.push({
+        time:e.time, position:e.side==='LONG'?'belowBar':'aboveBar',
+        color:e.side==='LONG'?'#4f8cff':'#ff4f64',
+        shape:e.side==='LONG'?'arrowUp':'arrowDown',
+        text:'SWITCH '+(e.side==='LONG'?'LONG ▲':'SHORT ▼')
+      });
+    }
+  }
+  marks.sort((a,b)=>a.time-b.time);
   try{candle.setMarkers(marks)}catch(e){}
 }
 async function syncServer(){
   try{
-    const [live,sigs]=await Promise.all([
+    const [live,sigs,pos,events]=await Promise.all([
       fetch(SERVER_API+'/api/live',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/signals?limit=300',{cache:'no-store'}).then(r=>r.json())
+      fetch(SERVER_API+'/api/signals?limit=300',{cache:'no-store'}).then(r=>r.json()),
+      fetch(SERVER_API+'/api/position',{cache:'no-store'}).then(r=>r.json()),
+      fetch(SERVER_API+'/api/position-events?limit=300',{cache:'no-store'}).then(r=>r.json())
     ]);
     serverSaved=(Array.isArray(sigs)?sigs:[]).map(x=>({
       id:'srv_'+x.id,name:x.name,dir:x.side,score:x.score,entry:x.entry,sl:x.sl,tp1:x.tp1,tp2:x.tp2,
       ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000),status:x.status,closed:x.closed_ts,
       metrics:{d10:x.d10,d30:x.d30,oi60:x.oi60,int:x.flow,book:x.book},source:'SERVER'
     }));
+    livePosition=pos||{side:'FLAT'};
+    positionEvents=(Array.isArray(events)?events:[]).map(x=>({
+      ...x,ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000)
+    }));
     let st=$('srvState'); if(st){st.textContent=(live?.status?.public==='live'&&live?.status?.business==='live')?'● LIVE':'● CONNECTED';st.style.color='#2fd58b'}
     if($('srvCount'))$('srvCount').textContent=serverSaved.length;
-    if($('srvLast'))$('srvLast').textContent=serverSaved.length?`최근 ${serverSaved.at(-1).name} @ $${fmt(serverSaved.at(-1).entry)} · ${serverSaved.at(-1).status}`:`BTC $${fmt(live.price)} · 아직 서버 신호 없음`;
+    if($('srvLast')){
+      const ps=livePosition?.side && livePosition.side!=='FLAT'
+        ? ` · POSITION ${livePosition.side} @ $${fmt(livePosition.entry)}`
+        : ' · POSITION FLAT';
+      $('srvLast').textContent=(serverSaved.length?`최근 ${serverSaved.at(-1).name} @ $${fmt(serverSaved.at(-1).entry)} · ${serverSaved.at(-1).status}`:`BTC $${fmt(live.price)} · 아직 서버 신호 없음`)+ps;
+    }
     renderHistory();renderMarkers();
   }catch(e){let st=$('srvState');if(st){st.textContent='● OFFLINE';st.style.color='#ff5c70'}}
 }
