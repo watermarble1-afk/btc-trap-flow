@@ -59,7 +59,7 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v19 · MOBILE FULL</h1>
+    <h1>BTC OKX RADAR v6.27 · MOBILE FINAL</h1>
     <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 신호 엔진은 1M/3M SCALP만 묶고 5M · 15M · 1H · 4H는 완전 독립</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
@@ -623,7 +623,17 @@ function renderLiveState(liq,A,w10,w30,oi60,int,nearH,nearL){
 }
 function engLabel(e){e=e||'5M';return e==='SCALP'?'1/3M':e;}
 function engBracket(e){return '['+engLabel(e)+']';}
-function engColor(e,side){if(e==='SCALP')return side==='LONG'?'#35d98a':'#ff78b4';if(e==='5M')return side==='LONG'?'#4f8cff':'#ff4f64';if(e==='15M')return side==='LONG'?'#48a9ff':'#ff6b6b';if(e==='1H')return side==='LONG'?'#27c2a4':'#d95bd1';return side==='LONG'?'#19d3c5':'#c86cff';}
+function engColor(e,side){
+  // v6.27: every engine gets its own unmistakable palette; shape still conveys L/S.
+  const c={
+    SCALP:{LONG:'#35d98a',SHORT:'#ff78b4'},
+    '5M':{LONG:'#4f8cff',SHORT:'#ff4f64'},
+    '15M':{LONG:'#00c8ff',SHORT:'#ff8a3d'},
+    '1H':{LONG:'#20d6b5',SHORT:'#f2c94c'},
+    '4H':{LONG:'#b56cff',SHORT:'#e95cff'}
+  };
+  return (c[e]||c['5M'])[side==='SHORT'?'SHORT':'LONG'];
+}
 let positionPerf={closed:0,wins:0,losses:0,winrate:null,engines:{}};
 let engineView='ALL';
 function allSaved(){
@@ -787,11 +797,14 @@ function renderTradeLedger(){
       <td style="color:${pct==null?'#f0c84b':pct>=0?'#35d98a':'#ff5c70'}">${pct==null?(bad?'AUDIT':'OPEN'):(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td></tr>`;
   }).join('');
 }
+let syncServerBusy=false;
 async function syncServer(){
+  if(syncServerBusy) return;
+  syncServerBusy=true;
   try{
     const [live,sigs,pos,events,stats,positions]=await Promise.all([
       fetch(SERVER_API+'/api/live',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/signals?limit=300',{cache:'no-store'}).then(r=>r.json()),
+      fetch(SERVER_API+'/api/signals?limit=1000',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/position',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/position-events?limit=1000',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/position-performance',{cache:'no-store'}).then(r=>r.json()),
@@ -844,7 +857,8 @@ async function syncServer(){
       $('srvLast').textContent=(serverSaved.length?`최근 ${serverSaved.at(-1).name} @ $${fmt(serverSaved.at(-1).entry)} · `:`BTC $${fmt(live.price)} · 아직 서버 신호 없음`)+ps;
     }
     renderHistory();renderMarkers();
-  }catch(e){let st=$('srvState');if(st){st.textContent='● OFFLINE';st.style.color='#ff5c70'}}
+  }catch(e){let st=$('srvState');if(st){st.textContent='● 연결 재시도';st.style.color='#f1c75b'}}
+  finally{syncServerBusy=false;}
 }
 function refreshLivePositionReturns(){
   const nowPx=Number(currentPrice()||live?.price||0);
@@ -918,7 +932,7 @@ async function boot(){
   renderChart(true);updateDailyMove();detectBreakoutForRetest();connectBusiness();connectPublic();
   $('status').textContent='WebSocket 연결 중…';
 }
-boot().then(()=>{syncServer();setInterval(syncServer,5000)}).catch(e=>{$('status').textContent='오류: '+e.message});
+boot().then(()=>{syncServer();setInterval(syncServer,10000)}).catch(e=>{$('status').textContent='오류: '+e.message});
 
 // ---- USER INDICATORS v4.1 ----
 let userMA=[],maSeries=[],userVWAP=null;

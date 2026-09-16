@@ -24,7 +24,7 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
 <nav><button class="tab on" data-p="btc">BTC</button><button class="tab" data-p="stocks">주식</button><button class="tab" data-p="news">NEWS</button><button class="tab" data-p="lab">SIGNAL LAB</button><a class="tab" href="/mobile" style="text-decoration:none">모바일</a></nav>
 <div class="status">BTC SERVER <span id="srv" class="live">● CHECK</span></div></header>
 <main>
-<section id="btc" class="page on"><iframe src="btc.html?v=618"></iframe></section>
+<section id="btc" class="page on"><iframe src="btc.html?v=627"></iframe></section>
 <section id="stocks" class="page"><iframe src="stock.html?v=64"></iframe></section>
 <section id="news" class="page">
  <div class="newsbar">
@@ -97,22 +97,22 @@ async function loadRSS(){
  const seen=new Set(); NEWS=all.sort((a,b)=>b.ts-a.ts).filter(x=>!seen.has(x.title)&&(seen.add(x.title),true)).slice(0,40);
  if(!NEWS.length)feed.innerHTML='<div class="note">브라우저에서 뉴스 피드 연결이 막혔음. 다음 단계에서 Railway 서버 뉴스 수집기로 옮기면 24시간 안정적으로 받을 수 있다.</div>'; else renderNews();
 }
-let LABSIG=[], LABPOS=[], LF='ALL';
+let LABSIG=[], LABPOS=[], LF='ALL', LABSYNC=false;
 function fmtN(v){return Number(v||0).toLocaleString('en-US',{maximumFractionDigits:1})}
-function eng(e){return e==='SCALP'?'1/3M':e==='MACRO'?'1H/4H':'5/15M'}
+function eng(e){return e==='SCALP'?'1/3M':(e||'5M')}
 function buildPositions(ev){
- const rows=[];let o=null;
+ const rows=[], open={};
  [...ev].sort((a,b)=>Number(a.ts)-Number(b.ts)).forEach(e=>{
-  const t=String(e.event||'').toUpperCase();
-  if(t==='OPEN'){o={ts:+e.ts,engine:e.engine||'CORE',side:e.side,entry:+e.price}}
-  else if(t==='SWITCH'){if(o)rows.push({...o,exit:+e.price,exitTs:+e.ts,status:'SWITCH'});o={ts:+e.ts,engine:e.engine||'CORE',side:e.side,entry:+e.price}}
-  else if(t==='EXIT'&&o){rows.push({...o,exit:+e.price,exitTs:+e.ts,status:'EXIT'});o=null}
+  const t=String(e.event||'').toUpperCase(), engine=e.engine||'5M';
+  if(t==='OPEN'){ if(open[engine]) rows.push({...open[engine],status:'AUDIT DUP OPEN'}); open[engine]={ts:+e.ts,engine,side:e.side,entry:+e.price}; }
+  else if(t==='EXIT'){ if(open[engine]){rows.push({...open[engine],exit:+e.price,exitTs:+e.ts,status:'EXIT'});delete open[engine];} }
+  else if(t==='SWITCH'){ if(open[engine]) rows.push({...open[engine],exit:+e.price,exitTs:+e.ts,status:'SWITCH'}); open[engine]={ts:+e.ts,engine,side:e.side,entry:+e.price}; }
  });
- if(o)rows.push({...o,status:'OPEN'});
- return rows.reverse();
+ Object.values(open).forEach(o=>rows.push({...o,status:'OPEN'}));
+ return rows.sort((a,b)=>b.ts-a.ts);
 }
 function match(r){
- if(LF==='ALL')return true;if(['CORE','SCALP','MACRO'].includes(LF))return (r.engine||'CORE')===LF;
+ if(LF==='ALL')return true;if(['SCALP','5M','15M','1H','4H'].includes(LF))return (r.engine||'5M')===LF;
  return r.side===LF;
 }
 function renderLab(){
@@ -124,10 +124,11 @@ function renderLab(){
   return `<tr><td>${new Date(r.ts).toLocaleString('ko-KR')}</td><td>${eng(r.engine)}</td><td class="${r.side==='LONG'?'pos':'neg'}">${r.side}</td><td>$${fmtN(r.entry)}</td><td>${r.exit?'$'+fmtN(r.exit):'—'}</td><td>${r.exitTs?new Date(r.exitTs).toLocaleString('ko-KR'):'—'}</td><td>${hold}</td><td class="${pct==null?'':pct>=0?'pos':'neg'}">${pct==null?'—':(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td><td>${r.status}</td></tr>`
  }).join(''):'<tr><td colspan="9">해당 포지션 기록 없음</td></tr>';
  const sig=LABSIG.filter(match);
- signalsBody.innerHTML=sig.length?sig.map(x=>`<tr><td>${new Date(+x.ts).toLocaleString('ko-KR')}</td><td>${eng(x.engine||'CORE')}</td><td class="${x.side==='LONG'?'pos':'neg'}">${x.side||'—'}</td><td>${x.name}</td><td>$${fmtN(x.entry)}</td><td>$${fmtN(x.sl)}</td><td>$${fmtN(x.tp1)}</td><td>$${fmtN(x.tp2)}</td><td>${x.score??'—'}</td><td class="${x.status==='WIN'?'pos':x.status==='LOSS'?'neg':''}">${x.status}</td></tr>`).join(''):'<tr><td colspan="10">해당 신호 기록 없음</td></tr>';
+ signalsBody.innerHTML=sig.length?sig.map(x=>`<tr><td>${new Date(+x.ts).toLocaleString('ko-KR')}</td><td>${eng(x.engine||'5M')}</td><td class="${x.side==='LONG'?'pos':'neg'}">${x.side||'—'}</td><td>${x.name}</td><td>$${fmtN(x.entry)}</td><td>$${fmtN(x.sl)}</td><td>$${fmtN(x.tp1)}</td><td>$${fmtN(x.tp2)}</td><td>${x.score??'—'}</td><td class="${x.status==='WIN'?'pos':x.status==='LOSS'?'neg':''}">${x.status}</td></tr>`).join(''):'<tr><td colspan="10">해당 신호 기록 없음</td></tr>';
 }
 document.querySelectorAll('[data-lf]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-lf]').forEach(x=>x.classList.remove('on'));b.classList.add('on');LF=b.dataset.lf;renderLab()});
 async function syncServer(){
+ if(LABSYNC)return; LABSYNC=true;
  try{
   const [live,sigs,events]=await Promise.all([
    fetch(API+'/api/live',{cache:'no-store'}).then(r=>r.json()),
@@ -138,7 +139,7 @@ async function syncServer(){
   LABSIG=Array.isArray(sigs)?sigs:[];LABPOS=buildPositions(Array.isArray(events)?events:[]);
   tot.textContent=LABSIG.length;win.textContent=LABSIG.filter(x=>x.status==='WIN').length;loss.textContent=LABSIG.filter(x=>x.status==='LOSS').length;open.textContent=LABSIG.filter(x=>x.status==='OPEN').length;
   renderLab();
- }catch(e){srv.textContent='● OFFLINE';srv.style.color='var(--r)'}
+ }catch(e){srv.textContent='● RETRY';srv.style.color='#f1c75b'} finally{LABSYNC=false}
 }
-refresh.onclick=loadRSS; loadRSS();syncServer();setInterval(syncServer,5000);setInterval(loadRSS,300000);
+refresh.onclick=loadRSS; loadRSS();syncServer();setInterval(syncServer,10000);setInterval(loadRSS,300000);
 </script></body></html>

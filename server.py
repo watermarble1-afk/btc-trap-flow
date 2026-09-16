@@ -1,4 +1,4 @@
-import asyncio, json, os, sqlite3, time
+import asyncio, json, os, sqlite3, time, re
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,9 +38,13 @@ tf_prev_d10={e:0.0 for e in ("5M","15M","1H","4H")}
 tf_last_signal_ts={e:0 for e in ("5M","15M","1H","4H")}
 scalp_prev_d10=0.0
 status={"public":"starting","business":"starting","started":int(time.time()*1000)}
+# v6.27: throttle CPU/SQLite-heavy research work so high-rate trade WS cannot starve HTTP.
+last_heavy_ms={"excursion":0,"manager":0,"evaluate":0,"outcomes":0}
 
 def db():
-    c=sqlite3.connect(DB)
+    c=sqlite3.connect(DB, timeout=5.0)
+    c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA busy_timeout=5000")
     c.execute("""CREATE TABLE IF NOT EXISTS signals(
       id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, name TEXT, side TEXT,
       entry REAL, sl REAL, tp1 REAL, tp2 REAL, score REAL,
@@ -651,17 +655,28 @@ async def public_loop():
                         if ch=="trades":
                             px=float(d["px"]); sz=float(d["sz"]); ts=int(d["ts"]);last_price=px
                             trades.append({"px":px,"ts":ts,"side":d["side"],"notional":px*sz})
-                            update_position_excursions()
                         elif ch=="open-interest":
                             current_oi=float(d["oi"]);oi_hist.append({"ts":int(d["ts"]),"oi":current_oi})
                         elif ch=="books5":
                             b=sum(float(x[1]) for x in d.get("bids",[]));a=sum(float(x[1]) for x in d.get("asks",[]))
                             book_imb=(b-a)/(b+a) if b+a else 0
-                    try:
-                        manage_position_reversal()
-                    except Exception as e:
-                        print("position_manager",repr(e))
-                    evaluate();evaluate_scalp();evaluate_macro();evaluate_ma_context();update_outcomes()
+                    # High-rate OKX trades can arrive many times per second. The research engine
+                    # used to run SQLite-heavy work on every WS packet, starving FastAPI and
+                    # producing long requests/499s. Keep market ingestion hot, throttle heavy work.
+                    now_ms=int(time.time()*1000)
+                    if now_ms-last_heavy_ms["excursion"]>=500:
+                        update_position_excursions(); last_heavy_ms["excursion"]=now_ms
+                    if now_ms-last_heavy_ms["manager"]>=500:
+                        try:
+                            manage_position_reversal()
+                        except Exception as e:
+                            print("position_manager",repr(e))
+                        last_heavy_ms["manager"]=now_ms
+                    if now_ms-last_heavy_ms["evaluate"]>=350:
+                        evaluate();evaluate_scalp();evaluate_macro();evaluate_ma_context()
+                        last_heavy_ms["evaluate"]=now_ms
+                    if now_ms-last_heavy_ms["outcomes"]>=1000:
+                        update_outcomes(); last_heavy_ms["outcomes"]=now_ms
         except Exception as e:
             status["public"]="reconnecting";print("public",e);await asyncio.sleep(2)
 
