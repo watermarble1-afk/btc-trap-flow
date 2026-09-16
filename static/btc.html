@@ -134,7 +134,7 @@ body.embedded-btc header{position:relative!important}
   </div>
 
   <div class="box">
-<h3>엔진별 현재 포지션 <span class="tiny">TP 없음 · FLOW 변곡까지 HOLD</span></h3>
+<h3>엔진별 현재 포지션 <span class="tiny">HOLD ↔ PRESSURE → X / SWITCH</span></h3>
 <div id="enginePositions" class="tiny">불러오는 중…</div>
 </div>
 
@@ -151,7 +151,7 @@ body.embedded-btc header{position:relative!important}
   </div>
 
   <div class="box">
-    <h3>라이브 신호 기록 <span class="tiny">WIN/LOSS = 고정 TP/SL 벤치마크 · 실제 포지션 종료는 X</span> <span style="font-size:8px;font-weight:400"><span style="color:#35d98a">●1/3 L</span> <span style="color:#4f8cff">●5/15 L</span> <span style="color:#ff78b4">●1/3 S</span> <span style="color:#ff4f64">●5/15 S</span></span></h3>
+    <h3>라이브 신호 기록 <span class="tiny">WIN/LOSS = 신호 벤치마크만 · 포지션은 X(EXIT) 없이는 종료되지 않음</span> <span style="font-size:8px;font-weight:400"><span style="color:#35d98a">●1/3 L</span> <span style="color:#4f8cff">●5/15 L</span> <span style="color:#ff78b4">●1/3 S</span> <span style="color:#ff4f64">●5/15 S</span></span></h3>
     <div class="history" id="history"><div class="tiny">아직 없음</div></div>
   </div>
 </aside>
@@ -547,10 +547,14 @@ function emitSignal(name,dir,score,level,ext,A,m){
     tp1=p-1.5*risk;
     tp2=liq.L&&liq.L<p-0.7*risk?liq.L:p-2.3*risk;
   }
-  let sig={id:Date.now()+'_'+name,name,dir,score,entry:p,sl,tp1,tp2,ts:Date.now(),time:Math.floor(Date.now()/1000),status:'OPEN',
+  let sig={id:Date.now()+'_'+name,name,dir,engine:'CORE',score,entry:p,sl,tp1,tp2,ts:Date.now(),time:Math.floor(Date.now()/1000),status:'OPEN',
     metrics:{d10:m.w10.ratio,d30:m.w30.ratio,oi60:m.oi60,int:m.int,book:m.book}};
   saved.push(sig);saved=saved.slice(-120);persist();lastSignalAt=Date.now();liveSignal=sig;trapArm=null;retestArm=null;
   renderedMarkers.push(sig);renderMarkers();renderSignal(sig);renderHistory();
+  // Server is authoritative after this point: refresh must not erase this signal.
+  fetch(SERVER_API+'/api/signals/record',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:sig.name,side:sig.dir,engine:sig.engine,score:sig.score,entry:sig.entry,sl:sig.sl,tp1:sig.tp1,tp2:sig.tp2,ts:sig.ts,metrics:sig.metrics})
+  }).then(r=>r.json()).then(()=>syncServer()).catch(()=>{});
 }
 function persist(){localStorage.setItem('trapflow_v17_signals',JSON.stringify(saved))}
 function evaluateSaved(){
@@ -583,7 +587,7 @@ function renderLiveState(liq,A,w10,w30,oi60,int,nearH,nearL){
   $('liqH').textContent=liq.H?'$'+fmt(liq.H):'—';$('liqL').textContent=liq.L?'$'+fmt(liq.L):'—';
   let d=Math.min(nearH,nearL);$('liqDist').textContent=isFinite(d)?d.toFixed(2)+' ATR':'—';
 
-  if(!liveSignal||Date.now()-liveSignal.ts>5*60*1000){
+  if(!liveSignal||Date.now()-liveSignal.ts>15*60*1000){
     let text='WAIT',why=[];
     if(trapArm){
       text=trapArm.dir==='L'?'ARMED · TRAP LONG':'ARMED · TRAP SHORT';
@@ -664,7 +668,7 @@ function renderMarkers(){
     if(e.event==='EXIT'){
       marks.push({
         time:e.time, position:e.side==='LONG'?'aboveBar':'belowBar',
-        color:'#c7d0dd', shape:'circle', text:'X'
+        color:'#c7d0dd', shape:'circle', text:(String(e.event).toUpperCase()==='SWITCH'?(e.side==='LONG'?'SW L':'SW S'):'X')
       });
     }else if(e.event==='SWITCH'){
       marks.push({
@@ -727,18 +731,24 @@ function renderTradeLedger(){
 
 async function syncServer(){
   try{
-    const [live,sigs,pos,events,stats]=await Promise.all([
+    const [live,sigs,pos,events,stats,positions]=await Promise.all([
       fetch(SERVER_API+'/api/live',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/signals?limit=300',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/position',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/position-events?limit=300',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/stats',{cache:'no-store'}).then(r=>r.json())
+      fetch(SERVER_API+'/api/position-events?limit=1000',{cache:'no-store'}).then(r=>r.json()),
+      fetch(SERVER_API+'/api/stats',{cache:'no-store'}).then(r=>r.json()),
+      fetch(SERVER_API+'/api/positions',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[])
     ]);
     serverSaved=(Array.isArray(sigs)?sigs:[]).map(x=>({
       id:'srv_'+x.id,name:x.name,dir:x.side,score:x.score,entry:x.entry,sl:x.sl,tp1:x.tp1,tp2:x.tp2,
       ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000),status:x.status,closed:x.closed_ts,
       metrics:{d10:x.d10,d30:x.d30,oi60:x.oi60,int:x.flow,book:x.book},source:'SERVER',engine:x.engine||'CORE'
     }));
+    const latestServer=[...serverSaved].sort((a,b)=>b.ts-a.ts)[0];
+    if(latestServer && Date.now()-latestServer.ts<15*60*1000){
+      liveSignal=latestServer;
+      renderSignal(latestServer);
+    }
     livePosition=pos||{side:'FLAT'};
     if($('scalpStat')){let q=stats?.SCALP||{};$('scalpStat').textContent=`1/3M SCALP ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':q.winrate+'%'}`;}
     if($('coreStat')){let q=stats?.CORE||{};$('coreStat').textContent=`5/15M TRAP ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':q.winrate+'%'}`;
@@ -747,6 +757,19 @@ async function syncServer(){
     positionEvents=(Array.isArray(events)?events:[]).map(x=>({
       ...x,ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000)
     }));
+    const ep=$('enginePositions');
+    if(ep){
+      const ps=Array.isArray(positions)?positions:[];
+      ep.innerHTML=ps.length?ps.map(p=>{
+        const tf=p.engine==='SCALP'?'1/3M':p.engine==='MACRO'?'1H/4H':'5/15M';
+        const col=p.side==='LONG'?(p.engine==='SCALP'?'#35d98a':p.engine==='MACRO'?'#27c2a4':'#4f8cff'):(p.engine==='SCALP'?'#ff78b4':p.engine==='MACRO'?'#d95bd1':'#ff4f64');
+        const mins=Math.max(0,Math.floor((Date.now()-Number(p.opened_ts))/60000));
+        const hold=mins>=60?`${Math.floor(mins/60)}시간 ${mins%60}분`:`${mins}분`;
+        const st=p.state||'HOLD', ps=Number(p.pressure_score||0);
+        const stColor=st==='PRESSURE'?'#f0c84b':'#35d98a';
+        return `<div style="padding:7px 0;border-bottom:1px solid #1f2a3a"><b style="color:${col}">${tf} ${p.side}</b> · 진입 $${fmt(p.entry)} · <b style="color:${stColor}">${st}</b> ${hold}<br><span class="tiny">반대압력 ${ps.toFixed(0)} · MFE +$${fmt(Number(p.mfe||0))} · MAE -$${fmt(Number(p.mae||0))}</span></div>`;
+      }).join(''):`<span style="color:#f0c84b">현재 열린 포지션 없음</span><br><span class="tiny">포지션 종료는 반드시 X(EXIT) 이벤트가 기록되어야 합니다.</span>`;
+    }
     let st=$('srvState'); if(st){st.textContent=(live?.status?.public==='live'&&live?.status?.business==='live')?'● LIVE':'● CONNECTED';st.style.color='#2fd58b'}
     if($('srvCount'))$('srvCount').textContent=serverSaved.length;
     if($('srvLast')){

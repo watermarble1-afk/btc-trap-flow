@@ -3,7 +3,7 @@ from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 import httpx, websockets
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -57,6 +57,9 @@ def db():
     if "worst_price" not in epcols:c.execute("ALTER TABLE engine_positions ADD COLUMN worst_price REAL")
     if "mfe" not in epcols:c.execute("ALTER TABLE engine_positions ADD COLUMN mfe REAL DEFAULT 0")
     if "mae" not in epcols:c.execute("ALTER TABLE engine_positions ADD COLUMN mae REAL DEFAULT 0")
+    if "state" not in epcols:c.execute("ALTER TABLE engine_positions ADD COLUMN state TEXT DEFAULT 'HOLD'")
+    if "pressure_since" not in epcols:c.execute("ALTER TABLE engine_positions ADD COLUMN pressure_since INTEGER")
+    if "pressure_score" not in epcols:c.execute("ALTER TABLE engine_positions ADD COLUMN pressure_score REAL DEFAULT 0")
     evcols={r[1] for r in c.execute("PRAGMA table_info(position_events)").fetchall()}
     if "engine" not in evcols:c.execute("ALTER TABLE position_events ADD COLUMN engine TEXT DEFAULT 'CORE'")
     c.execute("UPDATE position_events SET engine='CORE' WHERE engine IS NULL OR engine=''")
@@ -149,8 +152,18 @@ def current_position(engine="CORE"):
 
 def all_positions():
     c=db();c.row_factory=sqlite3.Row
-    rows=c.execute("SELECT * FROM engine_positions ORDER BY opened_ts").fetchall();c.close()
-    return [dict(x) for x in rows]
+    rows=c.execute("SELECT * FROM engine_positions ORDER BY opened_ts").fetchall()
+    out=[dict(x) for x in rows]
+    # Backward compatibility: if an old CORE position exists only in legacy table,
+    # expose it instead of making the UI look empty.
+    if not any(x.get("engine")=="CORE" for x in out):
+        legacy=c.execute("SELECT * FROM position_state WHERE id=1").fetchone()
+        if legacy and legacy["side"]:
+            d=dict(legacy);d["engine"]="CORE";d.setdefault("best_price",d.get("entry"))
+            d.setdefault("worst_price",d.get("entry"));d.setdefault("mfe",0);d.setdefault("mae",0)
+            out.append(d)
+    c.close()
+    return out
 
 def set_position(engine,side,entry,signal_id,atr_value=None):
     now=int(time.time()*1000);A=atr_value or (atr_tf("1M",30) if engine=="SCALP" else atr_tf("1H",24) if engine=="MACRO" else atr5())
@@ -160,11 +173,15 @@ def set_position(engine,side,entry,signal_id,atr_value=None):
                  ON CONFLICT(engine) DO UPDATE SET side=excluded.side,entry=excluded.entry,
                  opened_ts=excluded.opened_ts,signal_id=excluded.signal_id,updated_ts=excluded.updated_ts,
                  best_price=excluded.best_price,atr_open=excluded.atr_open,worst_price=excluded.worst_price,
-                 mfe=0,mae=0""",
+                 mfe=0,mae=0,state='HOLD',pressure_since=NULL,pressure_score=0""",
               (engine,side,entry,now,signal_id,now,entry,A,entry,0,0))
     c.commit();c.close()
 
-def clear_position(engine):
+def clear_position(engine, reason=None):
+    # Safety invariant: a live research position may never disappear silently.
+    # Every deletion must have an explicit close reason supplied by EXIT/SWITCH logic.
+    if not reason:
+        raise RuntimeError(f"Refusing silent position delete: {engine}")
     c=db();c.execute("DELETE FROM engine_positions WHERE engine=?",(engine,));c.commit();c.close()
 
 def apply_position_signal(engine,side,price,signal_id,atr_value=None):
@@ -181,7 +198,7 @@ def apply_position_signal(engine,side,price,signal_id,atr_value=None):
         return
     # Only an opposite signal from THE SAME engine can switch this engine.
     position_event("EXIT",pos["side"],price,signal_id,"same-engine opposite signal / switch",engine)
-    clear_position(engine)
+    clear_position(engine,"SWITCH")
     set_position(engine,side,price,signal_id,atr_value)
     position_event("SWITCH",side,price,signal_id,"same-engine opposite signal",engine)
 
@@ -282,10 +299,11 @@ def evaluate_scalp():
     scalp_prev_d10=w10["ratio"]
 
 def manage_position_reversal():
-    """TP-less research position manager.
-    Positions survive ordinary adverse movement. We continuously record MFE/MAE.
-    EXIT requires evidence that a move had developed and order-flow/price behavior
-    has materially reversed. Each engine is independent.
+    """Research position state machine:
+    OPEN/HOLD <-> PRESSURE -> EXIT or SWITCH.
+    Price moving against entry alone never closes a position.
+    Decisions combine 10s/30s aggressive flow, intensity, OI/book context,
+    and price acceptance/retrace. Engines remain independent.
     """
     if not last_price:return
     d10=flow(10000)["ratio"]; d30=flow(30000)["ratio"]
@@ -294,55 +312,75 @@ def manage_position_reversal():
 
     for pos in all_positions():
         engine=pos["engine"]; side=pos["side"]; entry=float(pos["entry"])
-        A=float(pos.get("atr_open") or 1.0)
-        best=float(pos.get("best_price") or entry)
-        worst=float(pos.get("worst_price") or entry)
+        A=max(float(pos.get("atr_open") or 1.0),1e-9)
+        best=float(pos.get("best_price") or entry); worst=float(pos.get("worst_price") or entry)
+        old_state=pos.get("state") or "HOLD"; psince=pos.get("pressure_since")
 
         if side=="LONG":
             best=max(best,last_price); worst=min(worst,last_price)
-            mfe=max(0.0,best-entry); mae=max(0.0,entry-worst)
-            retrace=max(0.0,best-last_price)
-            # Larger engines need a more developed move before flow-based exit.
-            if engine=="SCALP":
-                developed=mfe>=0.35*A
-                flow_turn=(d10<=-0.18 and d30<=-0.05 and intensity>=0.75)
-                price_fail=retrace>=0.32*A
-            elif engine=="MACRO":
-                developed=mfe>=0.80*A
-                flow_turn=(d10<=-0.12 and d30<=-0.06 and intensity>=0.80)
-                price_fail=retrace>=0.50*A
-            else:
-                developed=mfe>=0.55*A
-                flow_turn=(d10<=-0.14 and d30<=-0.05 and intensity>=0.78)
-                price_fail=retrace>=0.40*A
+            mfe=max(0,best-entry); mae=max(0,entry-worst)
+            adverse=(entry-last_price)/A
+            retrace=(best-last_price)/A
+            # Opposite (sell) pressure. Price alone is insufficient.
+            pscore=0
+            if d10<=-0.12: pscore+=30
+            if d30<=-0.05: pscore+=25
+            if intensity>=0.80: pscore+=15
+            if book<=-0.20: pscore+=10
+            if oi>0 and d30<0: pscore+=10
+            if adverse>=0.25 or retrace>=0.32: pscore+=10
+            opposite_side="SHORT"
         else:
             best=min(best,last_price); worst=max(worst,last_price)
-            mfe=max(0.0,entry-best); mae=max(0.0,worst-entry)
-            retrace=max(0.0,last_price-best)
-            if engine=="SCALP":
-                developed=mfe>=0.35*A
-                flow_turn=(d10>=0.18 and d30>=0.05 and intensity>=0.75)
-                price_fail=retrace>=0.32*A
-            elif engine=="MACRO":
-                developed=mfe>=0.80*A
-                flow_turn=(d10>=0.12 and d30>=0.06 and intensity>=0.80)
-                price_fail=retrace>=0.50*A
-            else:
-                developed=mfe>=0.55*A
-                flow_turn=(d10>=0.14 and d30>=0.05 and intensity>=0.78)
-                price_fail=retrace>=0.40*A
+            mfe=max(0,entry-best); mae=max(0,worst-entry)
+            adverse=(last_price-entry)/A
+            retrace=(last_price-best)/A
+            # Opposite (buy) pressure.
+            pscore=0
+            if d10>=0.12: pscore+=30
+            if d30>=0.05: pscore+=25
+            if intensity>=0.80: pscore+=15
+            if book>=0.20: pscore+=10
+            if oi>0 and d30>0: pscore+=10
+            if adverse>=0.25 or retrace>=0.32: pscore+=10
+            opposite_side="LONG"
+
+        # Larger timeframe needs more persistence before switching.
+        pressure_threshold=55 if engine=="SCALP" else 60 if engine=="CORE" else 65
+        switch_threshold=80 if engine=="SCALP" else 82 if engine=="CORE" else 85
+        min_pressure_ms=12000 if engine=="SCALP" else 25000 if engine=="CORE" else 60000
+
+        new_state=old_state
+        new_psince=psince
+        if pscore>=pressure_threshold:
+            if old_state!="PRESSURE":
+                new_state="PRESSURE"; new_psince=now
+                position_event("PRESSURE",side,last_price,pos["signal_id"],
+                               f"opposite pressure score={pscore}",engine)
+        else:
+            if old_state=="PRESSURE":
+                new_state="HOLD"; new_psince=None
+                position_event("HOLD",side,last_price,pos["signal_id"],
+                               f"pressure released score={pscore}",engine)
 
         c=db()
-        c.execute("""UPDATE engine_positions
-                     SET best_price=?,worst_price=?,mfe=?,mae=?,updated_ts=?
-                     WHERE engine=?""",(best,worst,mfe,mae,now,engine))
+        c.execute("""UPDATE engine_positions SET best_price=?,worst_price=?,mfe=?,mae=?,
+                     state=?,pressure_since=?,pressure_score=?,updated_ts=? WHERE engine=?""",
+                  (best,worst,mfe,mae,new_state,new_psince,pscore,now,engine))
         c.commit();c.close()
 
-        # No TP exit. A benchmark WIN/LOSS never reaches this branch.
-        if developed and flow_turn and price_fail:
-            note=f"FLOW EXIT d10={d10:.3f} d30={d30:.3f} flow={intensity:.2f} oi60={oi:.4f} book={book:.3f} mfe={mfe:.1f} mae={mae:.1f}"
-            position_event("EXIT",side,last_price,pos["signal_id"],note,engine)
-            clear_position(engine)
+        persisted = new_state=="PRESSURE" and new_psince and now-int(new_psince)>=min_pressure_ms
+        # SWITCH only after strong, persistent opposite flow + actual price acceptance.
+        price_accept = adverse>=0.38 if engine=="SCALP" else adverse>=0.45 if engine=="CORE" else adverse>=0.55
+        if persisted and pscore>=switch_threshold and price_accept:
+            old_signal=pos["signal_id"]
+            note=(f"FLOW SWITCH score={pscore} d10={d10:.3f} d30={d30:.3f} "
+                  f"flow={intensity:.2f} oi60={oi:.4f} book={book:.3f} mfe={mfe:.1f} mae={mae:.1f}")
+            # Explicitly close old side, then create the opposite position at the same price.
+            position_event("EXIT",side,last_price,old_signal,note,engine)
+            clear_position(engine,"FLOW_SWITCH")
+            set_position(engine,opposite_side,last_price,None,A)
+            position_event("SWITCH",opposite_side,last_price,None,note,engine)
 
 def update_outcomes():
     """LEGACY BENCHMARK ONLY: fixed TP1-vs-SL. Never closes/removes a research position."""
@@ -470,6 +508,50 @@ def stats():
 @app.get("/api/position")
 def position():
     return current_position() or {"side":"FLAT"}
+
+@app.post("/api/signals/record")
+async def api_record_signal(request: Request):
+    """Persist a browser-detected signal so refresh cannot erase it.
+    Dedupes near-identical client submissions. Actual engine position is also
+    opened/confirmed independently from the benchmark outcome.
+    """
+    x=await request.json()
+    name=str(x.get("name") or "").strip()
+    side=str(x.get("side") or x.get("dir") or "").upper()
+    engine=str(x.get("engine") or "CORE").upper()
+    if side not in ("LONG","SHORT") or engine not in ("SCALP","CORE","MACRO") or not name:
+        return {"ok":False,"error":"invalid signal"}
+    ts=int(x.get("ts") or time.time()*1000)
+    entry=float(x.get("entry") or last_price or 0)
+    sl=float(x.get("sl") or entry)
+    tp1=float(x.get("tp1") or entry)
+    tp2=float(x.get("tp2") or entry)
+    score=float(x.get("score") or 0)
+    m=x.get("metrics") or {}
+    d10=float(m.get("d10") or 0); d30=float(m.get("d30") or 0)
+    oi60=float(m.get("oi60") or 0); flowv=float(m.get("int") or m.get("flow") or 0)
+    bookv=float(m.get("book") or 0)
+
+    c=db()
+    dup=c.execute("""SELECT id FROM signals
+                     WHERE engine=? AND name=? AND side=? AND ABS(ts-?)<5000
+                     ORDER BY id DESC LIMIT 1""",(engine,name,side,ts)).fetchone()
+    if dup:
+        c.close(); return {"ok":True,"id":dup[0],"deduped":True}
+    cur=c.execute("""INSERT INTO signals(ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flow,book,status,engine)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'OPEN',?)""",
+                  (ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flowv,bookv,engine))
+    sid=cur.lastrowid;c.commit();c.close()
+    A=atr_tf("1M",30) if engine=="SCALP" else atr_tf("1H",24) if engine=="MACRO" else atr5()
+    apply_position_signal(engine,side,entry,sid,A)
+    return {"ok":True,"id":sid,"deduped":False}
+
+@app.get("/api/position-audit")
+def api_position_audit():
+    c=db();c.row_factory=sqlite3.Row
+    ev=[dict(x) for x in c.execute("SELECT * FROM position_events ORDER BY ts DESC LIMIT 50").fetchall()]
+    c.close()
+    return {"positions":all_positions(),"events":ev}
 
 @app.get("/api/positions")
 def api_positions():

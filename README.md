@@ -1,18 +1,23 @@
-# v6 FLOW EXIT RESEARCH
+# v6.4 PRESSURE + SWITCH RESEARCH
 
-Actual research positions:
-- SCALP 1/3M, CORE 5/15M, MACRO 1H/4H are independent.
-- No TP-based position exit.
-- Same-engine same-direction signal = CONFIRM/HOLD.
-- Other-engine opposite signals do not close the position.
-- Same-engine opposite signal can EXIT/SWITCH that engine.
-- Otherwise exit requires: developed favorable excursion + meaningful retrace + opposite 10s/30s order-flow.
-- MFE and MAE are persisted while each position is open.
-- Every OPEN / CONFIRM / EXIT / SWITCH is persisted in position_events.
+Entry logic is unchanged.
 
-Benchmark:
-- Legacy TP1 1.5R vs SL WIN/LOSS remains for comparison only.
-- Benchmark WIN/LOSS never closes an actual research position.
+Actual position management:
+- SCALP 1/3M, CORE 5/15M, MACRO 1H/4H remain independent.
+- Price moving against a position does NOT itself create LOSS or close it.
+- State machine: OPEN/HOLD <-> PRESSURE -> EXIT or SWITCH.
+- PRESSURE uses opposite 10s/30s aggressive-flow persistence, flow intensity,
+  book imbalance, OI context, and price response.
+- If pressure fades, state returns to HOLD.
+- Strong persistent opposite flow plus price acceptance triggers explicit
+  EXIT of the old side and SWITCH into the opposite side.
+- Every PRESSURE/HOLD/EXIT/SWITCH is persisted in position_events.
+- Silent deletion remains forbidden.
+- MFE/MAE continue to accumulate.
+- Fixed TP/SL WIN/LOSS remains benchmark-only and never manages actual positions.
 
-This is a first research heuristic, not validated trading performance.
-No DB reset.
+Initial research thresholds:
+SCALP pressure 55 / switch 80 / persistence 12s
+CORE pressure 60 / switch 82 / persistence 25s
+MACRO pressure 65 / switch 85 / persistence 60s
+These are experimental heuristics, not validated probabilities.

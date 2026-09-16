@@ -24,8 +24,8 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
 <nav><button class="tab on" data-p="btc">BTC</button><button class="tab" data-p="stocks">주식</button><button class="tab" data-p="news">NEWS</button><button class="tab" data-p="lab">SIGNAL LAB</button></nav>
 <div class="status">BTC SERVER <span id="srv" class="live">● CHECK</span></div></header>
 <main>
-<section id="btc" class="page on"><iframe src="btc.html?v=60"></iframe></section>
-<section id="stocks" class="page"><iframe src="stock.html?v=60"></iframe></section>
+<section id="btc" class="page on"><iframe src="btc.html?v=64"></iframe></section>
+<section id="stocks" class="page"><iframe src="stock.html?v=64"></iframe></section>
 <section id="news" class="page">
  <div class="newsbar">
   <button class="chip on" data-cat="all">전체</button><button class="chip" data-cat="btc">BTC·CRYPTO</button>
@@ -48,7 +48,7 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
   <div class="card"><h3>OPEN</h3><div id="open" class="big">0</div></div>
  </div>
  <div class="card" style="margin-top:12px">
-  <h3>실제 포지션 목록 · OPEN → HOLD → FLOW EXIT / SWITCH · TP 청산 없음</h3>
+  <h3>실제 포지션 목록 · OPEN → HOLD ↔ PRESSURE → X(EXIT) / SWITCH</h3>
   <div id="labFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
    <button class="chip on" data-lf="ALL">전체</button><button class="chip" data-lf="CORE">5/15M</button>
    <button class="chip" data-lf="SCALP">1/3M</button><button class="chip" data-lf="MACRO">1H/4H</button>
@@ -113,7 +113,7 @@ function buildPositions(ev){
 }
 function match(r){
  if(LF==='ALL')return true;if(['CORE','SCALP','MACRO'].includes(LF))return (r.engine||'CORE')===LF;
- return r.side===LF||r.dir===LF;
+ return r.side===LF;
 }
 function renderLab(){
  const pos=LABPOS.filter(match);
@@ -124,7 +124,7 @@ function renderLab(){
   return `<tr><td>${new Date(r.ts).toLocaleString('ko-KR')}</td><td>${eng(r.engine)}</td><td class="${r.side==='LONG'?'pos':'neg'}">${r.side}</td><td>$${fmtN(r.entry)}</td><td>${r.exit?'$'+fmtN(r.exit):'—'}</td><td>${r.exitTs?new Date(r.exitTs).toLocaleString('ko-KR'):'—'}</td><td>${hold}</td><td class="${pct==null?'':pct>=0?'pos':'neg'}">${pct==null?'—':(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td><td>${r.status}</td></tr>`
  }).join(''):'<tr><td colspan="9">해당 포지션 기록 없음</td></tr>';
  const sig=LABSIG.filter(match);
- signalsBody.innerHTML=sig.length?sig.map(x=>`<tr><td>${new Date(+x.ts).toLocaleString('ko-KR')}</td><td>${eng(x.engine||'CORE')}</td><td class="${x.dir==='LONG'?'pos':'neg'}">${x.dir}</td><td>${x.name}</td><td>$${fmtN(x.entry)}</td><td>$${fmtN(x.sl)}</td><td>$${fmtN(x.tp1)}</td><td>$${fmtN(x.tp2)}</td><td>${x.score??'—'}</td><td class="${x.status==='WIN'?'pos':x.status==='LOSS'?'neg':''}">${x.status}</td></tr>`).join(''):'<tr><td colspan="10">해당 신호 기록 없음</td></tr>';
+ signalsBody.innerHTML=sig.length?sig.map(x=>`<tr><td>${new Date(+x.ts).toLocaleString('ko-KR')}</td><td>${eng(x.engine||'CORE')}</td><td class="${x.side==='LONG'?'pos':'neg'}">${x.side||'—'}</td><td>${x.name}</td><td>$${fmtN(x.entry)}</td><td>$${fmtN(x.sl)}</td><td>$${fmtN(x.tp1)}</td><td>$${fmtN(x.tp2)}</td><td>${x.score??'—'}</td><td class="${x.status==='WIN'?'pos':x.status==='LOSS'?'neg':''}">${x.status}</td></tr>`).join(''):'<tr><td colspan="10">해당 신호 기록 없음</td></tr>';
 }
 document.querySelectorAll('[data-lf]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-lf]').forEach(x=>x.classList.remove('on'));b.classList.add('on');LF=b.dataset.lf;renderLab()});
 async function syncServer(){
