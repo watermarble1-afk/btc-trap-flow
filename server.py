@@ -19,13 +19,16 @@ app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_
 
 trades=deque(maxlen=12000)
 oi_hist=deque(maxlen=2000)
-candles={"5M":deque(maxlen=400),"15M":deque(maxlen=400),"1H":deque(maxlen=300),"4H":deque(maxlen=300)}
+candles={"1M":deque(maxlen=800),"3M":deque(maxlen=600),"5M":deque(maxlen=400),"15M":deque(maxlen=400),"1H":deque(maxlen=300),"4H":deque(maxlen=300)}
 book_imb=0.0
 current_oi=None
 last_price=None
 trap_arm=None
 last_signal_ts=0
 prev_d10=0.0
+scalp_arm=None
+scalp_last_signal_ts=0
+scalp_prev_d10=0.0
 status={"public":"starting","business":"starting","started":int(time.time()*1000)}
 
 def db():
@@ -37,6 +40,10 @@ def db():
       closed_ts INTEGER)""")
     c.execute("""CREATE TABLE IF NOT EXISTS snapshots(
       ts INTEGER PRIMARY KEY, price REAL,d10 REAL,d30 REAL,oi60 REAL,flow REAL,book REAL,oi REAL)""")
+    sigcols={r[1] for r in c.execute("PRAGMA table_info(signals)").fetchall()}
+    if "engine" not in sigcols:
+        c.execute("ALTER TABLE signals ADD COLUMN engine TEXT DEFAULT 'CORE'")
+        c.execute("UPDATE signals SET engine='CORE' WHERE engine IS NULL OR engine=''")
     c.execute("""CREATE TABLE IF NOT EXISTS position_events(
       id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, event TEXT, side TEXT,
       price REAL, signal_id INTEGER, note TEXT)""")
@@ -102,6 +109,22 @@ def liquidity15():
     local=a[-24:]
     return H or max(x["high"] for x in local), L or min(x["low"] for x in local)
 
+def atr_tf(tf,n=24):
+    a=list(candles[tf])
+    if len(a)<n+1:return max((last_price or 1)*0.001,1)
+    vals=[]
+    for i in range(max(1,len(a)-n),len(a)):
+        c=a[i];p=a[i-1]["close"]
+        vals.append(max(c["high"]-c["low"],abs(c["high"]-p),abs(c["low"]-p)))
+    return median(vals) or 1
+
+def liquidity_tf(tf,lookback=80,local_n=24):
+    a=[x for x in candles[tf] if x.get("confirm")=="1"]
+    if len(a)<20:return None,None
+    H,L=pivots(a[-lookback:])
+    local=a[-local_n:]
+    return H or max(x["high"] for x in local), L or min(x["low"] for x in local)
+
 def position_event(event,side,price,signal_id=None,note=""):
     c=db()
     c.execute("INSERT INTO position_events(ts,event,side,price,signal_id,note) VALUES(?,?,?,?,?,?)",
@@ -145,9 +168,9 @@ def apply_position_signal(side,price,signal_id):
     set_position(side,price,signal_id)
     position_event("SWITCH",side,price,signal_id,"opposite TRAP")
 
-def save_signal(name,side,score,level,ext,metrics):
+def save_signal(name,side,score,level,ext,metrics,engine="CORE",atr_value=None):
     global last_signal_ts,trap_arm
-    p=last_price; A=atr5()
+    p=last_price; A=atr_value or atr5()
     if side=="LONG":
         sl=min(ext,level-.22*A); risk=max(p-sl,.35*A); tp1=p+1.5*risk; tp2=p+2.3*risk
     else:
@@ -157,14 +180,18 @@ def save_signal(name,side,score,level,ext,metrics):
         trap_arm=None
         return
     now=int(time.time()*1000)
-    c=db();cur=c.execute("""INSERT INTO signals(ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flow,book,status)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'OPEN')""",
+    c=db();cur=c.execute("""INSERT INTO signals(ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flow,book,status,engine)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'OPEN',?)""",
       (now,name,side,p,sl,tp1,tp2,score,metrics["d10"],metrics["d30"],
-       metrics["oi60"],metrics["flow"],metrics["book"]))
+       metrics["oi60"],metrics["flow"],metrics["book"],engine))
     signal_id=cur.lastrowid
     c.commit();c.close()
-    apply_position_signal(side,p,signal_id)
-    last_signal_ts=now;trap_arm=None
+    if engine=="CORE":
+        apply_position_signal(side,p,signal_id)
+        last_signal_ts=now;trap_arm=None
+    else:
+        global scalp_last_signal_ts,scalp_arm
+        scalp_last_signal_ts=now;scalp_arm=None
 
 def evaluate():
     global trap_arm,prev_d10
@@ -200,6 +227,42 @@ def evaluate():
                 save_signal("TRAP S","SHORT",score,trap_arm["level"],trap_arm["ext"],
                             {"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb})
     prev_d10=w10["ratio"]
+
+def evaluate_scalp():
+    """SCALP engine: 3M liquidity/structure + 1M sweep/reclaim + micro-flow flip."""
+    global scalp_arm,scalp_prev_d10
+    if not last_price or len(trades)<20:return
+    H,L=liquidity_tf("3M",100,30)
+    if H is None:return
+    A=atr_tf("1M",30); c=list(candles["1M"])[-1] if candles["1M"] else None
+    if not c:return
+    w10,w30=flow(10000),flow(30000);oi60=oi_delta();inten=flow_intensity();now=int(time.time()*1000)
+    # tighter sweep thresholds than CORE, shorter arm/cooldown
+    if c["high"]>H+.025*A and c["close"]<H+.06*A:
+        if not scalp_arm or scalp_arm["dir"]!="S" or now-scalp_arm["ts"]>60000:
+            scalp_arm={"dir":"S","level":H,"ext":c["high"],"ts":now,"peak":w30["ratio"]}
+    if c["low"]<L-.025*A and c["close"]>L-.06*A:
+        if not scalp_arm or scalp_arm["dir"]!="L" or now-scalp_arm["ts"]>60000:
+            scalp_arm={"dir":"L","level":L,"ext":c["low"],"ts":now,"peak":w30["ratio"]}
+    if scalp_arm and now-scalp_arm["ts"]>90000:scalp_arm=None
+    if scalp_arm and now-scalp_last_signal_ts>45000:
+        if scalp_arm["dir"]=="L":
+            reclaim=last_price>scalp_arm["level"]+.015*A
+            hot=scalp_arm["peak"]<-.10 or w30["ratio"]<-.13 or scalp_prev_d10<-.15
+            flip=w10["ratio"]>.06 and w10["ratio"]-scalp_prev_d10>.11
+            score=35+(20 if hot else 0)+(25 if flip else 0)+(10 if oi60<-.012 else 0)+(5 if inten>1.03 else 0)+(5 if book_imb>-.20 else 0)
+            if reclaim and hot and flip and score>=80:
+                save_signal("SCALP L","LONG",score,scalp_arm["level"],scalp_arm["ext"],
+                  {"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},"SCALP",A)
+        else:
+            reclaim=last_price<scalp_arm["level"]-.015*A
+            hot=scalp_arm["peak"]>.10 or w30["ratio"]>.13 or scalp_prev_d10>.15
+            flip=w10["ratio"]<-.06 and scalp_prev_d10-w10["ratio"]>.11
+            score=35+(20 if hot else 0)+(25 if flip else 0)+(10 if oi60<-.012 else 0)+(5 if inten>1.03 else 0)+(5 if book_imb<.20 else 0)
+            if reclaim and hot and flip and score>=80:
+                save_signal("SCALP S","SHORT",score,scalp_arm["level"],scalp_arm["ext"],
+                  {"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},"SCALP",A)
+    scalp_prev_d10=w10["ratio"]
 
 def manage_position_reversal():
     """Exit only after a meaningful favorable move and a confirmed counter-flow retrace.
@@ -263,7 +326,7 @@ def update_outcomes():
 
 async def seed():
     async with httpx.AsyncClient(timeout=15) as h:
-        for label,bar in [("5M","5m"),("15M","15m"),("1H","1H"),("4H","4H")]:
+        for label,bar in [("1M","1m"),("3M","3m"),("5M","5m"),("15M","15m"),("1H","1H"),("4H","4H")]:
             try:
                 r=(await h.get("https://www.okx.com/api/v5/market/candles",params={"instId":INST,"bar":bar,"limit":300})).json()
                 arr=[]
@@ -293,12 +356,12 @@ async def public_loop():
                         elif ch=="books5":
                             b=sum(float(x[1]) for x in d.get("bids",[]));a=sum(float(x[1]) for x in d.get("asks",[]))
                             book_imb=(b-a)/(b+a) if b+a else 0
-                    evaluate();manage_position_reversal();update_outcomes()
+                    evaluate();evaluate_scalp();manage_position_reversal();update_outcomes()
         except Exception as e:
             status["public"]="reconnecting";print("public",e);await asyncio.sleep(2)
 
 async def business_loop():
-    mapping={"candle5m":"5M","candle15m":"15M","candle1H":"1H","candle4H":"4H"}
+    mapping={"candle1m":"1M","candle3m":"3M","candle5m":"5M","candle15m":"15M","candle1H":"1H","candle4H":"4H"}
     while True:
         try:
             async with websockets.connect(BIZ,ping_interval=20,ping_timeout=20) as ws:
@@ -342,16 +405,28 @@ def live():
             "flow":flow_intensity(),"book":book_imb,"liqH":H,"liqL":L,"armed":trap_arm,"status":status}
 
 @app.get("/api/signals")
-def signals(limit:int=100):
+def signals(limit:int=100, engine:str="ALL"):
     c=db();c.row_factory=sqlite3.Row
-    rows=[dict(x) for x in c.execute("SELECT * FROM signals ORDER BY ts DESC LIMIT ?",(min(limit,500),)).fetchall()]
+    if engine.upper() in ("CORE","SCALP"):
+        rows=[dict(x) for x in c.execute("SELECT * FROM signals WHERE engine=? ORDER BY ts DESC LIMIT ?",(engine.upper(),min(limit,1000))).fetchall()]
+    else:
+        rows=[dict(x) for x in c.execute("SELECT * FROM signals ORDER BY ts DESC LIMIT ?",(min(limit,1000),)).fetchall()]
     c.close();return rows
 
 @app.get("/api/stats")
 def stats():
-    c=db()
-    rows=c.execute("SELECT status,COUNT(*) FROM signals GROUP BY status").fetchall();c.close()
-    return {k:v for k,v in rows}
+    c=db();c.row_factory=sqlite3.Row
+    out={}
+    for eng in ("SCALP","CORE"):
+        r=c.execute("""SELECT COUNT(*) total,
+          SUM(CASE WHEN status='WIN' THEN 1 ELSE 0 END) wins,
+          SUM(CASE WHEN status='LOSS' THEN 1 ELSE 0 END) losses,
+          SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) open
+          FROM signals WHERE engine=?""",(eng,)).fetchone()
+        d=dict(r);closed=(d["wins"] or 0)+(d["losses"] or 0)
+        d["winrate"]=round(100*(d["wins"] or 0)/closed,1) if closed else None
+        out[eng]=d
+    c.close();return out
 
 
 
@@ -368,48 +443,66 @@ def position_events(limit:int=300):
 
 @app.get("/api/stock/gaon")
 async def stock_gaon(tf: str="1D"):
-    """Gaon Cable 000500 OHLCV. Intraday via Yahoo; daily via Naver primary."""
-    import ast, datetime as _dt
+    """Gaon Cable 000500 OHLCV. Yahoo primary, Naver daily fallback."""
+    import datetime as _dt
     tf=tf.upper()
-    headers={"User-Agent":"Mozilla/5.0","Referer":"https://finance.naver.com/"}
+    headers={"User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+             "Accept":"application/json,text/plain,*/*"}
     errors=[]
-    # Intraday: Yahoo supports practical chart intervals/ranges.
-    ymap={"1M":("1m","7d"),"5M":("5m","60d"),"15M":("15m","60d"),
-          "30M":("30m","60d"),"60M":("60m","730d"),"1H":("60m","730d")}
-    if tf in ymap:
-        interval,rg=ymap[tf]
-        try:
-            url="https://query1.finance.yahoo.com/v8/finance/chart/000500.KS"
-            params={"range":rg,"interval":interval,"events":"history","includePrePost":"false"}
-            async with httpx.AsyncClient(timeout=20.0,headers=headers,follow_redirects=True) as client:
-                r=await client.get(url,params=params);r.raise_for_status();j=r.json()
-            result=j["chart"]["result"][0];q=result["indicators"]["quote"][0];ts=result.get("timestamp") or []
-            rows=[]
-            for i,t in enumerate(ts):
-                vals=(q["open"][i],q["high"][i],q["low"][i],q["close"][i])
-                if any(v is None for v in vals):continue
-                rows.append({"time":int(t),"open":vals[0],"high":vals[1],"low":vals[2],"close":vals[3],"volume":q["volume"][i] or 0})
-            if rows:return {"symbol":"000500.KS","name":"가온전선","currency":"KRW","source":"YAHOO","tf":tf,"rows":rows}
-        except Exception as e:errors.append("intraday: "+str(e))
-
-    # Daily base from Naver; weekly/monthly are aggregated in browser.
+    ymap={
+      "1M":("1m","7d"),"5M":("5m","60d"),"15M":("15m","60d"),
+      "30M":("30m","60d"),"60M":("60m","730d"),"1H":("60m","730d"),
+      "1D":("1d","5y"),"1W":("1wk","10y"),"1MO":("1mo","max")
+    }
+    interval,rg=ymap.get(tf,("1d","5y"))
     try:
-        endd=_dt.datetime.now().strftime("%Y%m%d")
-        startd=(_dt.datetime.now()-_dt.timedelta(days=2200)).strftime("%Y%m%d")
-        url="https://api.finance.naver.com/siseJson.naver"
-        params={"symbol":"000500","requestType":"1","startTime":startd,"endTime":endd,"timeframe":"day"}
+        url="https://query1.finance.yahoo.com/v8/finance/chart/000500.KS"
+        params={"range":rg,"interval":interval,"events":"history","includeAdjustedClose":"true","includePrePost":"false"}
         async with httpx.AsyncClient(timeout=20.0,headers=headers,follow_redirects=True) as client:
-            r=await client.get(url,params=params);r.raise_for_status();data=ast.literal_eval(r.text.strip())
+            r=await client.get(url,params=params)
+            if r.status_code!=200: raise RuntimeError(f"Yahoo HTTP {r.status_code}")
+            j=r.json()
+        result=(j.get("chart",{}).get("result") or [None])[0]
+        if not result: raise RuntimeError(str(j.get("chart",{}).get("error") or "Yahoo result empty"))
+        q=result["indicators"]["quote"][0];ts=result.get("timestamp") or []
         rows=[]
-        for row in data[1:]:
-            if not isinstance(row,(list,tuple)) or len(row)<6:continue
-            ds=str(row[0]).strip()
-            if not re.fullmatch(r"\d{8}",ds):continue
-            t=int(_dt.datetime.strptime(ds,"%Y%m%d").replace(tzinfo=_dt.timezone.utc).timestamp())
-            rows.append({"time":t,"open":float(row[1]),"high":float(row[2]),"low":float(row[3]),"close":float(row[4]),"volume":float(row[5])})
-        if rows:return {"symbol":"000500","name":"가온전선","currency":"KRW","source":"NAVER","tf":"1D","rows":rows}
-    except Exception as e:errors.append("daily: "+str(e))
-    return {"symbol":"000500","name":"가온전선","currency":"KRW","tf":tf,"rows":[],"error":" | ".join(errors)}
+        for i,t in enumerate(ts):
+            try:
+                vals=(q["open"][i],q["high"][i],q["low"][i],q["close"][i])
+                if any(v is None for v in vals): continue
+                rows.append({"time":int(t),"open":float(vals[0]),"high":float(vals[1]),"low":float(vals[2]),
+                             "close":float(vals[3]),"volume":float(q["volume"][i] or 0)})
+            except Exception: continue
+        if rows:
+            return {"ok":True,"symbol":"000500.KS","name":"가온전선","currency":"KRW","source":"YAHOO","tf":tf,"rows":rows}
+        raise RuntimeError("Yahoo rows=0")
+    except Exception as e:
+        errors.append("Yahoo "+repr(e))
+
+    # Daily fallback: parse Naver text manually; do not use ast.literal_eval.
+    if tf in ("1D","1W","1MO"):
+        try:
+            endd=_dt.datetime.now().strftime("%Y%m%d")
+            startd=(_dt.datetime.now()-_dt.timedelta(days=3650)).strftime("%Y%m%d")
+            url="https://api.finance.naver.com/siseJson.naver"
+            params={"symbol":"000500","requestType":"1","startTime":startd,"endTime":endd,"timeframe":"day"}
+            nh={"User-Agent":headers["User-Agent"],"Referer":"https://finance.naver.com/"}
+            async with httpx.AsyncClient(timeout=20.0,headers=nh,follow_redirects=True) as client:
+                r=await client.get(url,params=params)
+                if r.status_code!=200: raise RuntimeError(f"Naver HTTP {r.status_code}")
+                txt=r.text
+            rows=[]
+            # Extract rows like ["20260916", 123, 130, 120, 127, 123456, ...]
+            for m in re.finditer(r'\[\s*["\']?(\d{8})["\']?\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)',txt):
+                ds,o,h,l,c,v=m.groups()
+                t=int(_dt.datetime.strptime(ds,"%Y%m%d").replace(tzinfo=_dt.timezone.utc).timestamp())
+                rows.append({"time":t,"open":float(o),"high":float(h),"low":float(l),"close":float(c),"volume":float(v)})
+            if rows:
+                return {"ok":True,"symbol":"000500","name":"가온전선","currency":"KRW","source":"NAVER","tf":"1D","rows":rows}
+            raise RuntimeError("Naver rows=0")
+        except Exception as e:
+            errors.append("Naver "+repr(e))
+    return {"ok":False,"symbol":"000500","name":"가온전선","currency":"KRW","tf":tf,"rows":[],"error":" | ".join(errors)}
 
 # Web terminal. Keep this mount at the end so /api/* routes take priority.
 STATIC_DIR = Path(__file__).resolve().parent / "static"

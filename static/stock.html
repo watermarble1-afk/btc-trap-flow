@@ -18,13 +18,13 @@
 .hoverbar b{font-size:11px}.pctUp{color:#4f8cff}.pctDn{color:#ff4f64}.pctFlat{color:#c7d0dd}
 </style>
 </head><body><div class="wrap">
-<div class="top"><div><h1>가온전선 <span style="color:#f1c75b">000500</span> · STOCK SIGNAL LAB v1.1</h1><div class="mut">일봉 과거 신호 연구판</div></div><div class="pill" id="state">DATA LOADING…</div></div>
+<div id="apierr" style="display:none;margin-bottom:8px;padding:9px;border:1px solid #ff4f64;border-radius:8px;color:#ff8290;font-size:11px;white-space:pre-wrap"></div><div class="top"><div><h1>가온전선 <span style="color:#f1c75b">000500</span> · STOCK SIGNAL LAB v1.1</h1><div class="mut">일봉 과거 신호 연구판</div></div><div class="pill" id="state">DATA LOADING…</div></div>
 <div class="cards"><div class="card"><div class="lbl">최근 종가</div><div class="val" id="last">—</div></div><div class="card"><div class="lbl">데이터</div><div class="val" id="bars">—</div></div><div class="card"><div class="lbl">LONG</div><div class="val blue" id="lc">—</div></div><div class="card"><div class="lbl">SHORT</div><div class="val red" id="sc">—</div></div><div class="card"><div class="lbl">상태</div><div class="val" id="pos">FLAT</div></div></div>
 <div class="grid"><section class="panel"><div class="tools"><div id="tfbar" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px">
 <button class="btn tf" data-tf="1M">1분</button><button class="btn tf" data-tf="5M">5분</button><button class="btn tf" data-tf="15M">15분</button><button class="btn tf" data-tf="30M">30분</button><button class="btn tf" data-tf="60M">60분</button><button class="btn tf" data-tf="1D">일</button><button class="btn tf" data-tf="1W">주</button><button class="btn tf" data-tf="1MO">월</button></div><button class="btn" id="indBtn">⚙ 지표 설정</button><div class="ind" id="ind">
 <div><input id="len" type="number" min="2" max="500" value="20" style="width:75px"> <select id="typ"><option>SMA</option><option>EMA</option></select> <input id="maColor" type="color" value="#f1c75b" title="선 색상" style="width:42px;height:31px;padding:2px;vertical-align:middle"> <button class="btn" id="add">+ 추가</button></div>
 <div id="tags"></div><div style="margin-top:9px"><label><input id="volC" type="checkbox" checked> 거래량</label></div><div class="mut" style="margin-top:7px">5·20·60·120·240 등 직접 입력 · 클릭한 이평선은 ×로 삭제</div></div></div>
-<div class="hoverbar" id="hoverbar"><span>봉에 마우스를 올리면 등락률이 표시됩니다.</span></div><div id="chart"></div><div class="legend"><span class="blue"><b>LONG ▲</b></span><span class="red"><b>SHORT ▼</b></span><span class="cyan"><b>RETEST</b></span><span><b>X</b> 포지션 정리</span></div></section>
+<div class="hoverbar" id="hoverbar"><span>봉에 마우스를 올리면 등락률이 표시됩니다.</span></div><div id="chart"></div><div class="legend"><span class="blue"><b>L</b></span><span class="red"><b>S</b></span><span class="cyan"><b>RETEST</b></span><span><b>X</b> 포지션 정리</span></div></section>
 <aside><div class="panel"><b>과거 신호</b><div class="list" id="list"></div></div></aside></div></div>
 <script>
 const $=x=>document.getElementById(x), won=n=>Math.round(n||0).toLocaleString('ko-KR')+'원';
@@ -53,9 +53,9 @@ function aggregate(a,mode){
  }return [...m.values()].sort((a,b)=>a.time-b.time)
 }
 async function init(tf=curTF){try{
- curTF=tf; $('state').textContent='DATA LOADING…';
+ curTF=tf; $('state').textContent='DATA LOADING…';$('apierr').style.display='none';
 
-let apiTF=(tf==='1W'||tf==='1MO')?'1D':tf;let r=await fetch('/api/stock/gaon?tf='+encodeURIComponent(apiTF)+'&v=46',{cache:'no-store'});if(!r.ok)throw Error('API '+r.status);let j=await r.json();rows=j.rows||[];if(tf==='1W'||tf==='1MO')rows=aggregate(rows,tf);if(!rows.length)throw Error(j.error||'주가 데이터 0건');
+let apiTF=(tf==='1W'||tf==='1MO')?'1D':tf;let r=await fetch('/api/stock/gaon?tf='+encodeURIComponent(apiTF)+'&v=48',{cache:'no-store'});if(!r.ok)throw Error('API '+r.status);let j=await r.json();rows=j.rows||[];if(tf==='1W'||tf==='1MO')rows=aggregate(rows,tf);if(!rows.length)throw Error(j.error||'주가 데이터 0건');
 if(!window.LightweightCharts)throw Error('차트 라이브러리 로딩 실패');
 $('state').textContent='● '+tf+' · '+(j.source||'DATA');$('state').style.color='#35d7e5';$('last').textContent=won(rows.at(-1).close);$('bars').textContent=rows.length+'봉';
 if(chart){try{chart.remove()}catch(e){};chart=null;candle=null;volume=null;maSeries=[]}$('chart').innerHTML='';chart=LightweightCharts.createChart($('chart'),{layout:{background:{color:'#0a0f18'},textColor:'#8d99ad'},grid:{vertLines:{color:'#151d2a'},horzLines:{color:'#151d2a'}},rightPriceScale:{borderColor:'#253044'},timeScale:{borderColor:'#253044'}});
@@ -71,11 +71,11 @@ function showBar(i){
 showBar(rows.length-1);
 chart.subscribeCrosshairMove(param=>{if(!param||!param.time)return;let i=rows.findIndex(x=>x.time===param.time);if(i>=0)showBar(i)});
 volume.setData(rows.map(x=>({time:x.time,value:x.volume,color:x.close>=x.open?'rgba(47,213,139,.25)':'rgba(255,92,112,.25)'})));
-let q=signals(rows),sg=q.out;let mk=sg.map(s=>({time:s.time,position:s.type==='LONG'||s.type==='RETEST L'?'belowBar':s.type==='SHORT'||s.type==='RETEST S'?'aboveBar':s.side==='LONG'?'aboveBar':'belowBar',color:s.type==='LONG'?'#4f8cff':s.type==='SHORT'?'#ff4f64':s.type.startsWith('RETEST')?'#35d7e5':'#d7dee9',shape:s.type==='LONG'?'arrowUp':s.type==='SHORT'?'arrowDown':'circle',text:s.type==='EXIT'?'X '+s.side:s.type}));candle.setMarkers(mk.sort((a,b)=>a.time-b.time));chart.timeScale().fitContent();
+let q=signals(rows),sg=q.out;let mk=sg.map(s=>({time:s.time,position:s.type==='LONG'||s.type==='RETEST L'?'belowBar':s.type==='SHORT'||s.type==='RETEST S'?'aboveBar':s.side==='LONG'?'aboveBar':'belowBar',color:s.type==='LONG'?'#4f8cff':s.type==='SHORT'?'#ff4f64':s.type.startsWith('RETEST')?'#35d7e5':'#d7dee9',shape:s.type==='LONG'?'arrowUp':s.type==='SHORT'?'arrowDown':'circle',text:s.type==='EXIT'?'X':s.type==='LONG'?'L':s.type==='SHORT'?'S':s.type}));candle.setMarkers(mk.sort((a,b)=>a.time-b.time));chart.timeScale().fitContent();
 $('lc').textContent=sg.filter(x=>x.type==='LONG').length;$('sc').textContent=sg.filter(x=>x.type==='SHORT').length;$('pos').textContent=q.pos?.side||'FLAT';
 $('list').innerHTML=sg.slice().reverse().slice(0,80).map(s=>`<div class="item"><span>${new Date(s.time*1000).toLocaleDateString('ko-KR')}</span><b class="${s.type==='LONG'?'blue':s.type==='SHORT'?'red':s.type.startsWith('RETEST')?'cyan':''}">${s.type==='EXIT'?'X '+s.side:s.type}</b><span>${won(s.price)}</span></div>`).join('');
 try{ma=JSON.parse(localStorage.getItem('stock-ma-000500')||'[]')}catch(e){}drawMA();new ResizeObserver(()=>chart.applyOptions({width:$('chart').clientWidth})).observe($('chart'));
-}catch(e){$('state').textContent='ERROR';$('state').style.color='#ff4f64';$('list').innerHTML='<div class="mut" style="padding:10px">'+e.message+'</div>';console.error(e)}}
+}catch(e){$('state').textContent='ERROR';$('state').style.color='#ff4f64';$('apierr').style.display='block';$('apierr').textContent='주가 데이터 오류: '+e.message;$('list').innerHTML='<div class="mut" style="padding:10px">'+e.message+'</div>';console.error(e)}}
 $('indBtn').onclick=()=>$('ind').classList.toggle('open');$('add').onclick=()=>{let n=Math.max(2,Math.min(500,+$('len').value||20)),t=$('typ').value;let c=$('maColor').value;if(!ma.some(x=>x.n===n&&x.t===t))ma.push({n,t,c});save();drawMA()};$('volC').onchange=()=>{if(volume)volume.applyOptions({visible:$('volC').checked})};
 document.querySelectorAll('.tf').forEach(x=>x.onclick=()=>init(x.dataset.tf));init('1D');
 </script></body></html>
