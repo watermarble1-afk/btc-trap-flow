@@ -6,6 +6,7 @@ import httpx, websockets
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 INST="BTC-USDT-SWAP"
 PUB="wss://ws.okx.com:8443/ws/v5/public"
@@ -841,5 +842,9 @@ async def stock_gaon(tf: str="1D"):
 # Web terminal. Keep this mount at the end so /api/* routes take priority.
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 if STATIC_DIR.exists():
+    @app.get("/mobile", include_in_schema=False)
+    async def mobile_app():
+        return FileResponse(STATIC_DIR / "mobile.html")
+
     app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="terminal")
 

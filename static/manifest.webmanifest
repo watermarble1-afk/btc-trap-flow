@@ -1,0 +1,9 @@
+{
+  "name":"BTC Trap Flow Mobile",
+  "short_name":"BTC FLOW",
+  "start_url":"/mobile",
+  "display":"standalone",
+  "background_color":"#070a10",
+  "theme_color":"#070a10",
+  "description":"BTC OKX Trap Flow mobile terminal"
+}
