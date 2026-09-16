@@ -299,20 +299,45 @@ def evaluate_scalp():
     scalp_prev_d10=w10["ratio"]
 
 
+def position_path_extremes(pos):
+    """Rebuild price extremes from confirmed/live 1M candles since the position opened.
+    This makes MFE/MAE survive Railway deploys/restarts instead of only tracking ticks
+    observed by the current server process.
+    """
+    entry=float(pos["entry"])
+    opened=int(pos.get("opened_ts") or 0)
+    highs=[]; lows=[]
+    for bar in candles.get("1M",[]):
+        try:
+            if int(bar.get("ts",0)) >= opened:
+                highs.append(float(bar["high"]))
+                lows.append(float(bar["low"]))
+        except Exception:
+            pass
+    if last_price:
+        highs.append(float(last_price)); lows.append(float(last_price))
+    # Include persisted values too, so rebuilding can never shrink an existing excursion.
+    bp=pos.get("best_price"); wp=pos.get("worst_price")
+    if bp is not None:
+        highs.append(float(bp)); lows.append(float(bp))
+    if wp is not None:
+        highs.append(float(wp)); lows.append(float(wp))
+    highs.append(entry); lows.append(entry)
+    return max(highs), min(lows)
+
 def update_position_excursions():
-    """Persist MFE/MAE on every trade tick, independently of signal/reversal logic."""
+    """Persist MFE/MAE and reconstruct the full path after restart/deploy."""
     if not last_price:
         return
     now=int(time.time()*1000)
     for pos in all_positions():
         engine=pos["engine"]; side=pos["side"]; entry=float(pos["entry"])
-        best=float(pos.get("best_price") if pos.get("best_price") is not None else entry)
-        worst=float(pos.get("worst_price") if pos.get("worst_price") is not None else entry)
+        path_high,path_low=position_path_extremes(pos)
         if side=="LONG":
-            best=max(best,last_price); worst=min(worst,last_price)
+            best=path_high; worst=path_low
             mfe=max(0.0,best-entry); mae=max(0.0,entry-worst)
         else:
-            best=min(best,last_price); worst=max(worst,last_price)
+            best=path_low; worst=path_high
             mfe=max(0.0,entry-best); mae=max(0.0,worst-entry)
         c=db()
         c.execute("""UPDATE engine_positions
@@ -332,6 +357,8 @@ def manage_position_reversal():
     d10=flow(10000)["ratio"]; d30=flow(30000)["ratio"]
     intensity=flow_intensity(); oi=oi_delta(60000); book=book_imbalance()
     now=int(time.time()*1000)
+    # Ensure reversal logic uses restart-safe, reconstructed MFE/MAE.
+    update_position_excursions()
 
     for pos in all_positions():
         engine=pos["engine"]; side=pos["side"]; entry=float(pos["entry"])

@@ -92,3 +92,17 @@ These are experimental heuristics, not validated probabilities.
 - MFE/MAE now persist independently of signal generation and benchmark logic.
 - Reversal/pressure manager is also executed before signal evaluation in the public loop.
 - Existing position lifecycle, HOLD/PRESSURE/X/SWITCH and entry logic are unchanged.
+
+## v6.12 RETEST color separation
+- RETEST L/S markers changed to violet (`#b56cff`).
+- Actual POS L remains cyan and POS S remains yellow.
+- No signal, position, HOLD/PRESSURE, EXIT or performance logic changed.
+
+## v6.13 MFE/MAE restart-safe rebuild
+- Root cause traced: v6.11 tracked excursions only from trade ticks seen after that server
+  process/deploy started. An already-open position could therefore show only the post-deploy
+  excursion (e.g. +$32.7) and miss an earlier low/high.
+- MFE/MAE now rebuild from 1M candle highs/lows from the original `opened_ts` forward.
+- Persisted extremes are merged, so values never shrink after a restart.
+- Reversal manager refreshes reconstructed excursions before HOLD/PRESSURE/X/SWITCH decisions.
+- RETEST color separation from v6.12 is retained.
