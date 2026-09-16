@@ -1,11 +1,15 @@
-# v5.6 Trade Table + Candle/Daily Move
+# v5.7 HARD FIX
 
-Changes:
-- Chart markers are clean again: no entry/exit dollar amount in marker text.
-- Added right-side position/trade ledger with engine, direction, entry, exit, holding time and return.
-- Existing CORE OPEN/EXIT/SWITCH position events feed the ledger; no fake exits are created.
-- Restores/extends candle hover information: OHLC + candle % + high/low range % where the existing OHLC legend is used.
-- Adds '오늘 · 일봉 기준' card showing current daily candle dollar move and percentage move from daily open.
-- Existing signal labels/colors, SCALP/TRAP/MACRO engines and benchmark stats remain.
+Fixed:
+- Server falsely showing OFFLINE even while the direct OKX chart moved.
+  Cause: frontend stats code referenced `st.MACRO` instead of `stats.MACRO`, throwing inside syncServer.
+- Restored server signal history and position event/X rendering after sync.
+- Added the requested right-side position/trade table using the actual page `.box` structure.
+- Chart markers no longer show dollar amounts; X is clean.
+- Trade table shows entry, exit, holding time and return for real recorded CORE position events.
+- Fixed candle hover %: OHLC, previous-candle %, candle body %, high-low range %.
+- Fixed today's daily candle dollar move and percentage from daily open.
+- AUTO now maps 1H/4H to MACRO.
+- Fixed malformed external Lightweight Charts script tag that had swallowed older inline hover code.
 
-SCALP and MACRO still do not have independent actual position state machines; their signal entries remain in signal history/benchmark until that is implemented.
+No SQLite schema reset or DB deletion is performed.

@@ -4,65 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BTC OKX Radar v18.1 · POSITION v3.1</title>
-<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js">
-// ---- USER INDICATORS v4.1 ----
-let userMA=[],maSeries=[],userVWAP=null;
-const INDKEY='marketTerminalIndicators:'+location.pathname;
-function indData(){
-  if(typeof cache!=='undefined' && typeof cur!=='undefined' && cache[cur]) return cache[cur];
-  return window.__stockRows||[];
-}
-function calcMA(a,n,type){
- let out=[],ema=null,k=2/(n+1);
- for(let i=0;i<a.length;i++){
-   let v;
-   if(type==='EMA'){ema=ema==null?a[i].close:a[i].close*k+ema*(1-k);if(i>=n-1)v=ema}
-   else if(i>=n-1){let sum=0;for(let j=i-n+1;j<=i;j++)sum+=a[j].close;v=sum/n}
-   if(v!=null)out.push({time:a[i].time,value:v});
- } return out;
-}
-function calcUserVWAP(a){
- let out=[],pv=0,v=0,lastDay='';
- for(const x of a){
-   let d=new Date(x.time*1000).toISOString().slice(0,10);
-   if(d!==lastDay){pv=0;v=0;lastDay=d}
-   let q=x.volume||1;pv+=((x.high+x.low+x.close)/3)*q;v+=q;out.push({time:x.time,value:pv/v});
- } return out;
-}
-function loadInd(){try{let x=JSON.parse(localStorage.getItem(INDKEY)||'{}');userMA=x.ma||[];$('vwapChk').checked=!!x.vwap;$('volChk').checked=x.vol!==false}catch(e){}}
-function saveInd(){localStorage.setItem(INDKEY,JSON.stringify({ma:userMA,vwap:$('vwapChk').checked,vol:$('volChk').checked}))}
-function drawInd(){
- if(!chart||!candle)return; let a=indData(); if(!a.length)return;
- for(const x of maSeries)try{chart.removeSeries(x)}catch(e){} maSeries=[];
- userMA.forEach((m,i)=>{let z=chart.addLineSeries({lineWidth:2,color:m.c||'#f1c75b',priceLineVisible:false,lastValueVisible:false,title:m.type+m.n});z.setData(calcMA(a,m.n,m.type));maSeries.push(z)});
- if(userVWAP){try{chart.removeSeries(userVWAP)}catch(e){}userVWAP=null}
- if($('vwapChk').checked){userVWAP=chart.addLineSeries({lineWidth:2,priceLineVisible:false,lastValueVisible:false,title:'VWAP'});userVWAP.setData(calcUserVWAP(a))}
- if(typeof vol!=='undefined'&&vol)vol.applyOptions({visible:$('volChk').checked});
- if(typeof volume!=='undefined'&&volume)volume.applyOptions({visible:$('volChk').checked});
- $('indTags').innerHTML=userMA.map((m,i)=>`<span class="indTag" data-rm="${i}" style="border-color:${m.c||'#f1c75b'};color:${m.c||'#f1c75b'}">${m.type}${m.n} ×</span>`).join('');
- document.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{userMA.splice(+x.dataset.rm,1);saveInd();drawInd()});
-}
-function initInd(){
- loadInd();
- $('indBtn').onclick=()=>$('indPanel').classList.toggle('open');
- $('addMA').onclick=()=>{let n=Math.max(2,Math.min(500,+$('maLen').value||20)),type=$('maType').value;let c=$('maColor').value;if(!userMA.some(x=>x.n===n&&x.type===type))userMA.push({n,type,c});saveInd();drawInd()};
- $('vwapChk').onchange=$('volChk').onchange=()=>{saveInd();drawInd()};
- setTimeout(drawInd,1200);
-}
-setTimeout(initInd,300);
-
-function hpNum(v){return Number(v||0).toLocaleString('ko-KR',{maximumFractionDigits:2})}
-function hpClass(v){return v>0?'hpUp':v<0?'hpDn':''}
-function showHoverPct(t){
- try{
-  let a=(typeof cache!=='undefined'&&typeof cur!=='undefined'&&cache[cur])?cache[cur]:[];
-  if(!a.length)return;let i=a.findIndex(x=>x.time===t);if(i<0)return;let x=a[i],prev=i?a[i-1].close:x.open;
-  let day=(x.close/prev-1)*100,body=(x.close/x.open-1)*100,range=(x.high/x.low-1)*100;
-  $('hoverPctBar').innerHTML=`<span>O ${hpNum(x.open)}</span><span>H ${hpNum(x.high)}</span><span>L ${hpNum(x.low)}</span><span>C ${hpNum(x.close)}</span><b class="${hpClass(day)}">전봉대비 ${day>=0?'+':''}${day.toFixed(2)}%</b><b class="${hpClass(body)}">봉 ${body>=0?'+':''}${body.toFixed(2)}%</b><span>고저폭 ${range.toFixed(2)}%</span>`;
- }catch(e){}
-}
-setTimeout(()=>{try{chart.subscribeCrosshairMove(p=>{if(p&&p.time)showHoverPct(p.time)})}catch(e){}},1000);
-</script>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 :root{--bg:#070a10;--p:#0e1420;--line:#20293a;--txt:#e9eef7;--muted:#8d99ad;--g:#2fd58b;--r:#ff5c70;--y:#f1c75b;--b:#6da7ff;--c:#b37cff}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,sans-serif}
@@ -189,6 +131,18 @@ body.embedded-btc header{position:relative!important}
     <div class="row"><span>TP1</span><b id="tp1">—</b></div>
     <div class="row"><span>TP2 / 다음 유동성</span><b id="tp2">—</b></div>
     <div class="reason" id="why" style="margin-top:7px">실시간 flow 데이터 수집 중…</div>
+  </div>
+
+  <div class="box">
+    <h3>포지션 / 거래 기록</h3>
+    <div style="overflow:auto;max-height:260px">
+      <table style="width:100%;border-collapse:collapse;font-size:10px">
+        <thead><tr style="color:#8d99ad;text-align:left">
+          <th style="padding:6px">시간</th><th>엔진</th><th>방향</th><th>진입가</th><th>청산가</th><th>보유</th><th>결과</th>
+        </tr></thead>
+        <tbody id="tradeLedger"><tr><td colspan="7" class="tiny" style="padding:8px">기록 불러오는 중…</td></tr></tbody>
+      </table>
+    </div>
   </div>
 
   <div class="box">
@@ -687,7 +641,7 @@ function renderMarkers(){
   let marks=[];
 
   // Signal markers: direction color never changes with WIN/LOSS.
-  let effective=engineView==='AUTO'?((cur==='1M'||cur==='3M')?'SCALP':(cur==='5M'||cur==='15M')?'CORE':'ALL'):engineView;
+  let effective=engineView==='AUTO'?((cur==='1M'||cur==='3M')?'SCALP':(cur==='5M'||cur==='15M')?'CORE':(cur==='1H'||cur==='4H')?'MACRO':'ALL'):engineView;
   for(const s of allSaved().filter(s=>s.time>=from && (effective==='ALL'||(s.engine||'CORE')===effective))){
     const isRetest=(s.name||'').includes('RETEST');
     const color=isRetest?'#35d7e5':(s.engine==='SCALP'?(s.dir==='LONG'?'#35d98a':'#ff78b4'):s.engine==='MACRO'?(s.dir==='LONG'?'#27c2a4':'#d95bd1'):(s.dir==='LONG'?'#4f8cff':'#ff4f64'));
@@ -701,11 +655,11 @@ function renderMarkers(){
   }
 
   // Position layer: X means position closed. It is not a LOSS mark.
-  for(const e of positionEvents.filter(e=>e.time>=from && effective!=='SCALP')){
+  for(const e of positionEvents.filter(e=>e.time>=from && effective!=='SCALP' && effective!=='MACRO')){
     if(e.event==='EXIT'){
       marks.push({
         time:e.time, position:e.side==='LONG'?'aboveBar':'belowBar',
-        color:'#c7d0dd', shape:'circle', text:'X · $'+fmt(e.price)
+        color:'#c7d0dd', shape:'circle', text:'X'
       });
     }else if(e.event==='SWITCH'){
       marks.push({
@@ -728,7 +682,7 @@ function updateDailyMove(){
     if(!Number.isFinite(o)||!Number.isFinite(c)||!o) return;
     const diff=c-o, pct=diff/o*100, col=diff>=0?'#35d98a':'#ff5c70';
     const a=$('dayMoveUsd'), b=$('dayMovePct');
-    if(a){a.textContent=(diff>=0?'+':'')+'$'+Math.abs(diff).toLocaleString(undefined,{maximumFractionDigits:1});a.style.color=col}
+    if(a){a.textContent=(diff>=0?'+$':'-$')+Math.abs(diff).toLocaleString(undefined,{maximumFractionDigits:1});a.style.color=col}
     if(b){b.textContent=(pct>=0?'+':'')+pct.toFixed(2)+'%';b.style.color=col}
   }catch(e){}
 }
@@ -783,7 +737,7 @@ async function syncServer(){
     livePosition=pos||{side:'FLAT'};
     if($('scalpStat')){let q=stats?.SCALP||{};$('scalpStat').textContent=`1/3M SCALP ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':q.winrate+'%'}`;}
     if($('coreStat')){let q=stats?.CORE||{};$('coreStat').textContent=`5/15M TRAP ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':q.winrate+'%'}`;
-    const m=st.MACRO||{}; $('macroStat').textContent=`1H/4H ${m.wins||0}W/${m.losses||0}L · ${m.winrate==null?'—':m.winrate+'%'}`;}
+    const m=stats?.MACRO||{}; $('macroStat').textContent=`1H/4H ${m.wins||0}W/${m.losses||0}L · ${m.winrate==null?'—':m.winrate+'%'}`;}
 
     positionEvents=(Array.isArray(events)?events:[]).map(x=>({
       ...x,ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000)
@@ -811,6 +765,23 @@ function renderChart(full=true){
   $('price').textContent='$'+fmt(a.at(-1).close);renderMarkers();renderContext();
   try{drawInd()}catch(e){};if(full){let i=Math.max(0,a.length-420);chart.timeScale().setVisibleRange({from:a[i].time,to:a.at(-1).time})}
 }
+
+function hpNum(v){return Number(v||0).toLocaleString('ko-KR',{maximumFractionDigits:2})}
+function hpClass(v){return v>0?'hpUp':v<0?'hpDn':''}
+function showHoverPct(t){
+  try{
+    const a=cache?.[cur]||[]; if(!a.length)return;
+    const i=a.findIndex(x=>x.time===t); if(i<0)return;
+    const x=a[i], prev=i?a[i-1].close:x.open;
+    const chg=(x.close/prev-1)*100, body=(x.close/x.open-1)*100, range=(x.high/x.low-1)*100;
+    const el=$('hoverPctBar'); if(!el)return;
+    el.innerHTML=`<span>O ${hpNum(x.open)}</span><span>H ${hpNum(x.high)}</span><span>L ${hpNum(x.low)}</span><span>C ${hpNum(x.close)}</span>
+      <b class="${hpClass(chg)}">전봉대비 ${chg>=0?'+':''}${chg.toFixed(2)}%</b>
+      <b class="${hpClass(body)}">봉 ${body>=0?'+':''}${body.toFixed(2)}%</b>
+      <span>고저폭 ${range.toFixed(2)}%</span>`;
+  }catch(e){}
+}
+
 function initChart(){
   chart=LightweightCharts.createChart($('chart'),{
     layout:{background:{color:'#0a0f18'},textColor:'#8d99ad'},
@@ -823,6 +794,7 @@ function initChart(){
   vwapSeries=chart.addLineSeries({color:'#b37cff',lineWidth:2,priceLineVisible:false,lastValueVisible:true,title:'VWAP'});
   chart.priceScale('vol').applyOptions({scaleMargins:{top:.82,bottom:0}});
   new ResizeObserver(()=>chart.applyOptions({width:$('chart').clientWidth})).observe($('chart'));
+  chart.subscribeCrosshairMove(p=>{if(p&&p.time)showHoverPct(p.time)});
   document.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{
     cur=b.dataset.tf;document.querySelectorAll('[data-tf]').forEach(x=>x.classList.toggle('on',x===b));renderChart(true)
   });
@@ -836,11 +808,10 @@ setInterval(()=>{
 async function boot(){
   initChart();installInfiniteHistory();renderHistory();
   for(const k of Object.keys(TF)){$('status').textContent=k+' history…';cache[k]=await load(k)}
-  renderChart(true);detectBreakoutForRetest();connectBusiness();connectPublic();
+  renderChart(true);updateDailyMove();detectBreakoutForRetest();connectBusiness();connectPublic();
   $('status').textContent='WebSocket 연결 중…';
 }
-boot().then(()=>{syncServer();
-setTimeout(()=>{try{fetchCandles('1D').then(updateDailyMove)}catch(e){}},1200);setInterval(syncServer,5000)}).catch(e=>{$('status').textContent='오류: '+e.message});
+boot().then(()=>{syncServer();setInterval(syncServer,5000)}).catch(e=>{$('status').textContent='오류: '+e.message});
 
 // ---- USER INDICATORS v4.1 ----
 let userMA=[],maSeries=[],userVWAP=null;
