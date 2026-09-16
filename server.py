@@ -20,7 +20,7 @@ app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_
 
 trades=deque(maxlen=12000)
 oi_hist=deque(maxlen=2000)
-candles={"1M":deque(maxlen=800),"3M":deque(maxlen=600),"5M":deque(maxlen=400),"15M":deque(maxlen=400),"1H":deque(maxlen=300),"4H":deque(maxlen=300)}
+candles={"1M":deque(maxlen=900),"3M":deque(maxlen=900),"5M":deque(maxlen=900),"15M":deque(maxlen=900),"1H":deque(maxlen=900),"4H":deque(maxlen=900)}
 book_imb=0.0
 current_oi=None
 last_price=None
@@ -32,6 +32,7 @@ scalp_last_signal_ts=0
 macro_arm=None
 macro_prev_d10=0.0
 macro_last_signal_ts=0
+ma_context_last_ts={"SCALP":0,"CORE":0,"MACRO":0}
 scalp_prev_d10=0.0
 status={"public":"starting","business":"starting","started":int(time.time()*1000)}
 
@@ -141,6 +142,104 @@ def liquidity_tf(tf,lookback=80,local_n=24):
     H,L=pivots(a[-lookback:])
     local=a[-local_n:]
     return H or max(x["high"] for x in local), L or min(x["low"] for x in local)
+
+MA_PERIODS=(20,60,120,240,480)
+
+def sma_tf(tf,n):
+    a=list(candles.get(tf,[]))
+    if len(a)<n:return None
+    return sum(float(x["close"]) for x in a[-n:])/n
+
+def vwap_tf(tf,n=240):
+    a=list(candles.get(tf,[]))[-n:]
+    if not a:return None
+    den=sum(float(x.get("volume",0) or 0) for x in a)
+    if den<=0:return None
+    return sum(((float(x["high"])+float(x["low"])+float(x["close"]))/3.0)*float(x.get("volume",0) or 0) for x in a)/den
+
+def ma_context(tf, atr_value):
+    """Directional location score from SMA20/60/120/240/480 + rolling VWAP.
+    This is evidence, not a mandatory gate: rejection/reclaim near a major reference
+    can create an EARLY research entry before the original flow-confirmed signal.
+    """
+    a=list(candles.get(tf,[]))
+    if len(a)<25 or not last_price:return {"long":0,"short":0,"near":[],"vwap":None}
+    c=a[-1]; prev=a[-2]; A=max(float(atr_value or 1),1.0)
+    refs=[]
+    for n in MA_PERIODS:
+        v=sma_tf(tf,n)
+        if v is not None: refs.append((f"SMA{n}",v))
+    vw=vwap_tf(tf,240)
+    if vw is not None: refs.append(("VWAP",vw))
+    ls=ss=0; near=[]
+    for name,v in refs:
+        dist=abs(float(last_price)-v)/A
+        # only references close enough to plausibly act as support/resistance
+        if dist<=0.35:
+            near.append(name)
+            # rejection above reference -> short evidence
+            if c["high"]>=v and c["close"]<v and c["close"]<c["open"]: ss+=18
+            elif prev["close"]<v and c["high"]>=v and c["close"]<v: ss+=14
+            # reclaim/support -> long evidence
+            if c["low"]<=v and c["close"]>v and c["close"]>c["open"]: ls+=18
+            elif prev["close"]>v and c["low"]<=v and c["close"]>v: ls+=14
+        # broader alignment is deliberately weak; it must not dominate location
+        if last_price>v: ls+=2
+        elif last_price<v: ss+=2
+    return {"long":min(ls,60),"short":min(ss,60),"near":near,"vwap":vw}
+
+def save_ma_early_signal(engine,side,score,tf,A,ctx,metrics):
+    """Persist MA/VWAP early evidence. It may OPEN a flat engine or CONFIRM the same side,
+    but it NEVER flips an existing opposite position. This prevents MA context from
+    recreating the SCALP switch-churn problem while we collect test data.
+    """
+    global ma_context_last_ts
+    now=int(time.time()*1000); p=float(last_price)
+    name=f"MA EARLY {'L' if side=='LONG' else 'S'}"
+    risk=max(.55*A,1.0)
+    sl=p-risk if side=="LONG" else p+risk
+    tp1=p+1.5*risk if side=="LONG" else p-1.5*risk
+    tp2=p+2.3*risk if side=="LONG" else p-2.3*risk
+    c=db();cur=c.execute("""INSERT INTO signals(ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flow,book,status,engine)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'OPEN',?)""",
+      (now,name,side,p,sl,tp1,tp2,score,metrics["d10"],metrics["d30"],metrics["oi60"],metrics["flow"],metrics["book"],engine))
+    sid=cur.lastrowid;c.commit();c.close()
+    pos=current_position(engine)
+    note=f"MA/VWAP early {tf}: {','.join(ctx['near']) or 'alignment'}"
+    if not pos:
+        set_position(engine,side,p,sid,A); position_event("OPEN",side,p,sid,note,engine)
+    elif pos["side"]==side:
+        position_event("CONFIRM",side,p,sid,note,engine)
+    # opposite MA EARLY is recorded as evidence only; never auto-switch.
+    ma_context_last_ts[engine]=now
+
+def evaluate_ma_context():
+    """Experimental early-location layer. Existing SCALP/CORE/MACRO logic remains intact.
+    Engine mapping: SCALP=3M context, CORE=5M context, MACRO=1H context.
+    Requires MA/VWAP reaction plus flow exhaustion/reversal evidence.
+    """
+    if not last_price or len(trades)<20:return
+    now=int(time.time()*1000); w10,w30=flow(10000),flow(30000); inten=flow_intensity(); oi60=oi_delta()
+    cfg={
+      "SCALP":("3M",atr_tf("1M",30),90000),
+      "CORE":("5M",atr_tf("5M",24),180000),
+      "MACRO":("1H",atr_tf("1H",24),900000),
+    }
+    for engine,(tf,A,cooldown) in cfg.items():
+        if now-ma_context_last_ts.get(engine,0)<cooldown:continue
+        ctx=ma_context(tf,A)
+        # Need a real touch/rejection. Pure MA alignment alone cannot fire an early entry.
+        if not ctx["near"]:continue
+        # Exhaustion/turn evidence is intentionally lighter than the original trap flip.
+        long_flow=(w10["ratio"]>0.04 and w10["ratio"]-w30["ratio"]>0.05) or (w30["ratio"]<-.10 and w10["ratio"]>-0.02)
+        short_flow=(w10["ratio"]<-.04 and w30["ratio"]-w10["ratio"]>0.05) or (w30["ratio"]>.10 and w10["ratio"]<0.02)
+        metrics={"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb}
+        lscore=ctx["long"]+(20 if long_flow else 0)+(8 if book_imb>-.10 else 0)+(7 if inten>1.0 else 0)
+        sscore=ctx["short"]+(20 if short_flow else 0)+(8 if book_imb<.10 else 0)+(7 if inten>1.0 else 0)
+        if long_flow and lscore>=62 and lscore>=sscore+8:
+            save_ma_early_signal(engine,"LONG",min(lscore,100),tf,A,ctx,metrics)
+        elif short_flow and sscore>=62 and sscore>=lscore+8:
+            save_ma_early_signal(engine,"SHORT",min(sscore,100),tf,A,ctx,metrics)
 
 def position_event(event,side,price,signal_id=None,note="",engine="CORE"):
     c=db()
@@ -533,9 +632,19 @@ async def seed():
     async with httpx.AsyncClient(timeout=15) as h:
         for label,bar in [("1M","1m"),("3M","3m"),("5M","5m"),("15M","15m"),("1H","1H"),("4H","4H")]:
             try:
-                r=(await h.get("https://www.okx.com/api/v5/market/candles",params={"instId":INST,"bar":bar,"limit":300})).json()
+                # Fetch enough history for SMA480. OKX candles are newest-first; paginate older bars.
+                raw=[]; after=None
+                for _ in range(2):
+                    params={"instId":INST,"bar":bar,"limit":300}
+                    if after is not None: params["after"]=after
+                    r=(await h.get("https://www.okx.com/api/v5/market/candles",params=params)).json()
+                    batch=r.get("data",[])
+                    if not batch: break
+                    raw.extend(batch); after=batch[-1][0]
+                    if len(batch)<300: break
+                uniq={int(x[0]):x for x in raw}
                 arr=[]
-                for x in reversed(r.get("data",[])):
+                for _,x in sorted(uniq.items()):
                     arr.append({"ts":int(x[0]),"open":float(x[1]),"high":float(x[2]),"low":float(x[3]),
                                 "close":float(x[4]),"volume":float(x[5]),"confirm":x[8]})
                 candles[label].extend(arr)
@@ -566,7 +675,7 @@ async def public_loop():
                         manage_position_reversal()
                     except Exception as e:
                         print("position_manager",repr(e))
-                    evaluate();evaluate_scalp();evaluate_macro();update_outcomes()
+                    evaluate();evaluate_scalp();evaluate_macro();evaluate_ma_context();update_outcomes()
         except Exception as e:
             status["public"]="reconnecting";print("public",e);await asyncio.sleep(2)
 

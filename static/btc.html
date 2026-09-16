@@ -79,9 +79,9 @@ body.embedded-btc header{position:relative!important}
  <div style="font-size:9px;color:#7f8ba0;margin-top:7px">예: 5·20·60·120·240 또는 직접 숫자 입력 · 설정은 이 브라우저에 저장</div>
 </div></div><div id="enginePanel" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:7px;border:1px solid #263247;border-radius:8px;background:#0b111b">
 <b style="font-size:10px">SIGNAL ENGINE</b>
-<button class="btn engBtn" data-eng="AUTO">자동</button><button class="btn engBtn" data-eng="SCALP">SCALP 1M/3M</button><button class="btn engBtn" data-eng="CORE">TRAP 5M/15M</button><button class="engbtn" data-eng="MACRO">추세 1H/4H</button><button class="btn engBtn" data-eng="ALL">ALL</button>
+<button class="btn engBtn" data-eng="NONE">신호 제거</button><button class="btn engBtn" data-eng="SCALP">SCALP 1M/3M</button><button class="btn engBtn" data-eng="CORE">TRAP 5M/15M</button><button class="engbtn" data-eng="MACRO">추세 1H/4H</button><button class="btn engBtn" data-eng="ALL">ALL</button>
 <span id="scalpStat" style="font-size:10px;color:#8d99ad">SCALP —</span><span id="coreStat" style="font-size:10px;color:#8d99ad">5/15 —</span><span id="macroStat" style="font-size:10px;color:#8d99ad">1H/4H —</span>
-<div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">자동 = 1M·3M SCALP / 5M·15M TRAP / 1H·4H 큰추세 / 일·주·월은 전체 표시</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
+<div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">신호 제거 = 차트 마커만 숨김 · DB/거래기록은 그대로 보존</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
 <span style="color:#35d98a">● SCALP L</span><span style="color:#ff78b4">● SCALP S</span>
 <span style="color:#4f8cff">● TRAP L</span><span style="color:#ff4f64">● TRAP S</span>
 <span style="color:#27c2a4">● 1H/4H L</span><span style="color:#d95bd1">● 1H/4H S</span><span style="color:#d7dee9">● X 종료</span></div>
@@ -176,6 +176,7 @@ let saved=JSON.parse(localStorage.getItem('trapflow_v17_signals')||'[]');
 const SERVER_API=location.origin;
 let serverSaved=[];
 let positionEvents=[];
+let liveEnginePositions=[];
 let livePosition={side:'FLAT'};
 
 const $=id=>document.getElementById(id);
@@ -609,7 +610,7 @@ function renderLiveState(liq,A,w10,w30,oi60,int,nearH,nearL){
   }
 }
 let positionPerf={closed:0,wins:0,losses:0,winrate:null,engines:{}};
-let engineView='AUTO';
+let engineView='ALL';
 function allSaved(){
   let m=new Map();
   for(const x of saved)m.set('local:'+x.id,x);
@@ -650,6 +651,7 @@ function renderHistory(){
   }).join(''):'<div class="tiny">아직 없음</div>';
 }
 function renderMarkers(){
+  if(engineView==='NONE'){ try{candle.setMarkers([])}catch(e){}; return; }
   let from=cache[cur]?.[0]?.time||0;
   let marks=[];
 
@@ -657,7 +659,8 @@ function renderMarkers(){
   let effective=engineView==='AUTO'?((cur==='1M'||cur==='3M')?'SCALP':(cur==='5M'||cur==='15M')?'CORE':(cur==='1H'||cur==='4H')?'MACRO':'ALL'):engineView;
   for(const s of allSaved().filter(s=>s.time>=from && (effective==='ALL'||(s.engine||'CORE')===effective))){
     const isRetest=(s.name||'').includes('RETEST');
-    const color=isRetest?'#35d7e5':(s.engine==='SCALP'?(s.dir==='LONG'?'#35d98a':'#ff78b4'):s.engine==='MACRO'?(s.dir==='LONG'?'#27c2a4':'#d95bd1'):(s.dir==='LONG'?'#4f8cff':'#ff4f64'));
+    const isMA=(s.name||'').includes('MA EARLY');
+    const color=isMA?'#f2c94c':isRetest?'#b56cff':(s.engine==='SCALP'?(s.dir==='LONG'?'#35d98a':'#ff78b4'):s.engine==='MACRO'?(s.dir==='LONG'?'#27c2a4':'#d95bd1'):(s.dir==='LONG'?'#4f8cff':'#ff4f64'));
     marks.push({
       time:s.time,
       position:s.dir==='LONG'?'belowBar':'aboveBar',
@@ -685,7 +688,19 @@ function renderMarkers(){
         time:e.time, position:isL?'belowBar':'aboveBar',
         color:isL?'#00e5ff':'#ffd400',
         shape:isL?'arrowUp':'arrowDown',
-        text:(ev==='SWITCH'?'◆ '+tf+' SW→':'◆ '+tf+' POS ')+(isL?'L':'S')+' $'+fmt(e.price)
+        text:(()=>{
+          let base=(ev==='SWITCH'?'◆ '+tf+' SW→':'◆ '+tf+' POS ')+(isL?'L':'S')+' $'+fmt(e.price);
+          const eng=e.engine||'CORE';
+          const op=(liveEnginePositions||[]).find(p=>(p.engine||'CORE')===eng && p.side===e.side && Math.abs(Number(p.entry||0)-Number(e.price||0))<0.11);
+          if(op){
+            const now=Number(currentPrice()||0), ent=Number(op.entry||0);
+            if(now>0&&ent>0){
+              const pct=(op.side==='LONG'?(now-ent):(ent-now))/ent*100;
+              base+=' · '+(pct>=0?'+':'')+pct.toFixed(2)+'%';
+            }
+          }
+          return base;
+        })()
       });
     }
   }
@@ -747,7 +762,7 @@ function renderTradeLedger(){
     let pct=null;
     if(r.exit!=null&&r.entry){pct=(r.side==='SHORT'?(r.entry-r.exit):(r.exit-r.entry))/r.entry*100}
     const eng=r.engine==='SCALP'?'1/3M':r.engine==='MACRO'?'1H/4H':'5/15M';
-    const col=r.side==='LONG'?(r.engine==='SCALP'?'#35d98a':r.engine==='MACRO'?'#27c2a4':'#4f8cff'):(r.engine==='SCALP'?'#ff78b4':r.engine==='MACRO'?'#d95bd1':'#ff4f64');
+    const col=(r.name||'').includes('MA EARLY')?'#f2c94c':r.side==='LONG'?(r.engine==='SCALP'?'#35d98a':r.engine==='MACRO'?'#27c2a4':'#4f8cff'):(r.engine==='SCALP'?'#ff78b4':r.engine==='MACRO'?'#d95bd1':'#ff4f64');
     const bad=String(r.reason||'').startsWith('AUDIT:');
     return `<tr style="border-top:1px solid #1f2a3a">
       <td style="padding:7px 6px">${new Date(r.ts).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</td>
@@ -790,6 +805,7 @@ async function syncServer(){
     const ep=$('enginePositions');
     if(ep){
       const ps=Array.isArray(positions)?positions:[];
+      liveEnginePositions=ps;
       ep.innerHTML=ps.length?ps.map(p=>{
         const tf=p.engine==='SCALP'?'1/3M':p.engine==='MACRO'?'1H/4H':'5/15M';
         const col=p.side==='LONG'?(p.engine==='SCALP'?'#35d98a':p.engine==='MACRO'?'#27c2a4':'#4f8cff'):(p.engine==='SCALP'?'#ff78b4':p.engine==='MACRO'?'#d95bd1':'#ff4f64');
@@ -802,7 +818,7 @@ async function syncServer(){
         const pnlUsd=(nowPx>0&&ent>0)?(p.side==='LONG'?(nowPx-ent):(ent-nowPx)):0;
         const pnlColor=pnlPct>0?'#35d98a':pnlPct<0?'#ff4f64':'#9aa7b8';
         const pnlSign=pnlPct>0?'+':'';
-        return `<div style="padding:7px 0;border-bottom:1px solid #1f2a3a"><b style="color:${col}">${tf} ${p.side}</b> · 진입 $${fmt(p.entry)} · <b style="color:${stColor}">${st}</b> ${hold}<br><b style="color:${pnlColor}">현재손익 ${pnlSign}${pnlPct.toFixed(3)}% (${pnlUsd>=0?'+':'-'}$${fmt(Math.abs(pnlUsd))})</b><br><span class="tiny">반대압력 ${ps.toFixed(0)} · MFE +$${fmt(Number(p.mfe||0))} · MAE -$${fmt(Number(p.mae||0))}</span></div>`;
+        return `<div style="padding:7px 0;border-bottom:1px solid #1f2a3a"><b style="color:${col}">${tf} ${p.side}</b> · 진입 $${fmt(p.entry)} · <b style="color:${stColor}">${st}</b> ${hold}<br><b class="livePosPnl" data-entry="${ent}" data-side="${p.side}" style="color:${pnlColor}">현재수익률 ${pnlSign}${pnlPct.toFixed(3)}% · 현재손익 ${pnlUsd>=0?'+':'-'}$${fmt(Math.abs(pnlUsd))}</b><br><span class="tiny">반대압력 ${ps.toFixed(0)} · MFE +$${fmt(Number(p.mfe||0))} · MAE -$${fmt(Number(p.mae||0))}</span></div>`;
       }).join(''):`<span style="color:#f0c84b">현재 열린 포지션 없음</span><br><span class="tiny">포지션 종료는 반드시 X(EXIT) 이벤트가 기록되어야 합니다.</span>`;
     }
     let st=$('srvState'); if(st){st.textContent=(live?.status?.public==='live'&&live?.status?.business==='live')?'● LIVE':'● CONNECTED';st.style.color='#2fd58b'}
@@ -816,6 +832,20 @@ async function syncServer(){
     renderHistory();renderMarkers();
   }catch(e){let st=$('srvState');if(st){st.textContent='● OFFLINE';st.style.color='#ff5c70'}}
 }
+function refreshLivePositionReturns(){
+  const nowPx=Number(currentPrice()||live?.price||0);
+  if(!(nowPx>0)) return;
+  document.querySelectorAll('.livePosPnl').forEach(el=>{
+    const ent=Number(el.dataset.entry||0), side=String(el.dataset.side||'LONG');
+    if(!(ent>0)) return;
+    const usd=side==='LONG'?(nowPx-ent):(ent-nowPx);
+    const pct=usd/ent*100;
+    el.textContent=`현재수익률 ${pct>=0?'+':''}${pct.toFixed(3)}% · 현재손익 ${usd>=0?'+':'-'}$${fmt(Math.abs(usd))}`;
+    el.style.color=pct>0?'#35d98a':pct<0?'#ff4f64':'#9aa7b8';
+  });
+}
+setInterval(refreshLivePositionReturns,500);
+
 function renderContext(){
   let h1=structure(confirmed(cache['1H']||[])),h4=structure(confirmed(cache['4H']||[])),m15=structure(confirmed(cache['15M']||[])),m5=structure(confirmed(cache['5M']||[]));
   $('mtf').innerHTML=[['5M',m5],['15M',m15],['1H',h1],['4H',h4]].map(([k,v])=>`<div>${k}<b class="${v==='BULL'?'green':v==='BEAR'?'red':'yellow'}">${v}</b></div>`).join('');
