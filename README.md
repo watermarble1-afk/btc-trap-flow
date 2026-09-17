@@ -1,22 +1,16 @@
-# BTC OKX RADAR v6.42 · UNIVERSAL SIGNAL CLUSTER
+# BTC OKX RADAR v6.44 — CLUSTER TIME/COUNT FIX
 
-v6.41 기반 차트 표시 전용 패치.
+Patch scope only: chart signal aggregation display.
 
-- SCALP(1/3M), 5M, 15M, 1H, 4H 등 선택된 모든 일반 신호를 대상으로 클러스터링
-- 같은 방향 + 5분 이내 + 가격 0.22% 이내로 겹치는 신호는 차트에서 하나로 합침
-- 예: `[1/3M+5M+15M] S (8)`
-- `(8)`은 합쳐진 원본 신호 개수
-- 첫 경고 시점에 대표 마커를 표시하여 선행성 확인 가능
-- LONG/SHORT 방향이 다르면 절대 합치지 않음
-- POS / X / SWITCH / 사용자 B·S·X는 합치지 않음
-- SQLite 원본 signals 및 Signal Lab 연구 데이터는 삭제/병합하지 않음
-- v6.41 사후검증 기능 유지
-- PC + 모바일 동일 적용
-
-
-## v6.43 VWAP COLOR + SCALP SIGNAL-ONLY
-- VWAP-containing chart clusters use a dedicated purple family and include `VWAP` in the marker text.
-- SCALP (1/3M) continues generating/storing signals for research, but cannot create new automatic engine positions.
-- Existing SCALP positions are not silently deleted; their lifecycle can finish normally.
-- 5M/15M/1H/4H automatic research positions are unchanged.
-- Signal research DB, universal clustering, manual user positions, and PC/mobile behavior remain intact.
+- Same-engine counts are now limited to that engine's native candle bucket.
+  - SCALP: 3m bucket
+  - 5M: 5m bucket
+  - 15M: 15m bucket
+  - 1H: 1h bucket
+  - 4H: 4h bucket
+- VWAP / RETEST / normal families are counted separately before cross-engine merging.
+- Cross-engine merge uses a tight 75-second actual-signal overlap window plus price proximity.
+- A merged marker is placed at the latest constituent signal time (cluster completion), never backdated.
+- Filter changes cannot drag a signal backward in time.
+- DB, Signal Lab, signal generation, POS logic, v6.41 research, VWAP colors, and SCALP signal-only behavior are unchanged.
+- PC and mobile patched.

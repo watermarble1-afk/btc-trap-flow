@@ -708,42 +708,66 @@ function renderMarkers(){
   // aggregated raw signals plus POS / X / SWITCH. SQLite/Signal Lab remain untouched.
   const effective='MULTI';
   const showRawSignals = selectedEngines.size>0;
-  // v6.43 UNIVERSAL SIGNAL CLUSTER
-  // Raw DB rows remain untouched. Only chart markers are compressed.
-  // Any selected-engine signals that overlap in direction + time + price are merged,
-  // regardless of engine (SCALP/5M/15M/1H/4H) or family (NORMAL/VWAP/RETEST).
+  // v6.44 STABLE NATIVE-BUCKET CLUSTER
+  // 1) Aggregate only inside each engine's own candle bucket.
+  // 2) Cross-engine merge only when the *actual latest signal times* overlap.
+  // 3) A merged marker is placed at the completion time (latest constituent signal),
+  //    never backdated to the first warning. DB / Signal Lab rows are untouched.
   const engineRank={'SCALP':0,'5M':1,'15M':2,'1H':3,'4H':4};
   const engineText=e=>e==='SCALP'?'1/3M':e;
+  const bucketSec={'SCALP':180,'5M':300,'15M':900,'1H':3600,'4H':14400};
   const raw=(showRawSignals ? allSaved() : [])
     .filter(s=>!(s.name||'').includes('MA EARLY') && s.time>=from && selectedEngines.has(s.engine||'5M'))
     .map(s=>({...s,time:Number(s.time),entry:Number(s.entry||s.price||0)}))
     .sort((a,b)=>a.time-b.time);
 
-  // Five minutes is the visual overlap window. Price must also be close (0.22%).
-  // A new direction always starts a new cluster. This keeps distinct market moves separate.
-  const CLUSTER_SEC=300, PRICE_PCT=0.22;
-  const clusters=[];
+  const native=new Map();
   for(const s of raw){
+    const eng=s.engine||'5M';
+    const sec=bucketSec[eng]||300;
+    const bucket=Math.floor(s.time/sec)*sec;
+    const rawName=String(s.name||'').toUpperCase();
+    const family=rawName.includes('VWAP')?'VWAP':rawName.includes('RETEST')?'RETEST':rawName.includes('SCALP')?'SCALP':'NORMAL';
+    // Family stays in the key so VWAP does not silently inflate a normal signal count.
+    const key=[eng,bucket,s.dir,family].join('|');
+    let g=native.get(key);
+    if(!g){
+      g={dir:s.dir,count:0,engine:eng,family,bucket,firstTime:s.time,lastTime:s.time,
+         anchorPrice:s.entry||0,priceSum:0,priceN:0};
+      native.set(key,g);
+    }
+    g.count++;
+    g.firstTime=Math.min(g.firstTime,s.time);
+    g.lastTime=Math.max(g.lastTime,s.time);
+    if(s.entry){ g.priceSum+=s.entry; g.priceN++; g.anchorPrice=g.priceSum/g.priceN; }
+  }
+
+  // Merge different engines only when their real signal timestamps are genuinely close.
+  // This is intentionally much tighter than the old rolling 5-minute window.
+  const CROSS_SEC=75, PRICE_PCT=0.22;
+  const groups=[...native.values()].sort((a,b)=>a.lastTime-b.lastTime);
+  const clusters=[];
+  for(const s of groups){
     let best=null;
     for(let i=clusters.length-1;i>=0;i--){
       const g=clusters[i];
-      if(s.time-g.lastTime>CLUSTER_SEC) break;
-      if(g.dir!==s.dir) continue;
-      const gp=Number(g.anchorPrice||0), sp=Number(s.entry||0);
+      if(s.lastTime-g.lastTime>CROSS_SEC) break;
+      if(g.dir!==s.dir || g.engines.has(s.engine)) continue;
+      const gp=Number(g.anchorPrice||0), sp=Number(s.anchorPrice||0);
       const priceClose=!gp||!sp||Math.abs(sp-gp)/gp*100<=PRICE_PCT;
       if(priceClose){ best=g; break; }
     }
-    const eng=s.engine||'5M';
-    const rawName=String(s.name||'').toUpperCase();
-    const family=rawName.includes('VWAP')?'VWAP':rawName.includes('RETEST')?'RETEST':rawName.includes('SCALP')?'SCALP':'NORMAL';
     if(best){
-      best.count++;
-      best.lastTime=Math.max(best.lastTime,s.time);
-      best.engines.add(eng); best.families.add(family);
-      if(s.entry) best.anchorPrice=(best.anchorPrice*(best.count-1)+s.entry)/best.count;
+      const oldN=best.priceN||0, addN=s.priceN||0;
+      if(addN){ best.anchorPrice=((best.anchorPrice||0)*oldN+(s.anchorPrice||0)*addN)/(oldN+addN); best.priceN=oldN+addN; }
+      best.count+=s.count;
+      best.firstTime=Math.min(best.firstTime,s.firstTime);
+      best.lastTime=Math.max(best.lastTime,s.lastTime);
+      best.engines.add(s.engine); best.families.add(s.family);
     }else{
-      clusters.push({dir:s.dir,count:1,firstTime:s.time,lastTime:s.time,anchorPrice:s.entry||0,
-        engines:new Set([eng]),families:new Set([family])});
+      clusters.push({dir:s.dir,count:s.count,firstTime:s.firstTime,lastTime:s.lastTime,
+        anchorPrice:s.anchorPrice||0,priceN:s.priceN||0,
+        engines:new Set([s.engine]),families:new Set([s.family])});
     }
   }
 
@@ -752,9 +776,8 @@ function renderMarkers(){
     const engs=engines.map(engineText).join('+');
     const hasVwap=g.families.has('VWAP'), hasRetest=g.families.has('RETEST');
     const color=hasVwap?(g.dir==='LONG'?'#d78cff':'#9b5cff'):hasRetest?'#b56cff':engColor(engines[engines.length-1]||'5M',g.dir);
-    // Put the marker at the first warning: the chart keeps showing how early the cluster started.
     marks.push({
-      time:g.firstTime,
+      time:g.lastTime,
       position:g.dir==='LONG'?'belowBar':'aboveBar',
       color,
       shape:g.dir==='LONG'?'arrowUp':'arrowDown',
