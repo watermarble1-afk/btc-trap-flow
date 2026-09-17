@@ -57,7 +57,7 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
    <button class="chip" data-lf="5M">5M</button><button class="chip" data-lf="15M">15M</button><button class="chip" data-lf="1H">1H</button><button class="chip" data-lf="4H">4H</button>
    <button class="chip" data-lf="LONG">LONG</button><button class="chip" data-lf="SHORT">SHORT</button>
   </div>
-  <div style="overflow:auto"><table class="ledger"><thead><tr><th>진입 시간</th><th>엔진</th><th>방향</th><th>진입가</th><th>청산가</th><th>청산 시간</th><th>보유시간</th><th>수익률</th><th>상태</th></tr></thead><tbody id="positionsBody"><tr><td colspan="9">불러오는 중…</td></tr></tbody></table></div>
+  <div style="overflow:auto"><table class="ledger"><thead><tr><th>진입 시간</th><th>엔진</th><th>방향</th><th>진입가</th><th>청산가</th><th>청산 시간</th><th>보유시간</th><th>수익금</th><th>수익률</th><th>상태</th></tr></thead><tbody id="positionsBody"><tr><td colspan="10">불러오는 중…</td></tr></tbody></table></div>
  </div>
  <div class="card" style="margin-top:12px">
   <h3>신호 벤치마크 기록 · 포지션 성과는 TP/SL 비교용이며 실제 포지션 청산과 무관</h3>
@@ -129,9 +129,10 @@ function renderLab(){
  positionsBody.innerHTML=pos.length?pos.map(r=>{
   const ms=(r.exitTs||Date.now())-r.ts,m=Math.max(0,Math.floor(ms/60000));
   const hold=m>=1440?`${Math.floor(m/1440)}일 ${Math.floor((m%1440)/60)}시간`:m>=60?`${Math.floor(m/60)}시간 ${m%60}분`:`${m}분`;
-  const pct=r.exit&&r.entry?((r.side==='SHORT'?r.entry-r.exit:r.exit-r.entry)/r.entry*100):null;
-  return `<tr><td>${new Date(r.ts).toLocaleString('ko-KR')}</td><td>${eng(r.engine)}</td><td class="${r.side==='LONG'?'pos':'neg'}">${r.side}</td><td>$${fmtN(r.entry)}</td><td>${r.exit?'$'+fmtN(r.exit):'—'}</td><td>${r.exitTs?new Date(r.exitTs).toLocaleString('ko-KR'):'—'}</td><td>${hold}</td><td class="${pct==null?'':pct>=0?'pos':'neg'}">${pct==null?'—':(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td><td>${r.status}</td></tr>`
- }).join(''):'<tr><td colspan="9">해당 포지션 기록 없음</td></tr>';
+  const pnl=r.exit&&r.entry?(r.side==='SHORT'?r.entry-r.exit:r.exit-r.entry):null;
+  const pct=pnl==null?null:(pnl/r.entry*100);
+  return `<tr><td>${new Date(r.ts).toLocaleString('ko-KR')}</td><td>${eng(r.engine)}</td><td class="${r.side==='LONG'?'pos':'neg'}">${r.side}</td><td>$${fmtN(r.entry)}</td><td>${r.exit?'$'+fmtN(r.exit):'—'}</td><td>${r.exitTs?new Date(r.exitTs).toLocaleString('ko-KR'):'—'}</td><td>${hold}</td><td class="${pnl==null?'':pnl>=0?'pos':'neg'}">${pnl==null?'—':(pnl>=0?'+$':'-$')+fmtN(Math.abs(pnl))}</td><td class="${pct==null?'':pct>=0?'pos':'neg'}">${pct==null?'—':(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td><td>${r.status}</td></tr>`
+ }).join(''):'<tr><td colspan="10">해당 포지션 기록 없음</td></tr>';
  const sig=LABSIG.filter(match);
  signalsBody.innerHTML=sig.length?sig.map(x=>`<tr><td>${new Date(+x.ts).toLocaleString('ko-KR')}</td><td>${eng(x.engine||'5M')}</td><td class="${x.side==='LONG'?'pos':'neg'}">${x.side||'—'}</td><td>${x.name}</td><td>$${fmtN(x.entry)}</td><td>$${fmtN(x.sl)}</td><td>$${fmtN(x.tp1)}</td><td>$${fmtN(x.tp2)}</td><td>${x.score??'—'}</td><td class="${x.status==='WIN'?'pos':x.status==='LOSS'?'neg':''}">${x.status}</td></tr>`).join(''):'<tr><td colspan="10">해당 신호 기록 없음</td></tr>';
 }

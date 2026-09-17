@@ -80,6 +80,9 @@ def db():
     c.execute("UPDATE signals SET engine='1H' WHERE engine='MACRO'")
     c.execute("UPDATE position_events SET engine='5M' WHERE engine='CORE'")
     c.execute("UPDATE position_events SET engine='1H' WHERE engine='MACRO'")
+    c.execute("""CREATE TABLE IF NOT EXISTS position_reentry_guard(
+      engine TEXT PRIMARY KEY, side TEXT, exit_ts INTEGER, exit_price REAL, atr REAL, reason TEXT
+    )""")
     c.execute("UPDATE engine_positions SET engine='5M' WHERE engine='CORE' AND NOT EXISTS (SELECT 1 FROM engine_positions x WHERE x.engine='5M')")
     c.execute("DELETE FROM engine_positions WHERE engine='CORE'")
     c.execute("UPDATE engine_positions SET engine='1H' WHERE engine='MACRO' AND NOT EXISTS (SELECT 1 FROM engine_positions x WHERE x.engine='1H')")
@@ -265,12 +268,34 @@ def position_confluence(engine, side, signal_score, atr_value=None):
     if hb==-wanted and score<92: confirmed=False
     return score, reasons, ctx, confirmed, sorted(groups)
 
+def set_reentry_guard(engine, side, exit_price, atr_value, reason):
+    c=db(); c.execute("""INSERT INTO position_reentry_guard(engine,side,exit_ts,exit_price,atr,reason)
+      VALUES(?,?,?,?,?,?) ON CONFLICT(engine) DO UPDATE SET side=excluded.side,exit_ts=excluded.exit_ts,
+      exit_price=excluded.exit_price,atr=excluded.atr,reason=excluded.reason""",
+      (engine,side,int(time.time()*1000),float(exit_price),float(atr_value or 0),reason))
+    c.commit(); c.close()
+
+def reentry_guard_status(engine, side):
+    # Prevent same-engine/same-direction churn after an automatic stop.
+    # New signals are still stored; only simulator POS re-entry is locked.
+    lock_ms={"SCALP":8*60*1000,"5M":15*60*1000,"15M":30*60*1000,"1H":60*60*1000,"4H":120*60*1000}.get(engine,15*60*1000)
+    c=db(); c.row_factory=sqlite3.Row
+    r=c.execute("SELECT * FROM position_reentry_guard WHERE engine=?",(engine,)).fetchone(); c.close()
+    if not r or str(r["side"])!=side:return False,0,None
+    left=lock_ms-(int(time.time()*1000)-int(r["exit_ts"] or 0))
+    return left>0,max(0,left),dict(r)
+
 def apply_position_if_strong(engine,side,price,signal_id,signal_score,atr_value=None,source="SIGNAL"):
     """Only CONFIRMED multi-factor setups may create a research POS."""
     gate,reasons,ctx,confirmed,groups=position_confluence(engine,side,signal_score,atr_value)
     pos=current_position(engine)
     note=f"{source} CONF {gate} groups={'+'.join(groups) or '-'}: "+(",".join(reasons) or "insufficient confluence")
     if not pos:
+        locked,left,guard=reentry_guard_status(engine,side)
+        if locked:
+            # Same-side automatic re-entry is forbidden for a TF-specific reset window.
+            # This kills the S->FLOW X->S->FLOW X loop without deleting any signals.
+            return gate
         if confirmed:
             set_position(engine,side,price,signal_id,atr_value)
             position_event("OPEN",side,price,signal_id,note,engine)
@@ -622,10 +647,12 @@ def manage_position_reversal():
                   (best,worst,mfe,mae,new_state,new_psince,pscore,now,engine))
         c.commit();c.close()
 
-        # SCALP HOLD GUARD: micro-flow is noisy immediately after entry.
-        # Give a fresh SCALP position 45s to develop before ordinary FLOW EXIT/SWITCH.
-        # A truly broken entry can still emergency-exit immediately at >=1.25 ATR adverse.
+        # FLOW HOLD GUARD: do not let micro-flow churn a freshly opened research POS.
+        # Structure invalidation remains available, so a clearly broken thesis can still exit.
         hold_ms=max(0, now-int(pos.get("opened_ts") or now))
+        min_hold_ms={"SCALP":2*60*1000,"5M":8*60*1000,"15M":15*60*1000,
+                     "1H":30*60*1000,"4H":60*60*1000}.get(engine,8*60*1000)
+        flow_guard = hold_ms < min_hold_ms
         scalp_guard = engine=="SCALP" and hold_ms < 45000
 
         # STRUCTURE INVALIDATION: EXIT-only; never forces an opposite entry.
@@ -638,6 +665,7 @@ def manage_position_reversal():
                   f"d10={d10:.3f} d30={d30:.3f} flow={intensity:.2f} "
                   f"oi60={oi:.4f} book={book:.3f} mfe={mfe:.1f} mae={mae:.1f}")
             position_event("EXIT",side,last_price,old_signal,note,engine)
+            set_reentry_guard(engine,side,last_price,A,"STRUCTURE_INVALIDATION")
             clear_position(engine,"STRUCTURE_INVALIDATION")
             continue
 
@@ -645,11 +673,12 @@ def manage_position_reversal():
 
         # Strong reversal: EXIT old side + SWITCH to opposite side.
         switch_accept = adverse>=0.38 if engine=="SCALP" else adverse>=0.45 if engine in ("5M","15M") else adverse>=0.55
-        if persisted and pscore>=switch_threshold and switch_accept and not scalp_guard:
+        if persisted and pscore>=switch_threshold and switch_accept and not flow_guard:
             old_signal=pos["signal_id"]
             note=(f"FLOW SWITCH score={pscore} d10={d10:.3f} d30={d30:.3f} "
                   f"flow={intensity:.2f} oi60={oi:.4f} book={book:.3f} mfe={mfe:.1f} mae={mae:.1f}")
             position_event("EXIT",side,last_price,old_signal,note,engine)
+            set_reentry_guard(engine,side,last_price,A,"FLOW_SWITCH")
             clear_position(engine,"FLOW_SWITCH")
             set_position(engine,opposite_side,last_price,None,A)
             position_event("SWITCH",opposite_side,last_price,None,note,engine)
@@ -658,14 +687,15 @@ def manage_position_reversal():
         # EXIT-only: current thesis is invalid enough to stop holding, but opposite side
         # is not strong enough for an immediate reverse position.
         exit_threshold=65 if engine=="SCALP" else 70 if engine in ("5M","15M") else 75
-        exit_ms=8000 if engine=="SCALP" else 18000 if engine=="5M" else 25000 if engine=="15M" else 45000 if engine=="1H" else 60000
+        exit_ms=30000 if engine=="SCALP" else 45000 if engine=="5M" else 60000 if engine=="15M" else 90000 if engine=="1H" else 120000
         exit_accept=adverse>=0.22 if engine=="SCALP" else adverse>=0.28 if engine in ("5M","15M") else adverse>=0.38
         exit_persisted = new_state=="PRESSURE" and new_psince and now-int(new_psince)>=exit_ms
-        if exit_persisted and pscore>=exit_threshold and exit_accept and not scalp_guard:
+        if exit_persisted and pscore>=exit_threshold and exit_accept and not flow_guard:
             old_signal=pos["signal_id"]
             note=(f"FLOW EXIT score={pscore} d10={d10:.3f} d30={d30:.3f} "
                   f"flow={intensity:.2f} oi60={oi:.4f} book={book:.3f} mfe={mfe:.1f} mae={mae:.1f}")
             position_event("EXIT",side,last_price,old_signal,note,engine)
+            set_reentry_guard(engine,side,last_price,A,"FLOW_EXIT")
             clear_position(engine,"FLOW_EXIT")
             continue
 

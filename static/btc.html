@@ -47,7 +47,7 @@ body.embedded-btc header{position:relative!important}
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.29 · VWAP CONFLUENCE</h1>
+    <h1>BTC OKX RADAR v6.33 · SIGNAL COUNT FIX</h1>
     <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 신호 엔진은 1M/3M SCALP만 묶고 5M · 15M · 1H · 4H는 완전 독립</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
@@ -143,9 +143,9 @@ body.embedded-btc header{position:relative!important}
     <div style="overflow:auto;max-height:260px">
       <table style="width:100%;border-collapse:collapse;font-size:10px">
         <thead><tr style="color:#8d99ad;text-align:left">
-          <th style="padding:6px">시간</th><th>엔진</th><th>방향</th><th>진입가</th><th>청산가</th><th>보유</th><th>종료사유</th><th>결과</th>
+          <th style="padding:6px">시간</th><th>엔진</th><th>방향</th><th>진입가</th><th>청산가</th><th>보유</th><th>종료사유</th><th>수익금</th><th>결과</th>
         </tr></thead>
-        <tbody id="tradeLedger"><tr><td colspan="7" class="tiny" style="padding:8px">기록 불러오는 중…</td></tr></tbody>
+        <tbody id="tradeLedger"><tr><td colspan="9" class="tiny" style="padding:8px">기록 불러오는 중…</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -677,15 +677,18 @@ function renderMarkers(){
   const grouped=new Map();
   for(const s of allSaved().filter(s=>!(s.name||'').includes('MA EARLY') && s.time>=from && (effective==='ALL'||(s.engine||'5M')===effective))){
     const bucket=Math.floor(Number(s.time)/bucketSec)*bucketSec;
-    const name=s.name||((s.dir==='LONG')?'TRAP L':'TRAP S');
-    const key=[bucket,s.engine||'5M',s.dir||'',name].join('|');
+    const rawName=String(s.name||'').toUpperCase().trim();
+    // Canonicalize historical/new naming variants so visually identical signals on one bar really merge.
+    // e.g. "TRAP S", "5M S", "SHORT" -> NORMAL; VWAP/RETEST stay separate families.
+    const sigType=rawName.includes('VWAP')?'VWAP':rawName.includes('RETEST')?'RETEST':rawName.includes('SCALP')?'SCALP':'NORMAL';
+    const key=[bucket,s.engine||'5M',s.dir||'',sigType].join('|');
     const g=grouped.get(key);
     if(g){ g.count++; g.lastTime=Math.max(g.lastTime,Number(s.time)); }
-    else grouped.set(key,{...s,name,count:1,bucket,lastTime:Number(s.time)});
+    else grouped.set(key,{...s,sigType,count:1,bucket,lastTime:Number(s.time)});
   }
   for(const s of grouped.values()){
-    const isRetest=(s.name||'').includes('RETEST');
-    const isVwap=(s.name||'').startsWith('VWAP');
+    const isRetest=s.sigType==='RETEST';
+    const isVwap=s.sigType==='VWAP';
     // VWAP gets a dedicated visual family; engine identity remains in the label.
     const color=isRetest?'#b56cff':isVwap?(s.dir==='LONG'?'#35d7e5':'#ff9f43'):engColor(s.engine,s.dir);
     marks.push({
@@ -693,7 +696,7 @@ function renderMarkers(){
       position:s.dir==='LONG'?'belowBar':'aboveBar',
       color,
       shape:s.dir==='LONG'?'arrowUp':'arrowDown',
-      text:engBracket(s.engine)+' '+s.name+' ('+s.count+')'
+      text:engBracket(s.engine)+' '+(s.sigType==='VWAP'?'VWAP '+(s.dir==='LONG'?'L':'S'):s.sigType==='RETEST'?'RETEST '+(s.dir==='LONG'?'L':'S'):s.sigType==='SCALP'?'SCALP '+(s.dir==='LONG'?'L':'S'):(s.dir==='LONG'?'L':'S'))+' ('+s.count+')'
     });
   }
 
@@ -782,12 +785,15 @@ function renderTradeLedger(){
   }
   Object.values(openByEngine).forEach(op=>rows.push({...op,exit:null,exitTs:null,reason:'OPEN'}));
   rows.sort((a,b)=>b.ts-a.ts);
-  if(!rows.length){el.innerHTML='<tr><td colspan="8" class="tiny" style="padding:8px">아직 포지션 기록 없음</td></tr>';return}
+  if(!rows.length){el.innerHTML='<tr><td colspan="9" class="tiny" style="padding:8px">아직 포지션 기록 없음</td></tr>';return}
   el.innerHTML=rows.slice(0,40).map(r=>{
     const held=(r.exitTs||Date.now())-r.ts, mins=Math.max(0,Math.floor(held/60000));
     const hold=mins>=1440?`${Math.floor(mins/1440)}일 ${Math.floor((mins%1440)/60)}시간`:mins>=60?`${Math.floor(mins/60)}시간 ${mins%60}분`:`${mins}분`;
-    let pct=null;
-    if(r.exit!=null&&r.entry){pct=(r.side==='SHORT'?(r.entry-r.exit):(r.exit-r.entry))/r.entry*100}
+    let pct=null, pnlUsd=null;
+    if(r.exit!=null&&r.entry){
+      pnlUsd=(r.side==='SHORT'?(r.entry-r.exit):(r.exit-r.entry));
+      pct=pnlUsd/r.entry*100;
+    }
     const eng=engLabel(r.engine);
     const col=(r.name||'').includes('MA EARLY')?'#f2c94c':engColor(r.engine,r.side);
     const bad=String(r.reason||'').startsWith('AUDIT:');
@@ -796,6 +802,7 @@ function renderTradeLedger(){
       <td>${eng}</td><td style="color:${col};font-weight:800">${r.side==='LONG'?'L':'S'}</td>
       <td>${r.entry==null?'—':'$'+fmt(r.entry)}</td><td>${r.exit==null?'보유중':'$'+fmt(r.exit)}</td><td>${hold}</td>
       <td style="color:${bad?'#f0c84b':'#aab6c8'};font-weight:700">${r.reason||'—'}</td>
+      <td style="color:${pnlUsd==null?'#f0c84b':pnlUsd>=0?'#35d98a':'#ff5c70'}">${pnlUsd==null?'—':(pnlUsd>=0?'+$':'-$')+fmt(Math.abs(pnlUsd))}</td>
       <td style="color:${pct==null?'#f0c84b':pct>=0?'#35d98a':'#ff5c70'}">${pct==null?(bad?'AUDIT':'OPEN'):(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td></tr>`;
   }).join('');
 }
@@ -847,7 +854,7 @@ async function syncServer(){
         const pnlUsd=(nowPx>0&&ent>0)?(p.side==='LONG'?(nowPx-ent):(ent-nowPx)):0;
         const pnlColor=pnlPct>0?'#35d98a':pnlPct<0?'#ff4f64':'#9aa7b8';
         const pnlSign=pnlPct>0?'+':'';
-        return `<div style="padding:7px 0;border-bottom:1px solid #1f2a3a"><b style="color:${col}">${tf} ${p.side}</b> · 진입 $${fmt(p.entry)} · <b style="color:${stColor}">${st}</b> ${hold}<br><b class="livePosPnl" data-entry="${ent}" data-side="${p.side}" style="color:${pnlColor}">현재수익률 ${pnlSign}${pnlPct.toFixed(3)}% · 현재손익 ${pnlUsd>=0?'+':'-'}$${fmt(Math.abs(pnlUsd))}</b><br><span class="tiny">반대압력 ${ps.toFixed(0)} · MFE +$${fmt(Number(p.mfe||0))} · MAE -$${fmt(Number(p.mae||0))}</span></div>`;
+        return `<div style="padding:7px 0;border-bottom:1px solid #1f2a3a"><b style="color:${col}">${tf} ${p.side}</b> · 진입 $${fmt(p.entry)} · <b style="color:${stColor}">${st}</b> ${hold}<br><b class="livePosPnl" data-entry="${ent}" data-side="${p.side}" style="color:${pnlColor}">현재수익률 ${pnlSign}${pnlPct.toFixed(3)}% · 현재손익 ${pnlUsd>=0?'+':'-'}$${fmt(Math.abs(pnlUsd))}</b><br><span class="tiny">반대압력 ${ps.toFixed(0)} · MFE +$${fmt(Number(p.mfe||0))} · MAE -$${fmt(Number(p.mae||0))}</span><br><button onclick="manualCloseMain('${p.engine}')" style="margin-top:6px;padding:5px 10px;border:1px solid #ff5a6b;border-radius:7px;background:#251219;color:#ff7180;font-size:11px;font-weight:800;cursor:pointer">강제청산</button></div>`;
       }).join(''):`<span style="color:#f0c84b">현재 열린 포지션 없음</span><br><span class="tiny">포지션 종료는 반드시 X(EXIT) 이벤트가 기록되어야 합니다.</span>`;
     }
     let st=$('srvState'); if(st){st.textContent=(live?.status?.public==='live'&&live?.status?.business==='live')?'● LIVE':'● CONNECTED';st.style.color='#2fd58b'}
@@ -861,6 +868,16 @@ async function syncServer(){
     renderHistory();renderMarkers();
   }catch(e){let st=$('srvState');if(st){st.textContent='● 연결 재시도';st.style.color='#f1c75b'}}
   finally{syncServerBusy=false;}
+}
+async function manualCloseMain(engine){
+  const label=engLabel(engine);
+  if(!confirm(`${label} 시뮬레이터 포지션을 현재가로 강제청산할까?\n(실제 OKX 주문에는 영향 없음)`)) return;
+  try{
+    const r=await fetch(SERVER_API+'/api/positions/'+encodeURIComponent(engine)+'/close',{method:'POST'});
+    const j=await r.json();
+    if(!r.ok||!j.ok) throw new Error(j.error||('HTTP '+r.status));
+    await syncServer();
+  }catch(e){ alert('강제청산 실패: '+e.message); }
 }
 function refreshLivePositionReturns(){
   const nowPx=Number(currentPrice()||live?.price||0);

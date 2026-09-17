@@ -43,7 +43,24 @@ Research only; no real orders are placed.
 - Browser-persisted signals now use the same strict POS gate; they can no longer bypass it through the legacy immediate position function.
 - Confluence score is a condition score, not a calibrated win probability.
 
-## v6.30 Simulator controls
+## v6.31 Simulator controls
 - Signal Lab shows cumulative realized return (simple sum of closed POS return percentages).
 - Signal Lab shows cumulative realized P/L in USD on a 1 BTC notional basis; fees and leverage are excluded.
 - Each currently open engine position has a manual close button. It records an EXIT with reason MANUAL and closes only that simulator engine position; it never sends an OKX order.
+
+## v6.32 REENTRY GUARD
+- Main/mobile trade ledger adds per-trade realized P/L ($, 1 BTC basis; fees/leverage excluded).
+- Signal Lab position ledger adds the same per-trade P/L column.
+- Automatic FLOW/STRUCTURE exits arm a same-engine/same-side re-entry lock: SCALP 8m, 5M 15m, 15M 30m, 1H 60m, 4H 120m.
+- Signals continue to be stored during the lock; only simulator POS re-entry is blocked.
+- Fresh positions have a FLOW hold guard: SCALP 2m, 5M 8m, 15M 15m, 1H 30m, 4H 60m. Structure invalidation can still close a clearly broken thesis.
+- FLOW pressure must persist longer before ordinary exit. Manual close remains immediate and does not arm the automatic re-entry lock.
+
+
+## v6.33 SIGNAL COUNT FIX
+- Chart-only aggregation hardened: same displayed candle + engine + direction + canonical signal family is one marker with `(n)`, including `(1)`.
+- Historical naming variants are normalized for display so TRAP/engine-name variants no longer escape aggregation.
+- VWAP, RETEST, SCALP remain separate signal families.
+- POS / EXIT / SWITCH markers are never aggregated.
+- Raw SQLite signals and Signal Lab rows are unchanged.
+- v6.32 re-entry guard, simulator P&L and manual close controls are preserved.
