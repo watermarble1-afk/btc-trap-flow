@@ -1,25 +1,18 @@
-# BTC OKX RADAR v6.39 · 5M/15M PRECISION + LIVE POSITION LAB
+# BTC OKX RADAR v6.40 · MULTI SIGNAL + SIDE POSITION
 
-## v6.39
-- 5M precision: 15M direction is context/veto; weak score (<85) or no 5M VWAP reaction/own structure is not promoted as a new raw 5M signal.
-- 15M precision: 15M structure + VWAP location/reaction required; 1H opposite structure vetoes the 15M raw signal; weak score (<85) is rejected.
-- When a 5M execution signal aligns with 15M direction, its research name is stored as `5M+15M CONF L/S`.
-- 15M qualified raw signal is stored as `15M CONF L/S`.
-- Existing strict POS confluence gate remains: raw signal != automatic position. Confluence Score is a condition-alignment score, not a probability.
-- Existing re-entry guard / lifecycle / DB history preserved.
+이번 패치는 요청한 2가지만 변경합니다.
 
-## Signal Lab UI
-- Added polished `SYSTEM LIVE POSITION` and `MY LIVE POSITION` cards.
-- System live card shows engine, side, entry, current price-based return %, live PnL ($, 1 BTC basis), and close control.
-- My live card shows side, entry, current price, holding time, live return %, live PnL $, and position close control.
-- My trade timing/history table remains separate from system position history.
-- System realized TOTAL uses engine position events only. My realized TOTAL uses user position events only. They are not combined.
-- Fixed Signal Lab live-price state wiring so the system live PnL card can actually render from `/api/live`.
+1. SIGNAL ENGINE 버튼을 멀티선택 토글로 변경
+   - 5M ON 후 15M ON 시 5M이 사라지지 않고 5M+15M 동시 표시
+   - 각 버튼 재클릭 시 해당 엔진만 OFF
+   - ALL = SCALP/5M/15M/1H/4H 전체 ON
+   - 신호 제거 = 전체 OFF
+   - DB/Signal Lab 기록은 변경 없음
 
-## Existing v6.38 behavior retained
-- Multi-select signal filters.
-- Signal count aggregation uses the signal engine's own timeframe bucket, not the currently viewed chart timeframe.
-- POS/X/SWITCH and user B/S/X are not aggregated.
-- PC + mobile are shipped together.
+2. 내 포지션 주문/현재상태 패널을 차트 오른쪽 사이드로 이동
+   - 현재 타점 바로 아래 배치
+   - LONG/SHORT 진입, 실시간 내 포지션, 포지션 종료를 차트 옆에서 사용
+   - 차트 아래 오른쪽은 내 거래 기록만 유지
+   - PC/mobile 동일 DOM 구조 적용 (모바일은 화면 폭에 따라 자연스럽게 세로 배치)
 
-Research simulator only. No private OKX keys and no real orders.
+서버/DB/신호 알고리즘은 이번 패치에서 변경하지 않습니다.
