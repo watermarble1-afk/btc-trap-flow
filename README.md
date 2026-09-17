@@ -1,14 +1,14 @@
-# BTC OKX RADAR v6.41 · SIGNAL RESEARCH
+# BTC OKX RADAR v6.42 · UNIVERSAL SIGNAL CLUSTER
 
-Base: v6.40 multi-signal + side-position layout.
+v6.41 기반 차트 표시 전용 패치.
 
-## v6.41
-- Adds forward-only `signal_research` DB table. Existing signal/position/user-trade ledgers are untouched.
-- Every new/recent signal automatically accumulates MFE/MAE and the first observed BTC price after 5/15/30/60 minutes.
-- New `/api/signal-research` endpoint for research UI and mobile/server clients.
-- SIGNAL LAB adds a 5M/15M post-signal validation table with directional 5/15/30/60m returns plus MFE/MAE.
-- This is measurement only: it does not change WIN/LOSS, close positions, or claim a probability/win rate.
-- Existing v6.39 5M/15M precision logic and v6.40 multi-select/side-position layout remain intact.
-- PC and mobile continue using the same server/DB; mobile behavior is preserved and the research API is available to it without changing its trading controls.
-
-Deploy: overwrite repo files -> Commit changes -> Railway auto-deploy. Keep `/data/trapflow.db`.
+- SCALP(1/3M), 5M, 15M, 1H, 4H 등 선택된 모든 일반 신호를 대상으로 클러스터링
+- 같은 방향 + 5분 이내 + 가격 0.22% 이내로 겹치는 신호는 차트에서 하나로 합침
+- 예: `[1/3M+5M+15M] S (8)`
+- `(8)`은 합쳐진 원본 신호 개수
+- 첫 경고 시점에 대표 마커를 표시하여 선행성 확인 가능
+- LONG/SHORT 방향이 다르면 절대 합치지 않음
+- POS / X / SWITCH / 사용자 B·S·X는 합치지 않음
+- SQLite 원본 signals 및 Signal Lab 연구 데이터는 삭제/병합하지 않음
+- v6.41 사후검증 기능 유지
+- PC + 모바일 동일 적용

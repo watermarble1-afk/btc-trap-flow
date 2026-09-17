@@ -708,32 +708,57 @@ function renderMarkers(){
   // aggregated raw signals plus POS / X / SWITCH. SQLite/Signal Lab remain untouched.
   const effective='MULTI';
   const showRawSignals = selectedEngines.size>0;
-  const bucketSec={
-    '1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800,'1MO':2592000
-  }[cur]||60;
-  const grouped=new Map();
-  for(const s of (showRawSignals ? allSaved() : []).filter(s=>!(s.name||'').includes('MA EARLY') && s.time>=from && selectedEngines.has(s.engine||'5M'))){
-    const bucket=Math.floor(Number(s.time)/bucketSec)*bucketSec;
-    const rawName=String(s.name||'').toUpperCase().trim();
-    // Canonicalize historical/new naming variants so visually identical signals on one bar really merge.
-    // e.g. "TRAP S", "5M S", "SHORT" -> NORMAL; VWAP/RETEST stay separate families.
-    const sigType=rawName.includes('VWAP')?'VWAP':rawName.includes('RETEST')?'RETEST':rawName.includes('SCALP')?'SCALP':'NORMAL';
-    const key=[bucket,s.engine||'5M',s.dir||'',sigType].join('|');
-    const g=grouped.get(key);
-    if(g){ g.count++; g.lastTime=Math.max(g.lastTime,Number(s.time)); }
-    else grouped.set(key,{...s,sigType,count:1,bucket,lastTime:Number(s.time)});
+  // v6.42 UNIVERSAL SIGNAL CLUSTER
+  // Raw DB rows remain untouched. Only chart markers are compressed.
+  // Any selected-engine signals that overlap in direction + time + price are merged,
+  // regardless of engine (SCALP/5M/15M/1H/4H) or family (NORMAL/VWAP/RETEST).
+  const engineRank={'SCALP':0,'5M':1,'15M':2,'1H':3,'4H':4};
+  const engineText=e=>e==='SCALP'?'1/3M':e;
+  const raw=(showRawSignals ? allSaved() : [])
+    .filter(s=>!(s.name||'').includes('MA EARLY') && s.time>=from && selectedEngines.has(s.engine||'5M'))
+    .map(s=>({...s,time:Number(s.time),entry:Number(s.entry||s.price||0)}))
+    .sort((a,b)=>a.time-b.time);
+
+  // Five minutes is the visual overlap window. Price must also be close (0.22%).
+  // A new direction always starts a new cluster. This keeps distinct market moves separate.
+  const CLUSTER_SEC=300, PRICE_PCT=0.22;
+  const clusters=[];
+  for(const s of raw){
+    let best=null;
+    for(let i=clusters.length-1;i>=0;i--){
+      const g=clusters[i];
+      if(s.time-g.lastTime>CLUSTER_SEC) break;
+      if(g.dir!==s.dir) continue;
+      const gp=Number(g.anchorPrice||0), sp=Number(s.entry||0);
+      const priceClose=!gp||!sp||Math.abs(sp-gp)/gp*100<=PRICE_PCT;
+      if(priceClose){ best=g; break; }
+    }
+    const eng=s.engine||'5M';
+    const rawName=String(s.name||'').toUpperCase();
+    const family=rawName.includes('VWAP')?'VWAP':rawName.includes('RETEST')?'RETEST':rawName.includes('SCALP')?'SCALP':'NORMAL';
+    if(best){
+      best.count++;
+      best.lastTime=Math.max(best.lastTime,s.time);
+      best.engines.add(eng); best.families.add(family);
+      if(s.entry) best.anchorPrice=(best.anchorPrice*(best.count-1)+s.entry)/best.count;
+    }else{
+      clusters.push({dir:s.dir,count:1,firstTime:s.time,lastTime:s.time,anchorPrice:s.entry||0,
+        engines:new Set([eng]),families:new Set([family])});
+    }
   }
-  for(const s of grouped.values()){
-    const isRetest=s.sigType==='RETEST';
-    const isVwap=s.sigType==='VWAP';
-    // VWAP gets a dedicated visual family; engine identity remains in the label.
-    const color=isRetest?'#b56cff':isVwap?(s.dir==='LONG'?'#35d7e5':'#ff9f43'):engColor(s.engine,s.dir);
+
+  for(const g of clusters){
+    const engines=[...g.engines].sort((a,b)=>(engineRank[a]??9)-(engineRank[b]??9));
+    const engs=engines.map(engineText).join('+');
+    const hasVwap=g.families.has('VWAP'), hasRetest=g.families.has('RETEST');
+    const color=hasVwap?(g.dir==='LONG'?'#35d7e5':'#ff9f43'):hasRetest?'#b56cff':engColor(engines[engines.length-1]||'5M',g.dir);
+    // Put the marker at the first warning: the chart keeps showing how early the cluster started.
     marks.push({
-      time:s.bucket,
-      position:s.dir==='LONG'?'belowBar':'aboveBar',
+      time:g.firstTime,
+      position:g.dir==='LONG'?'belowBar':'aboveBar',
       color,
-      shape:s.dir==='LONG'?'arrowUp':'arrowDown',
-      text:engBracket(s.engine)+' '+(s.sigType==='VWAP'?'VWAP '+(s.dir==='LONG'?'L':'S'):s.sigType==='RETEST'?'RETEST '+(s.dir==='LONG'?'L':'S'):s.sigType==='SCALP'?'SCALP '+(s.dir==='LONG'?'L':'S'):(s.dir==='LONG'?'L':'S'))+' ('+s.count+')'
+      shape:g.dir==='LONG'?'arrowUp':'arrowDown',
+      text:'['+engs+'] '+(g.dir==='LONG'?'L':'S')+' ('+g.count+')'
     });
   }
 
