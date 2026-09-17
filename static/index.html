@@ -49,7 +49,10 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
   <div class="card"><h3>누적 실현수익률</h3><div id="realizedPct" class="big">0.00%</div><div class="mut">청산 POS 수익률 단순합</div></div>
   <div class="card"><h3>누적 실현손익</h3><div id="realizedUsd" class="big">$0.0</div><div class="mut">1 BTC 기준 · 수수료/레버리지 제외</div></div>
  </div>
- <div class="card" style="margin-top:12px"><h3>현재 시뮬레이터 포지션 · 강제청산은 실제 OKX 주문과 무관</h3><div id="manualPositions" class="mut">불러오는 중…</div></div>
+ <div class="card" style="margin-top:12px"><h3>내 포지션 · 수동 시뮬레이터</h3><div id="myPosLab" class="mut">불러오는 중…</div><div style="display:flex;gap:8px;margin-top:8px"><button onclick="myOpen('LONG')">B 매수</button><button onclick="myOpen('SHORT')">S 매도</button><button onclick="myClose()">포지션 종료</button></div></div>
+<div class="cards" style="margin-top:12px"><div class="card"><h3>내 누적 실현수익률</h3><div id="myPct" class="big">0.00%</div></div><div class="card"><h3>내 누적 실현손익</h3><div id="myUsd" class="big">$0.0</div><div class="mut">1 BTC 기준 · 수수료/레버리지 제외</div></div></div>
+<div class="card" style="margin-top:12px"><h3>내 거래 기록</h3><div style="overflow:auto"><table><thead><tr><th>진입</th><th>방향</th><th>진입가</th><th>청산가</th><th>수익률</th><th>수익금</th></tr></thead><tbody id="myLedger"></tbody></table></div></div>
+<div class="card" style="margin-top:12px"><h3>현재 시뮬레이터 포지션 · 강제청산은 실제 OKX 주문과 무관</h3><div id="manualPositions" class="mut">불러오는 중…</div></div>
  <div class="card" style="margin-top:12px">
   <h3>실제 포지션 성과 · POS L/S → HOLD ↔ PRESSURE → X / SWITCH · 승률은 청산 포지션 기준</h3>
   <div id="labFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
@@ -124,7 +127,13 @@ function renderLab(){
  const sumUsd=closed.reduce((a,r)=>a+(r.side==='SHORT'?r.entry-r.exit:r.exit-r.entry),0);
  realizedPct.textContent=(sumPct>=0?'+':'')+sumPct.toFixed(2)+'%'; realizedPct.className='big '+(sumPct>=0?'pos':'neg');
  realizedUsd.textContent=(sumUsd>=0?'+':'')+'$'+fmtN(sumUsd); realizedUsd.className='big '+(sumUsd>=0?'pos':'neg');
- manualPositions.innerHTML=LIVEPOS.length?LIVEPOS.map(p=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)"><b>${eng(p.engine)}</b><span class="${p.side==='LONG'?'pos':'neg'}">${p.side}</span><span>진입 $${fmtN(p.entry)}</span><button class="btn" onclick="manualClose('${p.engine}')">강제청산</button></div>`).join(''):'현재 열린 POS 없음';
+ manualPositions.innerHTML=LIVEPOS.length?LIVEPOS.map(p=>{
+   const px=Number(LIVE?.price||0), en=Number(p.entry||0);
+   const usd=(px>0&&en>0)?(p.side==='LONG'?(px-en):(en-px)):0;
+   const pct=en>0?usd/en*100:0;
+   const cls=pct>0?'pos':pct<0?'neg':'';
+   return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line)"><b>${eng(p.engine)}</b><span class="${p.side==='LONG'?'pos':'neg'}">${p.side}</span><span>진입 $${fmtN(p.entry)}</span><b class="${cls}">현재 ${pct>=0?'+':''}${pct.toFixed(3)}% · ${usd>=0?'+':'-'}$${fmtN(Math.abs(usd))}</b><button class="btn" onclick="manualClose('${p.engine}')">포지션 종료</button></div>`;
+ }).join(''):'현재 열린 POS 없음';
  const pos=LABPOS.filter(match);
  positionsBody.innerHTML=pos.length?pos.map(r=>{
   const ms=(r.exitTs||Date.now())-r.ts,m=Math.max(0,Math.floor(ms/60000));
@@ -158,4 +167,9 @@ async function syncServer(){
  }catch(e){srv.textContent='● RETRY';srv.style.color='#f1c75b'} finally{LABSYNC=false}
 }
 refresh.onclick=loadRSS; loadRSS();syncServer();setInterval(syncServer,10000);setInterval(loadRSS,300000);
+
+async function loadMy(){try{const [p,perf]=await Promise.all([fetch('/api/user-position',{cache:'no-store'}).then(r=>r.json()),fetch('/api/user-position-performance',{cache:'no-store'}).then(r=>r.json())]);const px=Number(window.__lastPrice||0);let txt='현재 내 포지션 없음';if(p.side&&p.side!=='FLAT'){txt=`${p.side} · 진입 $${Number(p.entry).toLocaleString()}`;}document.getElementById('myPosLab').textContent=txt;document.getElementById('myPct').textContent=(perf.total_pct>=0?'+':'')+Number(perf.total_pct||0).toFixed(2)+'%';document.getElementById('myUsd').textContent=(perf.total_usd>=0?'+$':'-$')+Math.abs(Number(perf.total_usd||0)).toLocaleString(undefined,{maximumFractionDigits:1});document.getElementById('myLedger').innerHTML=(perf.trades||[]).map(t=>`<tr><td>${new Date(t.opened_ts).toLocaleString('ko-KR')}</td><td>${t.side}</td><td>$${Number(t.entry).toLocaleString()}</td><td>$${Number(t.exit).toLocaleString()}</td><td>${t.return_pct>=0?'+':''}${Number(t.return_pct).toFixed(2)}%</td><td>${t.pnl_usd>=0?'+$':'-$'}${Math.abs(Number(t.pnl_usd)).toLocaleString(undefined,{maximumFractionDigits:1})}</td></tr>`).join('')||'<tr><td colspan="6">기록 없음</td></tr>';}catch(e){}}
+async function myOpen(side){const r=await fetch('/api/user-position/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({side})});const j=await r.json();if(!j.ok)alert(j.error);loadMy()}
+async function myClose(){const r=await fetch('/api/user-position/close',{method:'POST'});const j=await r.json();if(!j.ok)alert(j.error);loadMy()}
+setInterval(loadMy,3000);loadMy();
 </script></body></html>

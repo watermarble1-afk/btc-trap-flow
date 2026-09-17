@@ -83,6 +83,12 @@ def db():
     c.execute("""CREATE TABLE IF NOT EXISTS position_reentry_guard(
       engine TEXT PRIMARY KEY, side TEXT, exit_ts INTEGER, exit_price REAL, atr REAL, reason TEXT
     )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS user_positions(
+      id INTEGER PRIMARY KEY CHECK(id=1), side TEXT, entry REAL, opened_ts INTEGER, updated_ts INTEGER
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS user_position_events(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, event TEXT, side TEXT, price REAL, note TEXT
+    )""")
     c.execute("UPDATE engine_positions SET engine='5M' WHERE engine='CORE' AND NOT EXISTS (SELECT 1 FROM engine_positions x WHERE x.engine='5M')")
     c.execute("DELETE FROM engine_positions WHERE engine='CORE'")
     c.execute("UPDATE engine_positions SET engine='1H' WHERE engine='MACRO' AND NOT EXISTS (SELECT 1 FROM engine_positions x WHERE x.engine='1H')")
@@ -264,6 +270,9 @@ def position_confluence(engine, side, signal_score, atr_value=None):
     score=max(0,min(score,100))
     # CONF requires at least four genuinely different evidence groups.
     confirmed=(score>=82 and len(groups)>=4)
+    # v6.35: 15M/1H are quality-first engines: require stronger independent confirmation.
+    if engine=="15M": confirmed=(score>=88 and len(groups)>=5 and "location" in groups and "structure" in groups)
+    elif engine=="1H": confirmed=(score>=90 and len(groups)>=5 and "location" in groups and "structure" in groups)
     # If higher TF directly conflicts, only exceptional confluence can override it.
     if hb==-wanted and score<92: confirmed=False
     return score, reasons, ctx, confirmed, sorted(groups)
@@ -1004,6 +1013,57 @@ def manual_close_position(engine: str):
     position_event("EXIT",pos["side"],px,pos.get("signal_id"),"MANUAL simulator close",engine)
     clear_position(engine,"MANUAL")
     return {"ok":True,"engine":engine,"side":pos["side"],"entry":pos["entry"],"exit":px,"reason":"MANUAL"}
+
+
+@app.get("/api/user-position")
+def api_user_position():
+    c=db(); c.row_factory=sqlite3.Row
+    r=c.execute("SELECT * FROM user_positions WHERE id=1").fetchone(); c.close()
+    return dict(r) if r else {"side":"FLAT"}
+
+@app.post("/api/user-position/open")
+async def api_user_position_open(request: Request):
+    body=await request.json(); side=str(body.get("side","")).upper()
+    if side not in ("LONG","SHORT"): return {"ok":False,"error":"side must be LONG or SHORT"}
+    px=float(last_price or 0)
+    if px<=0:return {"ok":False,"error":"live price unavailable"}
+    now=int(time.time()*1000); c=db(); c.row_factory=sqlite3.Row
+    old=c.execute("SELECT * FROM user_positions WHERE id=1").fetchone()
+    if old:return {"ok":False,"error":"user position already open"}
+    c.execute("INSERT INTO user_positions(id,side,entry,opened_ts,updated_ts) VALUES(1,?,?,?,?)",(side,px,now,now))
+    c.execute("INSERT INTO user_position_events(ts,event,side,price,note) VALUES(?,?,?,?,?)",(now,"OPEN",side,px,"USER"))
+    c.commit(); c.close(); return {"ok":True,"side":side,"entry":px,"opened_ts":now}
+
+@app.post("/api/user-position/close")
+def api_user_position_close():
+    px=float(last_price or 0); c=db(); c.row_factory=sqlite3.Row
+    r=c.execute("SELECT * FROM user_positions WHERE id=1").fetchone()
+    if not r: c.close(); return {"ok":False,"error":"no user position"}
+    if px<=0: c.close(); return {"ok":False,"error":"live price unavailable"}
+    now=int(time.time()*1000); side=r["side"]
+    c.execute("INSERT INTO user_position_events(ts,event,side,price,note) VALUES(?,?,?,?,?)",(now,"EXIT",side,px,"USER MANUAL"))
+    c.execute("DELETE FROM user_positions WHERE id=1"); c.commit(); c.close()
+    return {"ok":True,"side":side,"entry":r["entry"],"exit":px}
+
+@app.get("/api/user-position-events")
+def api_user_position_events():
+    c=db(); c.row_factory=sqlite3.Row
+    rows=[dict(x) for x in c.execute("SELECT * FROM user_position_events ORDER BY ts DESC,id DESC LIMIT 1000").fetchall()]
+    c.close(); return rows
+
+@app.get("/api/user-position-performance")
+def api_user_position_performance():
+    c=db(); c.row_factory=sqlite3.Row
+    ev=c.execute("SELECT * FROM user_position_events ORDER BY ts,id").fetchall(); c.close()
+    op=None; rows=[]; total_pct=0.0; total_usd=0.0
+    for e in ev:
+        if e["event"]=="OPEN": op=e
+        elif e["event"]=="EXIT" and op:
+            entry=float(op["price"]); exitp=float(e["price"]); side=op["side"]
+            usd=(exitp-entry) if side=="LONG" else (entry-exitp); pct=usd/entry*100 if entry else 0
+            rows.append({"opened_ts":op["ts"],"closed_ts":e["ts"],"side":side,"entry":entry,"exit":exitp,"return_pct":pct,"pnl_usd":usd})
+            total_pct+=pct; total_usd+=usd; op=None
+    return {"closed":len(rows),"total_pct":total_pct,"total_usd":total_usd,"trades":list(reversed(rows))[:500]}
 
 
 @app.get("/api/stock/gaon")

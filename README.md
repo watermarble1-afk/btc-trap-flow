@@ -64,3 +64,12 @@ Research only; no real orders are placed.
 - POS / EXIT / SWITCH markers are never aggregated.
 - Raw SQLite signals and Signal Lab rows are unchanged.
 - v6.32 re-entry guard, simulator P&L and manual close controls are preserved.
+
+
+## v6.34 CLEAN CHART + LIVE POS
+- ALL chart view is now execution-first: raw SCALP/TRAP/VWAP/RETEST observation markers are hidden. POS / X / SWITCH remain visible.
+- Selecting a specific engine (1/3M, 5M, 15M, 1H, 4H) restores that engine's raw signals, still aggregated per bar as `(n)`.
+- Signal DB and Signal Lab remain unchanged; this is display-only filtering.
+- Signal Lab current simulator positions now show live return % and 1-BTC unrealized P/L, plus a `포지션 종료` button.
+- Main BTC/mobile current-position cards retain live return/P&L and manual close controls.
+- v6.32 re-entry guard and v6.33 count aggregation remain intact.

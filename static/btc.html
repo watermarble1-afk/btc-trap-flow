@@ -47,7 +47,7 @@ body.embedded-btc header{position:relative!important}
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.33 · SIGNAL COUNT FIX</h1>
+    <h1>BTC OKX RADAR v6.35 · HTF + MY POSITION</h1>
     <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 신호 엔진은 1M/3M SCALP만 묶고 5M · 15M · 1H · 4H는 완전 독립</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
@@ -133,7 +133,11 @@ body.embedded-btc header{position:relative!important}
     <div class="reason" id="why" style="margin-top:7px">실시간 flow 데이터 수집 중…</div>
   </div>
 
-  <div class="box">
+  <div class="box"><h3>내 포지션 <span class="tiny">시뮬레이터 수동 B/S · 엔진과 완전 분리</span></h3>
+<div style="display:flex;gap:7px;margin:7px 0"><button onclick="openMyPos('LONG')" style="padding:7px 12px">B 매수</button><button onclick="openMyPos('SHORT')" style="padding:7px 12px">S 매도</button></div>
+<div id="myPosition" class="tiny">불러오는 중…</div></div>
+
+<div class="box">
 <h3>엔진별 현재 포지션 <span class="tiny">HOLD ↔ PRESSURE → X / SWITCH</span></h3>
 <div id="enginePositions" class="tiny">불러오는 중…</div>
 </div>
@@ -177,6 +181,7 @@ const SERVER_API=location.origin;
 let serverSaved=[];
 let positionEvents=[];
 let liveEnginePositions=[];
+let myPosition={side:"FLAT"}, myPositionEvents=[];
 let livePosition={side:'FLAT'};
 
 const $=id=>document.getElementById(id);
@@ -668,14 +673,17 @@ function renderMarkers(){
   let from=cache[cur]?.[0]?.time||0;
   let marks=[];
 
-  // Signal markers are VISUALLY aggregated per displayed candle. SQLite keeps every raw signal.
-  // Key = candle bucket + engine + direction + signal name. Always show (n), including (1).
+  // CLEAN CHART MODE v6.34:
+  // ALL = execution view: hide raw observation signals; keep only POS / X / SWITCH below.
+  // A specific engine (or AUTO resolving to one engine) = research view: show that engine's
+  // aggregated raw signals plus POS / X / SWITCH. SQLite/Signal Lab remain untouched.
   let effective=engineView==='AUTO'?((cur==='1M'||cur==='3M')?'SCALP':['5M','15M','1H','4H'].includes(cur)?cur:'ALL'):engineView;
+  const showRawSignals = effective!=='ALL';
   const bucketSec={
     '1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800,'1MO':2592000
   }[cur]||60;
   const grouped=new Map();
-  for(const s of allSaved().filter(s=>!(s.name||'').includes('MA EARLY') && s.time>=from && (effective==='ALL'||(s.engine||'5M')===effective))){
+  for(const s of (showRawSignals ? allSaved() : []).filter(s=>!(s.name||'').includes('MA EARLY') && s.time>=from && (effective==='ALL'||(s.engine||'5M')===effective))){
     const bucket=Math.floor(Number(s.time)/bucketSec)*bucketSec;
     const rawName=String(s.name||'').toUpperCase().trim();
     // Canonicalize historical/new naming variants so visually identical signals on one bar really merge.
@@ -811,13 +819,15 @@ async function syncServer(){
   if(syncServerBusy) return;
   syncServerBusy=true;
   try{
-    const [live,sigs,pos,events,stats,positions]=await Promise.all([
+    const [live,sigs,pos,events,stats,positions,mypos,myevents]=await Promise.all([
       fetch(SERVER_API+'/api/live',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/signals?limit=1000',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/position',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/position-events?limit=1000',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/position-performance',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/positions',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[])
+      fetch(SERVER_API+'/api/positions',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[]),
+      fetch(SERVER_API+'/api/user-position',{cache:'no-store'}).then(r=>r.json()),
+      fetch(SERVER_API+'/api/user-position-events',{cache:'no-store'}).then(r=>r.json())
     ]);
     serverSaved=(Array.isArray(sigs)?sigs:[]).map(x=>({
       id:'srv_'+x.id,name:x.name,dir:x.side,score:x.score,entry:x.entry,sl:x.sl,tp1:x.tp1,tp2:x.tp2,
@@ -842,6 +852,11 @@ async function syncServer(){
     if(ep){
       const ps=Array.isArray(positions)?positions:[];
       liveEnginePositions=ps;
+      myPosition=mypos||{side:'FLAT'}; myPositionEvents=Array.isArray(myevents)?myevents:[];
+      const mp=$('myPosition'); if(mp){
+        if(myPosition.side&&myPosition.side!=='FLAT'){const ent=Number(myPosition.entry||0), now=Number(currentPrice()||live?.price||0), usd=myPosition.side==='LONG'?now-ent:ent-now, pc=ent?usd/ent*100:0; mp.innerHTML=`<b style="color:${myPosition.side==='LONG'?'#35d98a':'#ff5c70'}">${myPosition.side}</b> · 진입 $${fmt(ent)} · <b class="myLivePnl">${pc>=0?'+':''}${pc.toFixed(3)}% · ${usd>=0?'+':'-'}$${fmt(Math.abs(usd))}</b> <button onclick="closeMyPos()" style="margin-left:8px">포지션 종료</button>`;}
+        else mp.innerHTML='<span style="color:#8d99ad">현재 내 포지션 없음</span>';
+      }
       ep.innerHTML=ps.length?ps.map(p=>{
         const tf=engLabel(p.engine);
         const col=engColor(p.engine,p.side);
@@ -869,6 +884,8 @@ async function syncServer(){
   }catch(e){let st=$('srvState');if(st){st.textContent='● 연결 재시도';st.style.color='#f1c75b'}}
   finally{syncServerBusy=false;}
 }
+async function openMyPos(side){try{const r=await fetch(SERVER_API+'/api/user-position/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({side})});const j=await r.json();if(!j.ok)throw new Error(j.error||'failed');await syncServer();}catch(e){alert('내 포지션 진입 실패: '+e.message)}}
+async function closeMyPos(){if(!confirm('내 시뮬레이터 포지션을 현재가로 종료할까?'))return;try{const r=await fetch(SERVER_API+'/api/user-position/close',{method:'POST'});const j=await r.json();if(!j.ok)throw new Error(j.error||'failed');await syncServer();}catch(e){alert('내 포지션 종료 실패: '+e.message)}}
 async function manualCloseMain(engine){
   const label=engLabel(engine);
   if(!confirm(`${label} 시뮬레이터 포지션을 현재가로 강제청산할까?\n(실제 OKX 주문에는 영향 없음)`)) return;
