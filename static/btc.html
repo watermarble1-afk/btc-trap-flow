@@ -43,11 +43,15 @@ body.embedded-btc header{position:relative!important}
 .sig-scalp-long{color:#35d98a!important}.sig-core-long{color:#4f8cff!important}
 .sig-scalp-short{color:#ff78b4!important}.sig-core-short{color:#ff4f64!important}
 .engineBadge{display:inline-block;font-size:8px;padding:2px 5px;border:1px solid currentColor;border-radius:10px;margin-right:4px}
-</style></head>
+</style>
+<style>
+.tradeDesk{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.deskPane{min-width:0}.myTradeControls{display:flex;gap:8px;margin:8px 0}.myTradeControls button{padding:8px 14px}.myPositionBox{padding:9px;border:1px solid #263249;border-radius:8px;background:#0b111b;font-size:10px}@media(max-width:1050px){.tradeDesk{grid-template-columns:1fr}}
+</style>
+</head>
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.35 · HTF + MY POSITION</h1>
+    <h1>BTC OKX RADAR v6.37 · USER TRADE TRACKING</h1>
     <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 신호 엔진은 1M/3M SCALP만 묶고 5M · 15M · 1H · 4H는 완전 독립</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
@@ -133,33 +137,41 @@ body.embedded-btc header{position:relative!important}
     <div class="reason" id="why" style="margin-top:7px">실시간 flow 데이터 수집 중…</div>
   </div>
 
-  <div class="box"><h3>내 포지션 <span class="tiny">시뮬레이터 수동 B/S · 엔진과 완전 분리</span></h3>
-<div style="display:flex;gap:7px;margin:7px 0"><button onclick="openMyPos('LONG')" style="padding:7px 12px">B 매수</button><button onclick="openMyPos('SHORT')" style="padding:7px 12px">S 매도</button></div>
-<div id="myPosition" class="tiny">불러오는 중…</div></div>
-
 <div class="box">
 <h3>엔진별 현재 포지션 <span class="tiny">HOLD ↔ PRESSURE → X / SWITCH</span></h3>
 <div id="enginePositions" class="tiny">불러오는 중…</div>
 </div>
 
-<div class="box">
-    <h3>포지션 / 거래 기록</h3>
-    <div style="overflow:auto;max-height:260px">
-      <table style="width:100%;border-collapse:collapse;font-size:10px">
-        <thead><tr style="color:#8d99ad;text-align:left">
-          <th style="padding:6px">시간</th><th>엔진</th><th>방향</th><th>진입가</th><th>청산가</th><th>보유</th><th>종료사유</th><th>수익금</th><th>결과</th>
-        </tr></thead>
-        <tbody id="tradeLedger"><tr><td colspan="9" class="tiny" style="padding:8px">기록 불러오는 중…</td></tr></tbody>
-      </table>
-    </div>
-  </div>
 
   <div class="box">
     <h3>라이브 신호 기록 <span class="tiny">일반 신호 = 방향 후보 · POS L/S = 실제 연구 포지션 · 성과 = 실제 포지션 X(EXIT) 기준</span> <span style="font-size:8px;font-weight:400"><span style="color:#35d98a">●1/3 L</span> <span style="color:#4f8cff">●5/15 L</span> <span style="color:#ff78b4">●1/3 S</span> <span style="color:#ff4f64">●5/15 S</span></span></h3>
     <div class="history" id="history"><div class="tiny">아직 없음</div></div>
   </div>
 </aside>
-</div></div>
+</div>
+<div class="tradeDesk">
+  <section class="panel deskPane">
+    <h3>🤖 엔진 포지션 / 거래 기록 <span class="tiny">자동 시뮬레이터</span></h3>
+    <div style="overflow:auto;max-height:430px">
+      <table style="width:100%;border-collapse:collapse;font-size:10px">
+        <thead><tr style="color:#8d99ad;text-align:left"><th style="padding:6px">시간</th><th>엔진</th><th>방향</th><th>진입가</th><th>청산가</th><th>보유</th><th>종료사유</th><th>수익금</th><th>결과</th></tr></thead>
+        <tbody id="tradeLedger"><tr><td colspan="9" class="tiny" style="padding:8px">기록 불러오는 중…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+  <section class="panel deskPane">
+    <h3>👤 내 포지션 / 내 거래 기록 <span class="tiny">엔진과 완전 분리 · 현재가 시뮬레이션</span></h3>
+    <div class="myTradeControls"><button onclick="openMyPos('LONG')">LONG 진입</button><button onclick="openMyPos('SHORT')">SHORT 진입</button></div>
+    <div id="myPosition" class="myPositionBox">불러오는 중…</div>
+    <div style="overflow:auto;max-height:350px;margin-top:10px">
+      <table style="width:100%;border-collapse:collapse;font-size:10px">
+        <thead><tr style="color:#8d99ad;text-align:left"><th style="padding:6px">진입시간</th><th>방향</th><th>진입가</th><th>청산가</th><th>보유</th><th>수익금</th><th>수익률</th></tr></thead>
+        <tbody id="myTradeLedger"><tr><td colspan="7" class="tiny" style="padding:8px">내 거래 기록 불러오는 중…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+</div>
 
 <script>
 const INST='BTC-USDT-SWAP';
@@ -742,6 +754,16 @@ function renderMarkers(){
       });
     }
   }
+
+  // Manual user position layer: entry B/S + exit X, deliberately minimal.
+  for(const e of (myPositionEvents||[])){
+    const ts=Math.floor(Number(e.ts||0)/1000);
+    const ev=String(e.event||'').toUpperCase();
+    if(!ts || ts<from || !['OPEN','EXIT'].includes(ev)) continue;
+    const isL=String(e.side||'').toUpperCase()==='LONG';
+    if(ev==='OPEN') marks.push({time:ts,position:isL?'belowBar':'aboveBar',color:isL?'#00e5ff':'#ffd400',shape:isL?'arrowUp':'arrowDown',text:isL?'B':'S'});
+    else marks.push({time:ts,position:isL?'aboveBar':'belowBar',color:'#ffffff',shape:'circle',text:'X'});
+  }
   marks.sort((a,b)=>a.time-b.time);
   try{candle.setMarkers(marks)}catch(e){}
 }
@@ -814,6 +836,28 @@ function renderTradeLedger(){
       <td style="color:${pct==null?'#f0c84b':pct>=0?'#35d98a':'#ff5c70'}">${pct==null?(bad?'AUDIT':'OPEN'):(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td></tr>`;
   }).join('');
 }
+
+function renderMyTradeLedger(){
+  const el=$('myTradeLedger'); if(!el)return;
+  const ev=[...(myPositionEvents||[])].sort((a,b)=>Number(a.ts)-Number(b.ts));
+  const rows=[]; let op=null;
+  for(const e of ev){
+    const t=String(e.event||'').toUpperCase();
+    if(t==='OPEN') op={ts:Number(e.ts),side:String(e.side||''),entry:Number(e.price)};
+    else if(t==='EXIT'&&op){rows.push({...op,exit:Number(e.price),exitTs:Number(e.ts)});op=null;}
+  }
+  if(op) rows.push({...op,exit:null,exitTs:null});
+  rows.sort((a,b)=>b.ts-a.ts);
+  if(!rows.length){el.innerHTML='<tr><td colspan="7" class="tiny" style="padding:8px">아직 내 거래 기록 없음</td></tr>';return;}
+  el.innerHTML=rows.slice(0,60).map(r=>{
+    const held=(r.exitTs||Date.now())-r.ts, mins=Math.max(0,Math.floor(held/60000));
+    const hold=mins>=60?`${Math.floor(mins/60)}시간 ${mins%60}분`:`${mins}분`;
+    let usd=null,pct=null; if(r.exit!=null&&r.entry){usd=r.side==='SHORT'?r.entry-r.exit:r.exit-r.entry;pct=usd/r.entry*100;}
+    const col=r.side==='LONG'?'#35d98a':'#ff5c70';
+    return `<tr style="border-top:1px solid #1f2a3a"><td style="padding:7px 6px">${new Date(r.ts).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</td><td style="color:${col};font-weight:800">${r.side==='LONG'?'LONG':'SHORT'}</td><td>$${fmt(r.entry)}</td><td>${r.exit==null?'보유중':'$'+fmt(r.exit)}</td><td>${hold}</td><td style="color:${usd==null?'#f0c84b':usd>=0?'#35d98a':'#ff5c70'}">${usd==null?'—':(usd>=0?'+$':'-$')+fmt(Math.abs(usd))}</td><td style="color:${pct==null?'#f0c84b':pct>=0?'#35d98a':'#ff5c70'}">${pct==null?'OPEN':(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td></tr>`;
+  }).join('');
+}
+
 let syncServerBusy=false;
 async function syncServer(){
   if(syncServerBusy) return;
@@ -852,9 +896,9 @@ async function syncServer(){
     if(ep){
       const ps=Array.isArray(positions)?positions:[];
       liveEnginePositions=ps;
-      myPosition=mypos||{side:'FLAT'}; myPositionEvents=Array.isArray(myevents)?myevents:[];
+      myPosition=mypos||{side:'FLAT'}; myPositionEvents=Array.isArray(myevents)?myevents:[]; renderMyTradeLedger();
       const mp=$('myPosition'); if(mp){
-        if(myPosition.side&&myPosition.side!=='FLAT'){const ent=Number(myPosition.entry||0), now=Number(currentPrice()||live?.price||0), usd=myPosition.side==='LONG'?now-ent:ent-now, pc=ent?usd/ent*100:0; mp.innerHTML=`<b style="color:${myPosition.side==='LONG'?'#35d98a':'#ff5c70'}">${myPosition.side}</b> · 진입 $${fmt(ent)} · <b class="myLivePnl">${pc>=0?'+':''}${pc.toFixed(3)}% · ${usd>=0?'+':'-'}$${fmt(Math.abs(usd))}</b> <button onclick="closeMyPos()" style="margin-left:8px">포지션 종료</button>`;}
+        if(myPosition.side&&myPosition.side!=='FLAT'){const ent=Number(myPosition.entry||0), now=Number(myPosition.current_price||currentPrice()||live?.price||0), usd=Number.isFinite(Number(myPosition.live_usd))?Number(myPosition.live_usd):(myPosition.side==='LONG'?now-ent:ent-now), pc=Number.isFinite(Number(myPosition.live_pct))?Number(myPosition.live_pct):(ent?usd/ent*100:0); mp.innerHTML=`<b style="color:${myPosition.side==='LONG'?'#35d98a':'#ff5c70'}">${myPosition.side}</b> · 진입 $${fmt(ent)} · 현재 $${fmt(now)} · <b class="myLivePnl" style="color:${pc>=0?'#35d98a':'#ff5c70'}">실시간 ${pc>=0?'+':''}${pc.toFixed(3)}% · ${usd>=0?'+':'-'}$${fmt(Math.abs(usd))}</b> <button onclick="closeMyPos()" style="margin-left:8px">포지션 종료</button>`;}
         else mp.innerHTML='<span style="color:#8d99ad">현재 내 포지션 없음</span>';
       }
       ep.innerHTML=ps.length?ps.map(p=>{

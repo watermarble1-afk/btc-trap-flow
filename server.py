@@ -1019,7 +1019,13 @@ def manual_close_position(engine: str):
 def api_user_position():
     c=db(); c.row_factory=sqlite3.Row
     r=c.execute("SELECT * FROM user_positions WHERE id=1").fetchone(); c.close()
-    return dict(r) if r else {"side":"FLAT"}
+    if not r:
+        return {"side":"FLAT","current_price":float(last_price or 0),"live_pct":0.0,"live_usd":0.0}
+    out=dict(r)
+    px=float(last_price or out.get("entry") or 0); ent=float(out.get("entry") or 0)
+    usd=(px-ent) if out.get("side")=="LONG" else (ent-px)
+    out.update({"current_price":px,"live_usd":usd,"live_pct":usd/ent*100 if ent else 0.0})
+    return out
 
 @app.post("/api/user-position/open")
 async def api_user_position_open(request: Request):
@@ -1063,7 +1069,12 @@ def api_user_position_performance():
             usd=(exitp-entry) if side=="LONG" else (entry-exitp); pct=usd/entry*100 if entry else 0
             rows.append({"opened_ts":op["ts"],"closed_ts":e["ts"],"side":side,"entry":entry,"exit":exitp,"return_pct":pct,"pnl_usd":usd})
             total_pct+=pct; total_usd+=usd; op=None
-    return {"closed":len(rows),"total_pct":total_pct,"total_usd":total_usd,"trades":list(reversed(rows))[:500]}
+    trades=list(reversed(rows))
+    if op:
+        entry=float(op["price"]); side=op["side"]; px=float(last_price or entry)
+        usd=(px-entry) if side=="LONG" else (entry-px); pct=usd/entry*100 if entry else 0
+        trades.insert(0,{"opened_ts":op["ts"],"closed_ts":None,"side":side,"entry":entry,"exit":None,"return_pct":pct,"pnl_usd":usd,"status":"OPEN","current_price":px})
+    return {"closed":len(rows),"total_pct":total_pct,"total_usd":total_usd,"trades":trades[:500]}
 
 
 @app.get("/api/stock/gaon")

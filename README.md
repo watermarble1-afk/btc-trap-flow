@@ -73,3 +73,21 @@ Research only; no real orders are placed.
 - Signal Lab current simulator positions now show live return % and 1-BTC unrealized P/L, plus a `포지션 종료` button.
 - Main BTC/mobile current-position cards retain live return/P&L and manual close controls.
 - v6.32 re-entry guard and v6.33 count aggregation remain intact.
+
+## v6.36 UI / USER DESK PATCH
+- PC + mobile together.
+- Move engine trade ledger out of narrow right sidebar to a wide panel below the chart.
+- Add separate personal position/trade panel beside engine ledger on desktop; stacked on mobile.
+- Rename manual controls to LONG 진입 / SHORT 진입 to clarify these are new simulated positions at current market price.
+- Existing 포지션 종료 button remains the only manual close control; no duplicate liquidation button.
+- Personal position stays fully separate from engine positions and has its own live P/L and personal trade ledger.
+- Manual user chart entry markers are minimal B / S only; personal exits are kept in the personal ledger rather than adding chart clutter.
+- Existing v6.35 HTF 15M/1H stricter confluence logic is preserved.
+
+
+## v6.37 USER TRADE TRACKING
+- Manual user position API now returns current price, live P/L %, and live P/L USD.
+- User OPEN trades appear immediately in Signal Lab; they no longer wait for EXIT to become visible.
+- User ledger records OPEN and EXIT lifecycle separately from engine positions.
+- Chart shows user entry as B/S and user exit as X.
+- PC and mobile both updated.
