@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.28 VWAP CONFLUENCE")
+app=FastAPI(title="BTC Trap Flow Collector v6.29 CONFIRMED SIGNAL")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 trades=deque(maxlen=12000)
@@ -174,7 +174,7 @@ def vwap_tf(tf,n=240):
     return sum(((float(x["high"])+float(x["low"])+float(x["close"]))/3.0)*float(x.get("volume",0) or 0) for x in a)/den
 
 def vwap_signal_context(tf, atr_value):
-    """VWAP-only location context. MA EARLY is retired in v6.28.
+    """VWAP-only location context. MA EARLY is retired in v6.29.
     Returns a directional reaction/reclaim score without using moving averages.
     """
     a=list(candles.get(tf,[]))
@@ -192,60 +192,98 @@ def vwap_signal_context(tf, atr_value):
     return {"vwap":vw,"long":ls,"short":ss,"dist_atr":dist,
             "long_reaction":long_reaction,"short_reaction":short_reaction}
 
+def trend_bias_tf(tf, bars=4):
+    """Simple confirmed price-structure bias: +1 bull, -1 bear, 0 mixed."""
+    a=[x for x in candles.get(tf,[]) if x.get("confirm")=="1"]
+    if len(a)<bars:return 0
+    z=a[-bars:]
+    closes=[float(x["close"]) for x in z]
+    highs=[float(x["high"]) for x in z]
+    lows=[float(x["low"]) for x in z]
+    bull=closes[-1]>closes[0] and highs[-1]>=highs[0] and lows[-1]>=lows[0]
+    bear=closes[-1]<closes[0] and highs[-1]<=highs[0] and lows[-1]<=lows[0]
+    return 1 if bull else -1 if bear else 0
+
+def higher_tf_for(engine):
+    return {"SCALP":"5M","5M":"15M","15M":"1H","1H":"4H","4H":None}.get(engine)
+
 def position_confluence(engine, side, signal_score, atr_value=None):
-    """Strict research-position gate.
-    Signals remain sensitive; POS opens only when signal + VWAP + flow/order context agree.
-    This score is a confluence score, NOT a calibrated probability.
+    """Strict CONF/POS gate. Score = condition confluence, never a probability.
+    Requires independent evidence groups so repeated flow readings cannot manufacture a POS.
     """
     tf="3M" if engine=="SCALP" else engine
     A=atr_value or (atr_tf("1M",30) if engine=="SCALP" else atr_tf(tf,24))
     ctx=vwap_signal_context(tf,A)
     w10,w30=flow(10000),flow(30000); inten=flow_intensity()
-    score=0; reasons=[]
-    ss=float(signal_score or 0)
-    if ss>=95: score+=30; reasons.append("signal95+")
-    elif ss>=90: score+=27; reasons.append("signal90+")
-    elif ss>=85: score+=23; reasons.append("signal85+")
-    elif ss>=80: score+=15
+    ss=float(signal_score or 0); score=0; reasons=[]; groups=set()
+
+    # 1) Original setup quality
+    if ss>=95: score+=24; groups.add("setup"); reasons.append("setup95+")
+    elif ss>=90: score+=21; groups.add("setup"); reasons.append("setup90+")
+    elif ss>=85: score+=17; groups.add("setup"); reasons.append("setup85+")
+    elif ss>=80: score+=10
+
+    # 2) Location / price reaction at VWAP
     if side=="LONG":
-        if ctx["long_reaction"]: score+=25; reasons.append("VWAP reclaim")
-        elif ctx["vwap"] is not None and last_price>=ctx["vwap"] and ctx["dist_atr"]<=.65: score+=14; reasons.append("VWAP support")
-        if w10["ratio"]>=.06: score+=15; reasons.append("d10+")
-        if w30["ratio"]>=-.02: score+=8
-        if book_imb>=-.05: score+=10
+        if ctx["long_reaction"]: score+=24;groups.add("location");reasons.append("VWAP reclaim")
+        elif ctx["vwap"] is not None and last_price>=ctx["vwap"] and ctx["dist_atr"]<=.45:
+            score+=12;groups.add("location");reasons.append("VWAP support")
     else:
-        if ctx["short_reaction"]: score+=25; reasons.append("VWAP reject")
-        elif ctx["vwap"] is not None and last_price<=ctx["vwap"] and ctx["dist_atr"]<=.65: score+=14; reasons.append("VWAP resistance")
-        if w10["ratio"]<=-.06: score+=15; reasons.append("d10-")
-        if w30["ratio"]<=.02: score+=8
-        if book_imb<=.05: score+=10
-    if inten>=1.05: score+=7; reasons.append("flow")
-    if ctx["dist_atr"]<=.35: score+=5
-    return min(score,100), reasons, ctx
+        if ctx["short_reaction"]: score+=24;groups.add("location");reasons.append("VWAP reject")
+        elif ctx["vwap"] is not None and last_price<=ctx["vwap"] and ctx["dist_atr"]<=.45:
+            score+=12;groups.add("location");reasons.append("VWAP resistance")
+
+    # 3) Flow confirmation - 10s+30s count as ONE evidence group
+    flow_ok=(w10["ratio"]>=.08 and w30["ratio"]>=.02) if side=="LONG" else (w10["ratio"]<=-.08 and w30["ratio"]<=-.02)
+    if flow_ok:
+        score+=20;groups.add("flow");reasons.append("flow confirm")
+    elif (w10["ratio"]>=.06 if side=="LONG" else w10["ratio"]<=-.06):
+        score+=8
+
+    # 4) Order-book/activity confirmation
+    book_ok=(book_imb>=.10) if side=="LONG" else (book_imb<=-.10)
+    if book_ok and inten>=1.05:
+        score+=14;groups.add("order");reasons.append("book+activity")
+    elif book_ok or inten>=1.15:
+        score+=6
+
+    # 5) Own-TF structure and higher-TF veto/confirmation
+    own=trend_bias_tf(tf); wanted=1 if side=="LONG" else -1
+    if own==wanted:
+        score+=12;groups.add("structure");reasons.append("TF structure")
+    higher=higher_tf_for(engine)
+    hb=trend_bias_tf(higher) if higher else 0
+    if hb==wanted:
+        score+=10;groups.add("higher");reasons.append("higher TF")
+    elif hb==-wanted:
+        score-=15;reasons.append("higher TF conflict")
+
+    score=max(0,min(score,100))
+    # CONF requires at least four genuinely different evidence groups.
+    confirmed=(score>=82 and len(groups)>=4)
+    # If higher TF directly conflicts, only exceptional confluence can override it.
+    if hb==-wanted and score<92: confirmed=False
+    return score, reasons, ctx, confirmed, sorted(groups)
 
 def apply_position_if_strong(engine,side,price,signal_id,signal_score,atr_value=None,source="SIGNAL"):
-    """Open/switch only high-confluence research positions.
-    Same-direction evidence confirms. Opposite evidence can switch only while the existing
-    position is already in PRESSURE and the new confluence is exceptionally strong.
-    """
-    gate,reasons,ctx=position_confluence(engine,side,signal_score,atr_value)
+    """Only CONFIRMED multi-factor setups may create a research POS."""
+    gate,reasons,ctx,confirmed,groups=position_confluence(engine,side,signal_score,atr_value)
     pos=current_position(engine)
-    note=f"{source} POS gate {gate}: "+(",".join(reasons) or "insufficient confluence")
+    note=f"{source} CONF {gate} groups={'+'.join(groups) or '-'}: "+(",".join(reasons) or "insufficient confluence")
     if not pos:
-        if gate>=75:
+        if confirmed:
             set_position(engine,side,price,signal_id,atr_value)
             position_event("OPEN",side,price,signal_id,note,engine)
         return gate
     if pos["side"]==side:
-        if gate>=75:
-            # Confirmation is useful but do not let weak/repeated signals create POS churn.
+        if confirmed:
             position_event("CONFIRM",side,price,signal_id,note,engine)
         return gate
-    # Never flip merely because an opposite signal appeared. Require an already pressured
-    # position plus exceptional opposite confluence; otherwise the normal exit manager decides.
-    if str(pos.get("state") or "HOLD").upper()=="PRESSURE" and gate>=90:
-        position_event("EXIT",pos["side"],price,signal_id,"HIGH-CONFLUENCE SWITCH / "+note,engine)
-        clear_position(engine,"HIGH_CONFLUENCE_SWITCH")
+    # Opposite signal never flips by itself. Existing POS must already be PRESSURE and
+    # opposite evidence must be exceptional.
+    if str(pos.get("state") or "HOLD").upper()=="PRESSURE" and confirmed and gate>=92:
+        position_event("EXIT",pos["side"],price,signal_id,"CONFIRMED SWITCH / "+note,engine)
+        clear_position(engine,"CONFIRMED_SWITCH")
         set_position(engine,side,price,signal_id,atr_value)
         position_event("SWITCH",side,price,signal_id,note,engine)
     return gate
@@ -746,7 +784,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.28 VWAP CONFLUENCE","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.29 CONFIRMED SIGNAL","ok":True,"status":status}
 
 @app.get("/api/live")
 def live():
@@ -819,14 +857,14 @@ async def api_record_signal(request: Request):
         # rebuild the position instead of returning early and leaving the UI FLAT.
         if not current_position(engine):
             A=atr_tf("1M",30) if engine=="SCALP" else atr_tf(engine,24) if engine in ("5M","15M","1H","4H") else atr5()
-            apply_position_signal(engine,side,entry,sid,A)
+            apply_position_if_strong(engine,side,entry,sid,score,A,"BROWSER")
         return {"ok":True,"id":sid,"deduped":True,"position_recovered":bool(current_position(engine))}
     cur=c.execute("""INSERT INTO signals(ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flow,book,status,engine)
                      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'OPEN',?)""",
                   (ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flowv,bookv,engine))
     sid=cur.lastrowid;c.commit();c.close()
     A=atr_tf("1M",30) if engine=="SCALP" else atr_tf(engine,24) if engine in ("5M","15M","1H","4H") else atr5()
-    apply_position_signal(engine,side,entry,sid,A)
+    apply_position_if_strong(engine,side,entry,sid,score,A,"BROWSER")
     return {"ok":True,"id":sid,"deduped":False}
 
 
@@ -920,6 +958,22 @@ def position_events(limit:int=300):
     c=db();c.row_factory=sqlite3.Row
     rows=[dict(x) for x in c.execute("SELECT * FROM position_events ORDER BY ts DESC LIMIT ?",(min(limit,5000),)).fetchall()]
     c.close();return rows
+
+@app.post("/api/positions/{engine}/close")
+def manual_close_position(engine: str):
+    """Close one research/simulator position only. Never sends an exchange order."""
+    engine=engine.upper()
+    if engine not in ("SCALP","5M","15M","1H","4H"):
+        return {"ok":False,"error":"invalid engine"}
+    pos=current_position(engine)
+    if not pos:
+        return {"ok":False,"error":"no open position","engine":engine}
+    px=float(last_price or pos.get("entry") or 0)
+    if px<=0:
+        return {"ok":False,"error":"live price unavailable","engine":engine}
+    position_event("EXIT",pos["side"],px,pos.get("signal_id"),"MANUAL simulator close",engine)
+    clear_position(engine,"MANUAL")
+    return {"ok":True,"engine":engine,"side":pos["side"],"entry":pos["entry"],"exit":px,"reason":"MANUAL"}
 
 
 @app.get("/api/stock/gaon")

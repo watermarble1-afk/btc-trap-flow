@@ -33,3 +33,17 @@ Research only; no real orders are placed.
 - Opposite signal cannot instantly flip a position; switch requires PRESSURE plus exceptional confluence.
 - Position-event API history expanded to 5000 so overnight CONFIRM traffic cannot hide OPEN events from Signal Lab.
 - Signal Lab filters now use the five independent engine keys.
+
+## v6.29 CONFIRMED SIGNAL
+- Chart-only marker aggregation: same displayed candle + engine + direction + signal name renders once as `(n)`; raw SQLite rows are untouched.
+- VWAP L/S markers use a dedicated cyan/orange visual family.
+- POS gate now requires >=82 confluence AND at least four independent evidence groups among setup, VWAP location/reaction, flow, order/activity, own-TF structure, higher-TF structure.
+- Direct higher-TF conflict vetoes normal POS unless exceptional confluence reaches 92+.
+- Opposite signal alone cannot switch; existing position must already be PRESSURE plus confirmed 92+ opposite confluence.
+- Browser-persisted signals now use the same strict POS gate; they can no longer bypass it through the legacy immediate position function.
+- Confluence score is a condition score, not a calibrated win probability.
+
+## v6.30 Simulator controls
+- Signal Lab shows cumulative realized return (simple sum of closed POS return percentages).
+- Signal Lab shows cumulative realized P/L in USD on a 1 BTC notional basis; fees and leverage are excluded.
+- Each currently open engine position has a manual close button. It records an EXIT with reason MANUAL and closes only that simulator engine position; it never sends an OKX order.

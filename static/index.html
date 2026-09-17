@@ -46,7 +46,10 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
   <div class="card"><h3>WIN</h3><div id="win" class="big">0</div></div>
   <div class="card"><h3>LOSS</h3><div id="loss" class="big">0</div></div>
   <div class="card"><h3>OPEN</h3><div id="open" class="big">0</div></div>
+  <div class="card"><h3>누적 실현수익률</h3><div id="realizedPct" class="big">0.00%</div><div class="mut">청산 POS 수익률 단순합</div></div>
+  <div class="card"><h3>누적 실현손익</h3><div id="realizedUsd" class="big">$0.0</div><div class="mut">1 BTC 기준 · 수수료/레버리지 제외</div></div>
  </div>
+ <div class="card" style="margin-top:12px"><h3>현재 시뮬레이터 포지션 · 강제청산은 실제 OKX 주문과 무관</h3><div id="manualPositions" class="mut">불러오는 중…</div></div>
  <div class="card" style="margin-top:12px">
   <h3>실제 포지션 성과 · POS L/S → HOLD ↔ PRESSURE → X / SWITCH · 승률은 청산 포지션 기준</h3>
   <div id="labFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
@@ -97,7 +100,7 @@ async function loadRSS(){
  const seen=new Set(); NEWS=all.sort((a,b)=>b.ts-a.ts).filter(x=>!seen.has(x.title)&&(seen.add(x.title),true)).slice(0,40);
  if(!NEWS.length)feed.innerHTML='<div class="note">브라우저에서 뉴스 피드 연결이 막혔음. 다음 단계에서 Railway 서버 뉴스 수집기로 옮기면 24시간 안정적으로 받을 수 있다.</div>'; else renderNews();
 }
-let LABSIG=[], LABPOS=[], LF='ALL', LABSYNC=false;
+let LABSIG=[], LABPOS=[], LIVEPOS=[], LF='ALL', LABSYNC=false;
 function fmtN(v){return Number(v||0).toLocaleString('en-US',{maximumFractionDigits:1})}
 function eng(e){return e==='SCALP'?'1/3M':(e||'5M')}
 function buildPositions(ev){
@@ -116,6 +119,12 @@ function match(r){
  return r.side===LF;
 }
 function renderLab(){
+ const closed=LABPOS.filter(r=>r.exit&&r.entry);
+ const sumPct=closed.reduce((a,r)=>a+((r.side==='SHORT'?r.entry-r.exit:r.exit-r.entry)/r.entry*100),0);
+ const sumUsd=closed.reduce((a,r)=>a+(r.side==='SHORT'?r.entry-r.exit:r.exit-r.entry),0);
+ realizedPct.textContent=(sumPct>=0?'+':'')+sumPct.toFixed(2)+'%'; realizedPct.className='big '+(sumPct>=0?'pos':'neg');
+ realizedUsd.textContent=(sumUsd>=0?'+':'')+'$'+fmtN(sumUsd); realizedUsd.className='big '+(sumUsd>=0?'pos':'neg');
+ manualPositions.innerHTML=LIVEPOS.length?LIVEPOS.map(p=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)"><b>${eng(p.engine)}</b><span class="${p.side==='LONG'?'pos':'neg'}">${p.side}</span><span>진입 $${fmtN(p.entry)}</span><button class="btn" onclick="manualClose('${p.engine}')">강제청산</button></div>`).join(''):'현재 열린 POS 없음';
  const pos=LABPOS.filter(match);
  positionsBody.innerHTML=pos.length?pos.map(r=>{
   const ms=(r.exitTs||Date.now())-r.ts,m=Math.max(0,Math.floor(ms/60000));
@@ -127,16 +136,22 @@ function renderLab(){
  signalsBody.innerHTML=sig.length?sig.map(x=>`<tr><td>${new Date(+x.ts).toLocaleString('ko-KR')}</td><td>${eng(x.engine||'5M')}</td><td class="${x.side==='LONG'?'pos':'neg'}">${x.side||'—'}</td><td>${x.name}</td><td>$${fmtN(x.entry)}</td><td>$${fmtN(x.sl)}</td><td>$${fmtN(x.tp1)}</td><td>$${fmtN(x.tp2)}</td><td>${x.score??'—'}</td><td class="${x.status==='WIN'?'pos':x.status==='LOSS'?'neg':''}">${x.status}</td></tr>`).join(''):'<tr><td colspan="10">해당 신호 기록 없음</td></tr>';
 }
 document.querySelectorAll('[data-lf]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-lf]').forEach(x=>x.classList.remove('on'));b.classList.add('on');LF=b.dataset.lf;renderLab()});
+async function manualClose(engine){
+ if(!confirm(`${eng(engine)} 시뮬레이터 포지션을 현재가로 강제청산할까?`))return;
+ try{const r=await fetch(API+'/api/positions/'+encodeURIComponent(engine)+'/close',{method:'POST'});const j=await r.json();if(!r.ok||!j.ok)throw Error(j.error||('HTTP '+r.status));await syncServer();}
+ catch(e){alert('강제청산 실패: '+e.message)}
+}
 async function syncServer(){
  if(LABSYNC)return; LABSYNC=true;
  try{
-  const [live,sigs,events]=await Promise.all([
+  const [live,sigs,events,positions]=await Promise.all([
    fetch(API+'/api/live',{cache:'no-store'}).then(r=>r.json()),
    fetch(API+'/api/signals?limit=1000',{cache:'no-store'}).then(r=>r.json()),
-   fetch(API+'/api/position-events?limit=5000',{cache:'no-store'}).then(r=>r.json())
+   fetch(API+'/api/position-events?limit=5000',{cache:'no-store'}).then(r=>r.json()),
+   fetch(API+'/api/positions',{cache:'no-store'}).then(r=>r.json())
   ]);
   srv.textContent='● LIVE';srv.style.color='var(--g)';
-  LABSIG=Array.isArray(sigs)?sigs:[];LABPOS=buildPositions(Array.isArray(events)?events:[]);
+  LABSIG=Array.isArray(sigs)?sigs:[];LABPOS=buildPositions(Array.isArray(events)?events:[]);LIVEPOS=Array.isArray(positions)?positions:[];
   tot.textContent=LABSIG.length;win.textContent=LABSIG.filter(x=>x.status==='WIN').length;loss.textContent=LABSIG.filter(x=>x.status==='LOSS').length;open.textContent=LABSIG.filter(x=>x.status==='OPEN').length;
   renderLab();
  }catch(e){srv.textContent='● RETRY';srv.style.color='#f1c75b'} finally{LABSYNC=false}

@@ -59,7 +59,7 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.28 · MOBILE VWAP</h1>
+    <h1>BTC OKX RADAR v6.29 · MOBILE VWAP</h1>
     <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 신호 엔진은 1M/3M SCALP만 묶고 5M · 15M · 1H · 4H는 완전 독립</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
@@ -680,17 +680,32 @@ function renderMarkers(){
   let from=cache[cur]?.[0]?.time||0;
   let marks=[];
 
-  // Signal markers: direction color never changes with 포지션 성과.
+  // Signal markers are VISUALLY aggregated per displayed candle. SQLite keeps every raw signal.
+  // Key = candle bucket + engine + direction + signal name. Always show (n), including (1).
   let effective=engineView==='AUTO'?((cur==='1M'||cur==='3M')?'SCALP':['5M','15M','1H','4H'].includes(cur)?cur:'ALL'):engineView;
+  const bucketSec={
+    '1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800,'1MO':2592000
+  }[cur]||60;
+  const grouped=new Map();
   for(const s of allSaved().filter(s=>!(s.name||'').includes('MA EARLY') && s.time>=from && (effective==='ALL'||(s.engine||'5M')===effective))){
+    const bucket=Math.floor(Number(s.time)/bucketSec)*bucketSec;
+    const name=s.name||((s.dir==='LONG')?'TRAP L':'TRAP S');
+    const key=[bucket,s.engine||'5M',s.dir||'',name].join('|');
+    const g=grouped.get(key);
+    if(g){ g.count++; g.lastTime=Math.max(g.lastTime,Number(s.time)); }
+    else grouped.set(key,{...s,name,count:1,bucket,lastTime:Number(s.time)});
+  }
+  for(const s of grouped.values()){
     const isRetest=(s.name||'').includes('RETEST');
-    const color=isRetest?'#b56cff':engColor(s.engine,s.dir);
+    const isVwap=(s.name||'').startsWith('VWAP');
+    // VWAP gets a dedicated visual family; engine identity remains in the label.
+    const color=isRetest?'#b56cff':isVwap?(s.dir==='LONG'?'#35d7e5':'#ff9f43'):engColor(s.engine,s.dir);
     marks.push({
-      time:s.time,
+      time:s.bucket,
       position:s.dir==='LONG'?'belowBar':'aboveBar',
       color,
       shape:s.dir==='LONG'?'arrowUp':'arrowDown',
-      text:((engBracket(s.engine)+' ')+(s.name||((s.dir==='LONG')?'TRAP L':'TRAP S')))
+      text:engBracket(s.engine)+' '+s.name+' ('+s.count+')'
     });
   }
 
