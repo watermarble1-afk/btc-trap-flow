@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.39 5M15M PRECISION")
+app=FastAPI(title="BTC Trap Flow Collector v6.41 SIGNAL RESEARCH")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 trades=deque(maxlen=12000)
@@ -97,6 +97,14 @@ def db():
     cols={r[1] for r in c.execute("PRAGMA table_info(position_state)").fetchall()}
     if "best_price" not in cols:c.execute("ALTER TABLE position_state ADD COLUMN best_price REAL")
     if "atr_open" not in cols:c.execute("ALTER TABLE position_state ADD COLUMN atr_open REAL")
+    # v6.41: forward signal research. Raw signals stay untouched; this table records
+    # post-signal excursion and fixed-horizon prices for later 5M/15M validation.
+    c.execute("""CREATE TABLE IF NOT EXISTS signal_research(
+      signal_id INTEGER PRIMARY KEY, started_ts INTEGER, last_ts INTEGER,
+      mfe_pct REAL DEFAULT 0, mae_pct REAL DEFAULT 0,
+      p5 REAL, p15 REAL, p30 REAL, p60 REAL,
+      FOREIGN KEY(signal_id) REFERENCES signals(id)
+    )""")
     c.commit(); return c
 
 def median(xs):
@@ -759,6 +767,33 @@ def manage_position_reversal():
             clear_position(engine,"FLOW_EXIT")
             continue
 
+def update_signal_research():
+    """Forward-only research tracker. Records MFE/MAE and first observed price
+    after 5/15/30/60 minutes. This is measurement, not a trading signal.
+    """
+    if not last_price:return
+    now=int(time.time()*1000); px=float(last_price); c=db()
+    # Only recent signals need live excursion updates. Older rows remain available.
+    rows=c.execute("""SELECT s.id,s.ts,s.side,s.entry,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60
+      FROM signals s LEFT JOIN signal_research r ON r.signal_id=s.id
+      WHERE s.ts>=? ORDER BY s.ts DESC LIMIT 1500""",(now-2*60*60*1000,)).fetchall()
+    for sid,ts,side,entry,mfe,mae,p5,p15,p30,p60 in rows:
+        if not entry: continue
+        entry=float(entry); move=(px-entry)/entry*100.0
+        fav=move if side=='LONG' else -move
+        adv=-move if side=='LONG' else move
+        mfe=max(float(mfe or 0),fav,0.0); mae=max(float(mae or 0),adv,0.0)
+        vals=[p5,p15,p30,p60]; horizons=[5,15,30,60]
+        for i,m in enumerate(horizons):
+            if vals[i] is None and now-int(ts)>=m*60000: vals[i]=px
+        c.execute("""INSERT INTO signal_research(signal_id,started_ts,last_ts,mfe_pct,mae_pct,p5,p15,p30,p60)
+          VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(signal_id) DO UPDATE SET
+          last_ts=excluded.last_ts,mfe_pct=excluded.mfe_pct,mae_pct=excluded.mae_pct,
+          p5=COALESCE(signal_research.p5,excluded.p5),p15=COALESCE(signal_research.p15,excluded.p15),
+          p30=COALESCE(signal_research.p30,excluded.p30),p60=COALESCE(signal_research.p60,excluded.p60)""",
+          (sid,ts,now,mfe,mae,*vals))
+    c.commit();c.close()
+
 def update_outcomes():
     """LEGACY BENCHMARK ONLY: fixed TP1-vs-SL. Never closes/removes a research position."""
     if not last_price:return
@@ -834,7 +869,7 @@ async def public_loop():
                         evaluate();evaluate_scalp();evaluate_macro();evaluate_vwap_context()
                         last_heavy_ms["evaluate"]=now_ms
                     if now_ms-last_heavy_ms["outcomes"]>=1000:
-                        update_outcomes(); last_heavy_ms["outcomes"]=now_ms
+                        update_outcomes(); update_signal_research(); last_heavy_ms["outcomes"]=now_ms
         except Exception as e:
             status["public"]="reconnecting";print("public",e);await asyncio.sleep(2)
 
@@ -874,7 +909,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.39 5M15M PRECISION","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.41 SIGNAL RESEARCH","ok":True,"status":status}
 
 @app.get("/api/live")
 def live():
@@ -890,6 +925,18 @@ def signals(limit:int=100, engine:str="ALL"):
     else:
         rows=[dict(x) for x in c.execute("SELECT * FROM signals ORDER BY ts DESC LIMIT ?",(min(limit,1000),)).fetchall()]
     c.close();return rows
+
+@app.get("/api/signal-research")
+def signal_research(limit:int=500, engine:str="ALL"):
+    c=db();c.row_factory=sqlite3.Row
+    where=""; args=[]
+    if engine.upper() in ("SCALP","5M","15M","1H","4H"):
+        where="WHERE s.engine=?";args.append(engine.upper())
+    q=f"""SELECT s.id,s.ts,s.engine,s.name,s.side,s.entry,s.score,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60
+      FROM signals s LEFT JOIN signal_research r ON r.signal_id=s.id {where}
+      ORDER BY s.ts DESC LIMIT ?"""
+    args.append(min(max(int(limit),1),1500))
+    rows=[dict(x) for x in c.execute(q,args).fetchall()];c.close();return rows
 
 @app.get("/api/stats")
 def stats():

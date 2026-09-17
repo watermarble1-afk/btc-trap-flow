@@ -66,6 +66,11 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
   <div style="overflow:auto"><table class="ledger"><thead><tr><th>진입 시간</th><th>엔진</th><th>방향</th><th>진입가</th><th>청산가</th><th>청산 시간</th><th>보유시간</th><th>수익금</th><th>수익률</th><th>상태</th></tr></thead><tbody id="positionsBody"><tr><td colspan="10">불러오는 중…</td></tr></tbody></table></div>
  </div>
  <div class="card" style="margin-top:12px">
+  <h3>5M / 15M 신호 사후검증 <span class="mut">신호 후 실제 움직임 측정 · 승률/확률 아님</span></h3>
+  <div class="mut" style="margin-bottom:8px">패치 이후 발생 신호부터 MFE·MAE와 5/15/30/60분 후 방향수익률을 자동 축적합니다.</div>
+  <div style="overflow:auto;max-height:420px"><table class="ledger"><thead><tr><th>시간</th><th>엔진</th><th>신호</th><th>MFE</th><th>MAE</th><th>5분</th><th>15분</th><th>30분</th><th>60분</th></tr></thead><tbody id="researchBody"><tr><td colspan="9">불러오는 중…</td></tr></tbody></table></div>
+ </div>
+ <div class="card" style="margin-top:12px">
   <h3>신호 벤치마크 기록 · 포지션 성과는 TP/SL 비교용이며 실제 포지션 청산과 무관</h3>
   <div style="overflow:auto;max-height:600px"><table class="ledger"><thead><tr><th>발생 시간</th><th>엔진</th><th>방향</th><th>신호</th><th>진입가</th><th>SL</th><th>TP1</th><th>TP2</th><th>SCORE</th><th>결과</th></tr></thead><tbody id="signalsBody"><tr><td colspan="10">불러오는 중…</td></tr></tbody></table></div>
  </div>
@@ -106,7 +111,7 @@ async function loadRSS(){
  const seen=new Set(); NEWS=all.sort((a,b)=>b.ts-a.ts).filter(x=>!seen.has(x.title)&&(seen.add(x.title),true)).slice(0,40);
  if(!NEWS.length)feed.innerHTML='<div class="note">브라우저에서 뉴스 피드 연결이 막혔음. 다음 단계에서 Railway 서버 뉴스 수집기로 옮기면 24시간 안정적으로 받을 수 있다.</div>'; else renderNews();
 }
-let LABSIG=[], LABPOS=[], LIVEPOS=[], LIVE={}, LF='ALL', LABSYNC=false;
+let LABSIG=[], LABPOS=[], LIVEPOS=[], LIVE={}, RESEARCH=[], LF='ALL', LABSYNC=false;
 function fmtN(v){return Number(v||0).toLocaleString('en-US',{maximumFractionDigits:1})}
 function eng(e){return e==='SCALP'?'1/3M':(e||'5M')}
 function buildPositions(ev){
@@ -124,6 +129,8 @@ function match(r){
  if(LF==='ALL')return true;if(['SCALP','5M','15M','1H','4H'].includes(LF))return (r.engine||'5M')===LF;
  return r.side===LF;
 }
+function researchRet(x,key){const p=Number(x[key]||0),e=Number(x.entry||0);if(!p||!e)return null;let r=(p-e)/e*100;if(x.side==='SHORT')r=-r;return r}
+function renderResearch(){const el=document.getElementById('researchBody');if(!el)return;const a=RESEARCH.filter(x=>['5M','15M'].includes(x.engine)).slice(0,150);el.innerHTML=a.length?a.map(x=>{const cell=v=>v==null?'—':`<span class="${v>=0?'pos':'neg'}">${v>=0?'+':''}${v.toFixed(3)}%</span>`;return `<tr><td>${new Date(+x.ts).toLocaleString('ko-KR')}</td><td>${x.engine}</td><td>${esc(x.name)}</td><td class="pos">${x.mfe_pct==null?'—':'+'+Number(x.mfe_pct).toFixed(3)+'%'}</td><td class="neg">${x.mae_pct==null?'—':'-'+Number(x.mae_pct).toFixed(3)+'%'}</td><td>${cell(researchRet(x,'p5'))}</td><td>${cell(researchRet(x,'p15'))}</td><td>${cell(researchRet(x,'p30'))}</td><td>${cell(researchRet(x,'p60'))}</td></tr>`}).join(''):'<tr><td colspan="9">패치 이후 5M/15M 신호가 발생하면 자동 기록됩니다.</td></tr>'}
 function renderLab(){
  const closed=LABPOS.filter(r=>r.exit&&r.entry);
  const sumPct=closed.reduce((a,r)=>a+((r.side==='SHORT'?r.entry-r.exit:r.exit-r.entry)/r.entry*100),0);
@@ -146,8 +153,9 @@ function renderLab(){
   return `<tr><td>${new Date(r.ts).toLocaleString('ko-KR')}</td><td>${eng(r.engine)}</td><td class="${r.side==='LONG'?'pos':'neg'}">${r.side}</td><td>$${fmtN(r.entry)}</td><td>${r.exit?'$'+fmtN(r.exit):'—'}</td><td>${r.exitTs?new Date(r.exitTs).toLocaleString('ko-KR'):'—'}</td><td>${hold}</td><td class="${pnl==null?'':pnl>=0?'pos':'neg'}">${pnl==null?'—':(pnl>=0?'+$':'-$')+fmtN(Math.abs(pnl))}</td><td class="${pct==null?'':pct>=0?'pos':'neg'}">${pct==null?'—':(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td><td>${r.status}</td></tr>`
  }).join(''):'<tr><td colspan="10">해당 포지션 기록 없음</td></tr>';
  const sig=LABSIG.filter(match);
- signalsBody.innerHTML=sig.length?sig.map(x=>`<tr><td>${new Date(+x.ts).toLocaleString('ko-KR')}</td><td>${eng(x.engine||'5M')}</td><td class="${x.side==='LONG'?'pos':'neg'}">${x.side||'—'}</td><td>${x.name}</td><td>$${fmtN(x.entry)}</td><td>$${fmtN(x.sl)}</td><td>$${fmtN(x.tp1)}</td><td>$${fmtN(x.tp2)}</td><td>${x.score??'—'}</td><td class="${x.status==='WIN'?'pos':x.status==='LOSS'?'neg':''}">${x.status}</td></tr>`).join(''):'<tr><td colspan="10">해당 신호 기록 없음</td></tr>';
+ signalsBody.innerHTML=sig.length?sig.map(x=>`<tr><td>${new Date(+x.ts).toLocaleString('ko-KR')}</td><td>${eng(x.engine||'5M')}</td><td class="${x.side==='LONG'?'pos':'neg'}">${x.side||'—'}</td><td>${x.name}</td><td>$${fmtN(x.entry)}</td><td>$${fmtN(x.sl)}</td><td>$${fmtN(x.tp1)}</td><td>$${fmtN(x.tp2)}</td><td>${x.score??'—'}</td><td class="${x.status==='WIN'?'pos':x.status==='LOSS'?'neg':''}">${x.status}</td></tr>`).join(''):'<tr><td colspan="10">해당 신호 기록 없음</td></tr>';  renderResearch();
 }
+
 document.querySelectorAll('[data-lf]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-lf]').forEach(x=>x.classList.remove('on'));b.classList.add('on');LF=b.dataset.lf;renderLab()});
 async function manualClose(engine){
  if(!confirm(`${eng(engine)} 시뮬레이터 포지션을 현재가로 강제청산할까?`))return;
@@ -157,15 +165,16 @@ async function manualClose(engine){
 async function syncServer(){
  if(LABSYNC)return; LABSYNC=true;
  try{
-  const [live,sigs,events,positions]=await Promise.all([
+  const [live,sigs,events,positions,research]=await Promise.all([
    fetch(API+'/api/live',{cache:'no-store'}).then(r=>r.json()),
    fetch(API+'/api/signals?limit=1000',{cache:'no-store'}).then(r=>r.json()),
    fetch(API+'/api/position-events?limit=5000',{cache:'no-store'}).then(r=>r.json()),
-   fetch(API+'/api/positions',{cache:'no-store'}).then(r=>r.json())
+   fetch(API+'/api/positions',{cache:'no-store'}).then(r=>r.json()),
+   fetch(API+'/api/signal-research?limit=500',{cache:'no-store'}).then(r=>r.json())
   ]);
   srv.textContent='● LIVE';srv.style.color='var(--g)';
   LIVE=live||{};
-  LABSIG=Array.isArray(sigs)?sigs:[];LABPOS=buildPositions(Array.isArray(events)?events:[]);LIVEPOS=Array.isArray(positions)?positions:[];
+  LABSIG=Array.isArray(sigs)?sigs:[];LABPOS=buildPositions(Array.isArray(events)?events:[]);LIVEPOS=Array.isArray(positions)?positions:[];RESEARCH=Array.isArray(research)?research:[];
   tot.textContent=LABSIG.length;win.textContent=LABSIG.filter(x=>x.status==='WIN').length;loss.textContent=LABSIG.filter(x=>x.status==='LOSS').length;open.textContent=LABSIG.filter(x=>x.status==='OPEN').length;
   renderLab();
  }catch(e){srv.textContent='● RETRY';srv.style.color='#f1c75b'} finally{LABSYNC=false}
