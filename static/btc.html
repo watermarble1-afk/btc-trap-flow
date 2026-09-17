@@ -88,7 +88,7 @@ body.embedded-btc header{position:relative!important}
 <div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">복수 선택 가능 · 예: 5M + 15M 동시 표시 · 신호 제거 = 전체 OFF · ALL = 전체 ON · DB/거래기록은 그대로 보존</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
 <span style="color:#35d98a">● SCALP L</span><span style="color:#ff78b4">● SCALP S</span>
 <span style="color:#4f8cff">● TRAP L</span><span style="color:#ff4f64">● TRAP S</span>
-<span style="color:#48a9ff">● 15M L/S</span><span style="color:#27c2a4">● 1H L/S</span><span style="color:#c86cff">● 4H L/S</span><span style="color:#d7dee9">● X 종료</span></div>
+<span style="color:#48a9ff">● 15M L/S</span><span style="color:#27c2a4">● 1H L/S</span><span style="color:#c86cff">● 4H L/S</span><span style="color:#b37cff">● VWAP L/S</span><span style="color:#d7dee9">● X 종료</span></div>
 </div><div style="font-size:10px;color:#8d99ad;margin:3px 0">TIMEFRAME · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO</div><div class="hoverPctBar" id="hoverPctBar">봉에 마우스를 올리면 해당 봉의 등락률이 표시됩니다.</div><div id="chart"></div>
   <div class="legend">
     <span><b class="blue">TRAP L / LONG</b> 저점 sweep + 매도 체결 과열 + 가격 실패 + flow 반전</span>
@@ -696,7 +696,7 @@ function renderMarkers(){
   // aggregated raw signals plus POS / X / SWITCH. SQLite/Signal Lab remain untouched.
   const effective='MULTI';
   const showRawSignals = selectedEngines.size>0;
-  // v6.42 UNIVERSAL SIGNAL CLUSTER
+  // v6.43 UNIVERSAL SIGNAL CLUSTER
   // Raw DB rows remain untouched. Only chart markers are compressed.
   // Any selected-engine signals that overlap in direction + time + price are merged,
   // regardless of engine (SCALP/5M/15M/1H/4H) or family (NORMAL/VWAP/RETEST).
@@ -739,14 +739,14 @@ function renderMarkers(){
     const engines=[...g.engines].sort((a,b)=>(engineRank[a]??9)-(engineRank[b]??9));
     const engs=engines.map(engineText).join('+');
     const hasVwap=g.families.has('VWAP'), hasRetest=g.families.has('RETEST');
-    const color=hasVwap?(g.dir==='LONG'?'#35d7e5':'#ff9f43'):hasRetest?'#b56cff':engColor(engines[engines.length-1]||'5M',g.dir);
+    const color=hasVwap?(g.dir==='LONG'?'#d78cff':'#9b5cff'):hasRetest?'#b56cff':engColor(engines[engines.length-1]||'5M',g.dir);
     // Put the marker at the first warning: the chart keeps showing how early the cluster started.
     marks.push({
       time:g.firstTime,
       position:g.dir==='LONG'?'belowBar':'aboveBar',
       color,
       shape:g.dir==='LONG'?'arrowUp':'arrowDown',
-      text:'['+engs+'] '+(g.dir==='LONG'?'L':'S')+' ('+g.count+')'
+      text:'['+engs+'] '+(hasVwap?'VWAP ':'')+(g.dir==='LONG'?'L':'S')+' ('+g.count+')'
     });
   }
 

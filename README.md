@@ -12,3 +12,11 @@ v6.41 기반 차트 표시 전용 패치.
 - SQLite 원본 signals 및 Signal Lab 연구 데이터는 삭제/병합하지 않음
 - v6.41 사후검증 기능 유지
 - PC + 모바일 동일 적용
+
+
+## v6.43 VWAP COLOR + SCALP SIGNAL-ONLY
+- VWAP-containing chart clusters use a dedicated purple family and include `VWAP` in the marker text.
+- SCALP (1/3M) continues generating/storing signals for research, but cannot create new automatic engine positions.
+- Existing SCALP positions are not silently deleted; their lifecycle can finish normally.
+- 5M/15M/1H/4H automatic research positions are unchanged.
+- Signal research DB, universal clustering, manual user positions, and PC/mobile behavior remain intact.

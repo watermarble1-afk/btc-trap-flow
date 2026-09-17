@@ -303,7 +303,15 @@ def reentry_guard_status(engine, side):
     return left>0,max(0,left),dict(r)
 
 def apply_position_if_strong(engine,side,price,signal_id,signal_score,atr_value=None,source="SIGNAL"):
-    """Only CONFIRMED multi-factor setups may create a research POS."""
+    """Only CONFIRMED multi-factor setups may create a research POS.
+
+    v6.43: SCALP (1/3M) remains a signal-only research engine. It may keep
+    recording SCALP/VWAP observations, but it cannot OPEN/CONFIRM/SWITCH an
+    automatic research position. Existing SCALP positions, if any, are left
+    to the normal lifecycle manager so they are never silently deleted.
+    """
+    if engine == "SCALP":
+        return 0
     gate,reasons,ctx,confirmed,groups=position_confluence(engine,side,signal_score,atr_value)
     pos=current_position(engine)
     note=f"{source} CONF {gate} groups={'+'.join(groups) or '-'}: "+(",".join(reasons) or "insufficient confluence")
