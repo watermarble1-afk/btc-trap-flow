@@ -1,5 +1,5 @@
 <!doctype html><html lang="ko"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>MY MARKET TERMINAL v6.39</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>MY MARKET TERMINAL v6.45</title>
 <style>
 :root{--bg:#071019;--p:#0d1722;--p2:#111e2b;--line:#223247;--txt:#e8f0f7;--mut:#8293a6;--g:#31d394;--r:#ff6678;--b:#6ba8ff}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,sans-serif}
@@ -25,7 +25,7 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
 <nav><button class="tab on" data-p="btc">BTC</button><button class="tab" data-p="stocks">주식</button><button class="tab" data-p="news">NEWS</button><button class="tab" data-p="lab">SIGNAL LAB</button><a class="tab" href="/mobile" style="text-decoration:none">모바일</a></nav>
 <div class="status">BTC SERVER <span id="srv" class="live">● CHECK</span></div></header>
 <main>
-<section id="btc" class="page on"><iframe src="btc.html?v=639"></iframe></section>
+<section id="btc" class="page on"><iframe src="btc.html?v=645"></iframe></section>
 <section id="stocks" class="page"><iframe src="stock.html?v=64"></iframe></section>
 <section id="news" class="page">
  <div class="newsbar">
@@ -59,16 +59,16 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
  <div class="card" style="margin-top:12px">
   <h3>실제 포지션 성과 · POS L/S → HOLD ↔ PRESSURE → X / SWITCH · 승률은 청산 포지션 기준</h3>
   <div id="labFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-   <button class="chip on" data-lf="ALL">전체</button><button class="chip" data-lf="SCALP">1/3M</button>
+   <button class="chip on" data-lf="ALL">전체</button><button class="chip" data-lf="SCALP">1/3M 과거</button>
    <button class="chip" data-lf="5M">5M</button><button class="chip" data-lf="15M">15M</button><button class="chip" data-lf="1H">1H</button><button class="chip" data-lf="4H">4H</button>
    <button class="chip" data-lf="LONG">LONG</button><button class="chip" data-lf="SHORT">SHORT</button>
   </div>
   <div style="overflow:auto"><table class="ledger"><thead><tr><th>진입 시간</th><th>엔진</th><th>방향</th><th>진입가</th><th>청산가</th><th>청산 시간</th><th>보유시간</th><th>수익금</th><th>수익률</th><th>상태</th></tr></thead><tbody id="positionsBody"><tr><td colspan="10">불러오는 중…</td></tr></tbody></table></div>
  </div>
  <div class="card" style="margin-top:12px">
-  <h3>5M / 15M 신호 사후검증 <span class="mut">신호 후 실제 움직임 측정 · 승률/확률 아님</span></h3>
-  <div class="mut" style="margin-bottom:8px">패치 이후 발생 신호부터 MFE·MAE와 5/15/30/60분 후 방향수익률을 자동 축적합니다.</div>
-  <div style="overflow:auto;max-height:420px"><table class="ledger"><thead><tr><th>시간</th><th>엔진</th><th>신호</th><th>MFE</th><th>MAE</th><th>5분</th><th>15분</th><th>30분</th><th>60분</th></tr></thead><tbody id="researchBody"><tr><td colspan="9">불러오는 중…</td></tr></tbody></table></div>
+  <h3>EARLY / 5M / CONF 신호 사후검증 <span class="mut">신호 후 실제 움직임 측정 · 승률/확률 아님</span></h3>
+  <div class="mut" style="margin-bottom:8px">15M EARLY → 5M 압력전환 → CONF 단계별로 MFE·MAE와 5/15/30/60분 후 방향수익률을 자동 축적합니다. VWAP은 내부 근거로 기록합니다.</div>
+  <div style="overflow:auto;max-height:420px"><table class="ledger"><thead><tr><th>시간</th><th>엔진</th><th>신호</th><th>근거</th><th>MFE</th><th>MAE</th><th>5분</th><th>15분</th><th>30분</th><th>60분</th></tr></thead><tbody id="researchBody"><tr><td colspan="10">불러오는 중…</td></tr></tbody></table></div>
  </div>
  <div class="card" style="margin-top:12px">
   <h3>신호 벤치마크 기록 · 포지션 성과는 TP/SL 비교용이며 실제 포지션 청산과 무관</h3>
@@ -130,7 +130,7 @@ function match(r){
  return r.side===LF;
 }
 function researchRet(x,key){const p=Number(x[key]||0),e=Number(x.entry||0);if(!p||!e)return null;let r=(p-e)/e*100;if(x.side==='SHORT')r=-r;return r}
-function renderResearch(){const el=document.getElementById('researchBody');if(!el)return;const a=RESEARCH.filter(x=>['5M','15M'].includes(x.engine)).slice(0,150);el.innerHTML=a.length?a.map(x=>{const cell=v=>v==null?'—':`<span class="${v>=0?'pos':'neg'}">${v>=0?'+':''}${v.toFixed(3)}%</span>`;return `<tr><td>${new Date(+x.ts).toLocaleString('ko-KR')}</td><td>${x.engine}</td><td>${esc(x.name)}</td><td class="pos">${x.mfe_pct==null?'—':'+'+Number(x.mfe_pct).toFixed(3)+'%'}</td><td class="neg">${x.mae_pct==null?'—':'-'+Number(x.mae_pct).toFixed(3)+'%'}</td><td>${cell(researchRet(x,'p5'))}</td><td>${cell(researchRet(x,'p15'))}</td><td>${cell(researchRet(x,'p30'))}</td><td>${cell(researchRet(x,'p60'))}</td></tr>`}).join(''):'<tr><td colspan="9">패치 이후 5M/15M 신호가 발생하면 자동 기록됩니다.</td></tr>'}
+function renderResearch(){const el=document.getElementById('researchBody');if(!el)return;const a=RESEARCH.filter(x=>['5M','15M'].includes(x.engine)).slice(0,150);el.innerHTML=a.length?a.map(x=>{const cell=v=>v==null?'—':`<span class="${v>=0?'pos':'neg'}">${v>=0?'+':''}${v.toFixed(3)}%</span>`;return `<tr><td>${new Date(+x.ts).toLocaleString('ko-KR')}</td><td>${x.engine}</td><td>${esc(x.name)}</td><td style="max-width:280px;white-space:normal;color:#a9b7c6">${esc(x.reason||'—')}</td><td class="pos">${x.mfe_pct==null?'—':'+'+Number(x.mfe_pct).toFixed(3)+'%'}</td><td class="neg">${x.mae_pct==null?'—':'-'+Number(x.mae_pct).toFixed(3)+'%'}</td><td>${cell(researchRet(x,'p5'))}</td><td>${cell(researchRet(x,'p15'))}</td><td>${cell(researchRet(x,'p30'))}</td><td>${cell(researchRet(x,'p60'))}</td></tr>`}).join(''):'<tr><td colspan="10">EARLY / 5M / CONF 신호가 발생하면 자동 기록됩니다.</td></tr>'}
 function renderLab(){
  const closed=LABPOS.filter(r=>r.exit&&r.entry);
  const sumPct=closed.reduce((a,r)=>a+((r.side==='SHORT'?r.entry-r.exit:r.exit-r.entry)/r.entry*100),0);

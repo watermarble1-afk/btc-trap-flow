@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.41 SIGNAL RESEARCH")
+app=FastAPI(title="BTC Trap Flow Collector v6.45 EARLY CONF PIPELINE")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 trades=deque(maxlen=12000)
@@ -36,6 +36,10 @@ vwap_last_ts={"SCALP":0,"5M":0,"15M":0,"1H":0,"4H":0}
 tf_arms={e:None for e in ("5M","15M","1H","4H")}
 tf_prev_d10={e:0.0 for e in ("5M","15M","1H","4H")}
 tf_last_signal_ts={e:0 for e in ("5M","15M","1H","4H")}
+# v6.45 staged signal pipeline: 15M EARLY -> 5M pressure -> CONF.
+# SCALP generation is disabled; 1H/4H engines remain unchanged.
+stage_15m_context={"LONG":None,"SHORT":None}
+stage_last_bucket={"EARLY_LONG":-1,"EARLY_SHORT":-1,"5M_LONG":-1,"5M_SHORT":-1,"CONF_LONG":-1,"CONF_SHORT":-1}
 scalp_prev_d10=0.0
 status={"public":"starting","business":"starting","started":int(time.time()*1000)}
 # v6.27: throttle CPU/SQLite-heavy research work so high-rate trade WS cannot starve HTTP.
@@ -56,6 +60,8 @@ def db():
     if "engine" not in sigcols:
         c.execute("ALTER TABLE signals ADD COLUMN engine TEXT DEFAULT 'CORE'")
         c.execute("UPDATE signals SET engine='CORE' WHERE engine IS NULL OR engine=''")
+    if "reason" not in sigcols:
+        c.execute("ALTER TABLE signals ADD COLUMN reason TEXT DEFAULT ''")
     c.execute("""CREATE TABLE IF NOT EXISTS position_events(
       id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, event TEXT, side TEXT,
       price REAL, signal_id INTEGER, note TEXT)""")
@@ -509,6 +515,172 @@ def precision_signal_gate(engine, side, score, A):
     if h==wanted: reasons.append("1H aligned")
     return True,reasons
 
+def _bar_shape(c):
+    if not c:return {"rng":1.0,"body":0.0,"upper":0.0,"lower":0.0,"close_pos":0.5}
+    h=float(c["high"]); l=float(c["low"]); o=float(c["open"]); cl=float(c["close"])
+    rng=max(h-l,1e-9); body=abs(cl-o)
+    return {"rng":rng,"body":body,"upper":h-max(o,cl),"lower":min(o,cl)-l,"close_pos":max(0,min(1,(cl-l)/rng))}
+
+def _save_stage_signal(name, side, score, engine, A, reason, allow_position=False):
+    """Persist a staged research signal. EARLY/5M pressure never open a POS.
+    Only CONF may hand off to the simulator.
+    """
+    p=float(last_price or 0); A=max(float(A or 1),1.0); now=int(time.time()*1000)
+    risk=max(.55*A,1.0)
+    sl=p-risk if side=="LONG" else p+risk
+    tp1=p+1.5*risk if side=="LONG" else p-1.5*risk
+    tp2=p+2.3*risk if side=="LONG" else p-2.3*risk
+    w10,w30=flow(10000),flow(30000)
+    c=db(); cur=c.execute("""INSERT INTO signals(ts,name,side,entry,sl,tp1,tp2,score,d10,d30,oi60,flow,book,status,engine,reason)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'OPEN',?,?)""",
+      (now,name,side,p,sl,tp1,tp2,float(score),w10["ratio"],w30["ratio"],oi_delta(),flow_intensity(),book_imb,engine,reason))
+    sid=cur.lastrowid; c.commit(); c.close()
+    if allow_position:
+        apply_pipeline_position(side,p,sid,float(score),A,reason)
+    return sid
+
+def apply_pipeline_position(side, price, signal_id, score, A, reason):
+    """v6.45 simulator entry: only a completed 5M+15M CONF may open a new 5M execution POS.
+    Opposite CONF does not blindly reverse a healthy position.
+    """
+    engine="5M"
+    pos=current_position(engine)
+    note=f"PIPELINE CONF {score:.0f}: {reason}"
+    if not pos:
+        locked,_,_=reentry_guard_status(engine,side)
+        if locked:return
+        if score>=80:
+            set_position(engine,side,price,signal_id,A)
+            position_event("OPEN",side,price,signal_id,note,engine)
+        return
+    if pos["side"]==side:
+        # Keep the lifecycle auditable but do not average/re-enter.
+        position_event("CONFIRM",side,price,signal_id,note,engine)
+        return
+    # A contrary CONF is an exit/switch candidate only if the current POS is already pressured.
+    if str(pos.get("state") or "HOLD").upper()=="PRESSURE" and score>=92:
+        position_event("EXIT",pos["side"],price,signal_id,"PIPELINE CONF SWITCH / "+note,engine)
+        clear_position(engine,"PIPELINE_CONF_SWITCH")
+        set_position(engine,side,price,signal_id,A)
+        position_event("SWITCH",side,price,signal_id,note,engine)
+
+def evaluate_5m15m_pipeline():
+    """Primary v6.45 signal hierarchy.
+
+    15M EARLY = leading warning from location + failed auction/absorption/flow fade.
+    5M L/S     = short-term pressure has actually started to turn.
+    CONF L/S   = recent 15M EARLY + current 5M turn + independent evidence agreement.
+
+    VWAP is evidence only; it no longer emits standalone VWAP L/S signals.
+    """
+    global stage_15m_context, stage_last_bucket
+    if not last_price or len(trades)<20:return
+    if len(candles["15M"])<8 or len(candles["5M"])<8:return
+    now=int(time.time()*1000); p=float(last_price)
+    A15=max(atr_tf("15M",24),1.0); A5=max(atr_tf("5M",24),1.0)
+    c15=list(candles["15M"])[-1]; c5=list(candles["5M"])[-1]
+    sh15=_bar_shape(c15); sh5=_bar_shape(c5)
+    H15,L15=liquidity_tf("15M",100,30)
+    w10,w30=flow(10000),flow(30000); oi60=oi_delta(); inten=flow_intensity()
+    v15=vwap_signal_context("15M",A15); v5=vwap_signal_context("5M",A5)
+    b15=int(now//(15*60*1000)); b5=int(now//(5*60*1000))
+
+    # ----- 15M EARLY: location is mandatory, then require at least one leading failure clue.
+    if H15 is not None:
+        for side in ("SHORT","LONG"):
+            wanted=-1 if side=="SHORT" else 1
+            reasons=[]; groups=set(); score=0
+            if side=="SHORT":
+                near_liq=(float(c15["high"])>=H15-.18*A15 or p>=H15-.12*A15)
+                failed=(float(c15["high"])>H15 and float(c15["close"])<H15+.04*A15)
+                absorption=(w30["ratio"]>.10 and sh15["upper"]>=max(sh15["body"],.18*sh15["rng"]) and sh15["close_pos"]<.72)
+                fade=(w30["ratio"]>.06 and w10["ratio"]<w30["ratio"]-.10)
+                vwap_ev=v15["short_reaction"] or (v15.get("vwap") is not None and p>v15["vwap"]+.35*A15 and sh15["close_pos"]<.65)
+                oi_trap=(oi60>.004 and (failed or absorption))
+            else:
+                near_liq=(float(c15["low"])<=L15+.18*A15 or p<=L15+.12*A15)
+                failed=(float(c15["low"])<L15 and float(c15["close"])>L15-.04*A15)
+                absorption=(w30["ratio"]<-.10 and sh15["lower"]>=max(sh15["body"],.18*sh15["rng"]) and sh15["close_pos"]>.28)
+                fade=(w30["ratio"]<-.06 and w10["ratio"]>w30["ratio"]+.10)
+                vwap_ev=v15["long_reaction"] or (v15.get("vwap") is not None and p<v15["vwap"]-.35*A15 and sh15["close_pos"]>.35)
+                oi_trap=(oi60>.004 and (failed or absorption))
+            if near_liq:
+                groups.add("LIQ"); reasons.append("LIQ"); score+=30
+            if failed:
+                groups.add("FAIL"); reasons.append("FAIL"); score+=24
+            if absorption:
+                groups.add("ABS"); reasons.append("ABS"); score+=22
+            if fade:
+                groups.add("FADE"); reasons.append("FLOW_FADE"); score+=15
+            if vwap_ev:
+                groups.add("VWAP"); reasons.append("VWAP_CTX"); score+=12
+            if oi_trap:
+                groups.add("OI"); reasons.append("OI_TRAP"); score+=8
+            key="EARLY_"+("SHORT" if side=="SHORT" else "LONG")
+            leading=len(groups.intersection({"FAIL","ABS","FADE","VWAP"}))>=1
+            if near_liq and leading and score>=54 and stage_last_bucket.get(key)!=b15:
+                reason="+".join(reasons)
+                _save_stage_signal("EARLY S" if side=="SHORT" else "EARLY L",side,min(score,100),"15M",A15,reason,False)
+                stage_15m_context[side]={"ts":now,"price":p,"score":score,"reason":reason,"groups":sorted(groups)}
+                stage_last_bucket[key]=b15
+
+    # Expire old EARLY context after 60 minutes.
+    for side in ("LONG","SHORT"):
+        ctx=stage_15m_context.get(side)
+        if ctx and now-int(ctx.get("ts",0))>60*60*1000:
+            stage_15m_context[side]=None
+
+    # ----- 5M pressure turn: one per direction per native 5M bar.
+    for side in ("SHORT","LONG"):
+        own=trend_bias_tf("5M"); wanted=-1 if side=="SHORT" else 1
+        if side=="SHORT":
+            flow_turn=(w10["ratio"]<=-.07 and w30["ratio"]<=-.015)
+            candle_turn=(float(c5["close"])<float(c5["open"]) and sh5["close_pos"]<.45)
+            vwap_turn=v5["short_reaction"]
+        else:
+            flow_turn=(w10["ratio"]>=.07 and w30["ratio"]>=.015)
+            candle_turn=(float(c5["close"])>float(c5["open"]) and sh5["close_pos"]>.55)
+            vwap_turn=v5["long_reaction"]
+        struct_turn=(own==wanted)
+        pressure_groups=[]; ps=0
+        if flow_turn: pressure_groups.append("FLOW"); ps+=38
+        if struct_turn: pressure_groups.append("STRUCT"); ps+=28
+        if vwap_turn: pressure_groups.append("VWAP"); ps+=18
+        if candle_turn: pressure_groups.append("PRICE"); ps+=16
+        key="5M_"+("SHORT" if side=="SHORT" else "LONG")
+        pressure_ok=flow_turn and (struct_turn or vwap_turn or candle_turn) and ps>=62
+        if pressure_ok and stage_last_bucket.get(key)!=b5:
+            _save_stage_signal("5M S" if side=="SHORT" else "5M L",side,min(ps,100),"5M",A5,"+".join(pressure_groups),False)
+            stage_last_bucket[key]=b5
+
+        # ----- CONF: recent 15M warning + current 5M pressure + no late chase.
+        ctx15=stage_15m_context.get(side)
+        if not pressure_ok or not ctx15: continue
+        age=now-int(ctx15.get("ts",0))
+        if age>45*60*1000: continue
+        # Prevent "already dumped/pumped, now chase" entries.
+        favorable=((float(ctx15["price"])-p) if side=="SHORT" else (p-float(ctx15["price"])))
+        if favorable>0.75*A15: continue
+        h1=trend_bias_tf("1H"); h4=trend_bias_tf("4H")
+        if h1==-wanted: continue
+        conf_groups={"15M_LOCATION","5M_PRESSURE","FLOW"}
+        conf_reasons=["15M:"+str(ctx15.get("reason") or "EARLY"),"5M:"+"+".join(pressure_groups)]
+        cs=42 + min(float(ctx15.get("score") or 0)*.30,24) + min(ps*.24,20)
+        if vwap_turn or ("VWAP" in (ctx15.get("groups") or [])):
+            conf_groups.add("VWAP"); cs+=8
+        if h1==wanted:
+            conf_groups.add("1H"); conf_reasons.append("1H_ALIGN"); cs+=8
+        if h4==wanted:
+            conf_groups.add("4H"); conf_reasons.append("4H_ALIGN"); cs+=4
+        if inten>=1.05:
+            conf_groups.add("ACTIVITY"); conf_reasons.append("ACTIVITY"); cs+=4
+        cs=max(0,min(cs,100))
+        key="CONF_"+("SHORT" if side=="SHORT" else "LONG")
+        if cs>=80 and len(conf_groups)>=4 and stage_last_bucket.get(key)!=b15:
+            reason=" | ".join(conf_reasons)
+            _save_stage_signal("CONF S" if side=="SHORT" else "CONF L",side,cs,"5M",A5,reason,True)
+            stage_last_bucket[key]=b15
+
 def evaluate_tf_engine(engine):
     """Independent timeframe engine: its own candles, liquidity, ATR, arm, signals and position."""
     if engine not in ("5M","15M","1H","4H") or not last_price or len(trades)<20:return
@@ -556,7 +728,7 @@ def evaluate_tf_engine(engine):
     tf_prev_d10[engine]=w10["ratio"]
 
 def evaluate():
-    evaluate_tf_engine("5M")
+    evaluate_5m15m_pipeline()
 
 def evaluate_scalp():
     """SCALP engine: 3M liquidity/structure + 1M sweep/reclaim + micro-flow flip."""
@@ -598,8 +770,8 @@ def evaluate_scalp():
 
 
 def evaluate_macro():
+    # v6.45: preserve 1H / 4H signal engines exactly as before.
     evaluate_tf_engine("1H")
-    evaluate_tf_engine("15M")
     evaluate_tf_engine("4H")
 
 
@@ -874,7 +1046,7 @@ async def public_loop():
                             print("position_manager",repr(e))
                         last_heavy_ms["manager"]=now_ms
                     if now_ms-last_heavy_ms["evaluate"]>=350:
-                        evaluate();evaluate_scalp();evaluate_macro();evaluate_vwap_context()
+                        evaluate();evaluate_macro()
                         last_heavy_ms["evaluate"]=now_ms
                     if now_ms-last_heavy_ms["outcomes"]>=1000:
                         update_outcomes(); update_signal_research(); last_heavy_ms["outcomes"]=now_ms
@@ -917,7 +1089,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.41 SIGNAL RESEARCH","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.45 EARLY CONF PIPELINE","ok":True,"status":status}
 
 @app.get("/api/live")
 def live():
@@ -940,7 +1112,7 @@ def signal_research(limit:int=500, engine:str="ALL"):
     where=""; args=[]
     if engine.upper() in ("SCALP","5M","15M","1H","4H"):
         where="WHERE s.engine=?";args.append(engine.upper())
-    q=f"""SELECT s.id,s.ts,s.engine,s.name,s.side,s.entry,s.score,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60
+    q=f"""SELECT s.id,s.ts,s.engine,s.name,s.side,s.entry,s.score,s.reason,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60
       FROM signals s LEFT JOIN signal_research r ON r.signal_id=s.id {where}
       ORDER BY s.ts DESC LIMIT ?"""
     args.append(min(max(int(limit),1),1500))
@@ -979,6 +1151,8 @@ async def api_record_signal(request: Request):
     engine=str(x.get("engine") or "5M").upper()
     if side not in ("LONG","SHORT") or engine not in ("SCALP","5M","15M","1H","4H") or not name:
         return {"ok":False,"error":"invalid signal"}
+    if engine=="SCALP":
+        return {"ok":False,"error":"SCALP disabled in v6.45"}
     ts=int(x.get("ts") or time.time()*1000)
     entry=float(x.get("entry") or last_price or 0)
     sl=float(x.get("sl") or entry)

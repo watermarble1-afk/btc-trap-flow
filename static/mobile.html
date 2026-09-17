@@ -63,8 +63,8 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.39 · MOBILE VWAP</h1>
-    <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 신호 엔진은 1M/3M SCALP만 묶고 5M · 15M · 1H · 4H는 완전 독립</div>
+    <h1>BTC OKX RADAR v6.45 · MOBILE EARLY → CONF</h1>
+    <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 메인 신호는 15M EARLY → 5M 압력전환 → CONF · 1H/4H 독립 유지 · 1/3M 신규 신호 중단</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
 </div>
@@ -95,12 +95,12 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
  <div style="font-size:9px;color:#7f8ba0;margin-top:7px">예: 5·20·60·120·240 또는 직접 숫자 입력 · 설정은 이 브라우저에 저장</div>
 </div></div><div id="enginePanel" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:7px;border:1px solid #263247;border-radius:8px;background:#0b111b">
 <b style="font-size:10px">SIGNAL ENGINE</b>
-<button class="btn engBtn" data-eng="NONE">신호 제거</button><button class="btn engBtn" data-eng="SCALP">SCALP 1M/3M</button><button class="btn engBtn" data-eng="5M">5M</button><button class="btn engBtn" data-eng="15M">15M</button><button class="btn engBtn" data-eng="1H">1H</button><button class="btn engBtn" data-eng="4H">4H</button><button class="btn engBtn" data-eng="ALL">ALL</button>
+<button class="btn engBtn" data-eng="NONE">신호 제거</button><button class="btn engBtn" data-eng="SCALP">1/3M 과거</button><button class="btn engBtn" data-eng="5M">5M</button><button class="btn engBtn" data-eng="15M">15M</button><button class="btn engBtn" data-eng="1H">1H</button><button class="btn engBtn" data-eng="4H">4H</button><button class="btn engBtn" data-eng="ALL">ALL</button>
 <span id="scalpStat" style="font-size:10px;color:#8d99ad">1/3M —</span><span id="m5Stat" style="font-size:10px;color:#8d99ad">5M —</span><span id="m15Stat" style="font-size:10px;color:#8d99ad">15M —</span><span id="h1Stat" style="font-size:10px;color:#8d99ad">1H —</span><span id="h4Stat" style="font-size:10px;color:#8d99ad">4H —</span>
 <div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">복수 선택 가능 · 예: 5M + 15M 동시 표시 · 신호 제거 = 전체 OFF · ALL = 전체 ON · DB/거래기록은 그대로 보존</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
-<span style="color:#35d98a">● SCALP L</span><span style="color:#ff78b4">● SCALP S</span>
+<span style="color:#f2c94c">● EARLY</span><span style="color:#4f8cff">● 5M 압력</span><span style="color:#9ef01a">● CONF L</span><span style="color:#ffb703">● CONF S</span>
 <span style="color:#4f8cff">● TRAP L</span><span style="color:#ff4f64">● TRAP S</span>
-<span style="color:#48a9ff">● 15M L/S</span><span style="color:#27c2a4">● 1H L/S</span><span style="color:#c86cff">● 4H L/S</span><span style="color:#b37cff">● VWAP L/S</span><span style="color:#d7dee9">● X 종료</span></div>
+<span style="color:#27c2a4">● 1H L/S</span><span style="color:#c86cff">● 4H L/S</span><span style="color:#b37cff">● VWAP선</span><span style="color:#d7dee9">● X 종료</span></div>
 </div><div style="font-size:10px;color:#8d99ad;margin:3px 0">TIMEFRAME · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO</div><div class="hoverPctBar" id="hoverPctBar">봉에 마우스를 올리면 해당 봉의 등락률이 표시됩니다.</div><div id="chart"></div>
   <div class="legend">
     <span><b class="blue">TRAP L / LONG</b> 저점 sweep + 매도 체결 과열 + 가격 실패 + flow 반전</span>
@@ -108,7 +108,7 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
     <span><b style="color:#35d7e5">RETEST</b> 청록</span><span><b style="color:#c7d0dd">X</b> 포지션 정리</span><span><b class="purple">VWAP</b> 선택 봉 기준 앵커 VWAP</span>
   </div>
   <div class="warn">
-    1M·3M·5M·15M·1H·4H·1D 차트를 자유롭게 볼 수 있습니다. 신호 엔진은 1M/3M SCALP만 묶고, 5M·15M·1H·4H는 각각 자기 캔들·유동성·MA/VWAP·포지션을 독립적으로 사용합니다. VWAP은 1M~4H는 UTC 일간 앵커, 1D는 월간 앵커입니다. 실제 trades / OI / books 데이터는 페이지를 연 뒤부터 쌓이며 발생한 신호만 저장합니다.
+    1M·3M·5M·15M·1H·4H·1D 차트를 자유롭게 볼 수 있습니다. v6.45부터 1/3M SCALP 신규 신호/저장을 중단하고, 15M EARLY → 5M 압력전환 → CONF를 메인 신호 흐름으로 사용합니다. VWAP은 독립 L/S 신호가 아니라 내부 근거로만 사용합니다. 1H·4H 기존 신호 엔진은 유지됩니다.
   </div>
 </section>
 
@@ -569,6 +569,8 @@ function detectBreakoutForRetest(){
   }
 }
 function emitSignal(name,dir,score,level,ext,A,m){
+  // v6.45: browser-side signal persistence disabled. Server pipeline is authoritative.
+  return;
   let p=currentPrice(),sl,tp1,tp2,liq=liq15();
   if(dir==='LONG'){
     sl=Math.min(ext,level-.22*A);
@@ -727,7 +729,7 @@ function renderMarkers(){
     const sec=bucketSec[eng]||300;
     const bucket=Math.floor(s.time/sec)*sec;
     const rawName=String(s.name||'').toUpperCase();
-    const family=rawName.includes('VWAP')?'VWAP':rawName.includes('RETEST')?'RETEST':rawName.includes('SCALP')?'SCALP':'NORMAL';
+    const family=rawName.includes('EARLY')?'EARLY':rawName.includes('CONF')?'CONF':rawName.includes('VWAP')?'VWAP':rawName.includes('RETEST')?'RETEST':rawName.includes('SCALP')?'SCALP':'NORMAL';
     // Family stays in the key so VWAP does not silently inflate a normal signal count.
     const key=[eng,bucket,s.dir,family].join('|');
     let g=native.get(key);
@@ -752,7 +754,7 @@ function renderMarkers(){
     for(let i=clusters.length-1;i>=0;i--){
       const g=clusters[i];
       if(s.lastTime-g.lastTime>CROSS_SEC) break;
-      if(g.dir!==s.dir || g.engines.has(s.engine)) continue;
+      if(g.dir!==s.dir || g.engines.has(s.engine) || !g.families.has(s.family)) continue;
       const gp=Number(g.anchorPrice||0), sp=Number(s.anchorPrice||0);
       const priceClose=!gp||!sp||Math.abs(sp-gp)/gp*100<=PRICE_PCT;
       if(priceClose){ best=g; break; }
@@ -774,14 +776,18 @@ function renderMarkers(){
   for(const g of clusters){
     const engines=[...g.engines].sort((a,b)=>(engineRank[a]??9)-(engineRank[b]??9));
     const engs=engines.map(engineText).join('+');
+    const hasEarly=g.families.has('EARLY'), hasConf=g.families.has('CONF');
     const hasVwap=g.families.has('VWAP'), hasRetest=g.families.has('RETEST');
-    const color=hasVwap?(g.dir==='LONG'?'#d78cff':'#9b5cff'):hasRetest?'#b56cff':engColor(engines[engines.length-1]||'5M',g.dir);
+    const color=hasEarly?'#f2c94c':hasConf?(g.dir==='LONG'?'#9ef01a':'#ffb703'):hasVwap?(g.dir==='LONG'?'#d78cff':'#9b5cff'):hasRetest?'#b56cff':engColor(engines[engines.length-1]||'5M',g.dir);
+    const label=hasEarly?('EARLY '+(g.dir==='LONG'?'L':'S')+' ('+g.count+')'):
+      hasConf?('★ CONF '+(g.dir==='LONG'?'L':'S')+(g.count>1?' ('+g.count+')':'')):
+      ('['+engs+'] '+(hasVwap?'VWAP ':'')+(g.dir==='LONG'?'L':'S')+' ('+g.count+')');
     marks.push({
       time:g.lastTime,
       position:g.dir==='LONG'?'belowBar':'aboveBar',
       color,
       shape:g.dir==='LONG'?'arrowUp':'arrowDown',
-      text:'['+engs+'] '+(hasVwap?'VWAP ':'')+(g.dir==='LONG'?'L':'S')+' ('+g.count+')'
+      text:label
     });
   }
 
@@ -1168,7 +1174,7 @@ loadPositionExitMarkers();
 function paintEngineButtons(){
  document.querySelectorAll('.engBtn').forEach(b=>{
    const e=b.dataset.eng;
-   const on=e==='ALL' ? selectedEngines.size===5 : e==='NONE' ? selectedEngines.size===0 : selectedEngines.has(e);
+   const on=e==='ALL' ? selectedEngines.size===4 : e==='NONE' ? selectedEngines.size===0 : selectedEngines.has(e);
    b.style.borderColor=on?'#4f8cff':'';
    b.style.background=on?'#13243c':'';
  });
@@ -1176,7 +1182,7 @@ function paintEngineButtons(){
 document.querySelectorAll('.engBtn').forEach(x=>x.onclick=()=>{
  const e=x.dataset.eng;
  if(e==='NONE') selectedEngines.clear();
- else if(e==='ALL'){ selectedEngines=new Set(['SCALP','5M','15M','1H','4H']); }
+ else if(e==='ALL'){ selectedEngines=new Set(['5M','15M','1H','4H']); }
  else { selectedEngines.has(e)?selectedEngines.delete(e):selectedEngines.add(e); }
  engineView='MULTI';
  paintEngineButtons();
