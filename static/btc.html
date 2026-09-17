@@ -51,7 +51,7 @@ body.embedded-btc header{position:relative!important}
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.39 · USER TRADE TRACKING</h1>
+    <h1>BTC OKX RADAR v6.40 · MULTI SIGNAL + SIDE POSITION</h1>
     <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 신호 엔진은 1M/3M SCALP만 묶고 5M · 15M · 1H · 4H는 완전 독립</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
@@ -85,7 +85,7 @@ body.embedded-btc header{position:relative!important}
 <b style="font-size:10px">SIGNAL ENGINE</b>
 <button class="btn engBtn" data-eng="NONE">신호 제거</button><button class="btn engBtn" data-eng="SCALP">SCALP 1M/3M</button><button class="btn engBtn" data-eng="5M">5M</button><button class="btn engBtn" data-eng="15M">15M</button><button class="btn engBtn" data-eng="1H">1H</button><button class="btn engBtn" data-eng="4H">4H</button><button class="btn engBtn" data-eng="ALL">ALL</button>
 <span id="scalpStat" style="font-size:10px;color:#8d99ad">1/3M —</span><span id="m5Stat" style="font-size:10px;color:#8d99ad">5M —</span><span id="m15Stat" style="font-size:10px;color:#8d99ad">15M —</span><span id="h1Stat" style="font-size:10px;color:#8d99ad">1H —</span><span id="h4Stat" style="font-size:10px;color:#8d99ad">4H —</span>
-<div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">신호 제거 = 차트 마커만 숨김 · DB/거래기록은 그대로 보존</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
+<div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">복수 선택 가능 · 예: 5M + 15M 동시 표시 · 신호 제거 = 전체 OFF · ALL = 전체 ON · DB/거래기록은 그대로 보존</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
 <span style="color:#35d98a">● SCALP L</span><span style="color:#ff78b4">● SCALP S</span>
 <span style="color:#4f8cff">● TRAP L</span><span style="color:#ff4f64">● TRAP S</span>
 <span style="color:#48a9ff">● 15M L/S</span><span style="color:#27c2a4">● 1H L/S</span><span style="color:#c86cff">● 4H L/S</span><span style="color:#d7dee9">● X 종료</span></div>
@@ -137,6 +137,12 @@ body.embedded-btc header{position:relative!important}
     <div class="reason" id="why" style="margin-top:7px">실시간 flow 데이터 수집 중…</div>
   </div>
 
+  <div class="box mySidePosition">
+    <h3>👤 내 포지션 <span class="tiny">수동 시뮬레이터</span></h3>
+    <div class="myTradeControls"><button onclick="openMyPos('LONG')">LONG 진입</button><button onclick="openMyPos('SHORT')">SHORT 진입</button></div>
+    <div id="myPosition" class="myPositionBox">불러오는 중…</div>
+  </div>
+
 <div class="box">
 <h3>엔진별 현재 포지션 <span class="tiny">HOLD ↔ PRESSURE → X / SWITCH</span></h3>
 <div id="enginePositions" class="tiny">불러오는 중…</div>
@@ -160,9 +166,7 @@ body.embedded-btc header{position:relative!important}
     </div>
   </section>
   <section class="panel deskPane">
-    <h3>👤 내 포지션 / 내 거래 기록 <span class="tiny">엔진과 완전 분리 · 현재가 시뮬레이션</span></h3>
-    <div class="myTradeControls"><button onclick="openMyPos('LONG')">LONG 진입</button><button onclick="openMyPos('SHORT')">SHORT 진입</button></div>
-    <div id="myPosition" class="myPositionBox">불러오는 중…</div>
+    <h3>👤 내 거래 기록 <span class="tiny">엔진과 완전 분리</span></h3>
     <div style="overflow:auto;max-height:350px;margin-top:10px">
       <table style="width:100%;border-collapse:collapse;font-size:10px">
         <thead><tr style="color:#8d99ad;text-align:left"><th style="padding:6px">진입시간</th><th>방향</th><th>진입가</th><th>청산가</th><th>보유</th><th>수익금</th><th>수익률</th></tr></thead>
@@ -640,7 +644,8 @@ function engColor(e,side){
   return (c[e]||c['5M'])[side==='SHORT'?'SHORT':'LONG'];
 }
 let positionPerf={closed:0,wins:0,losses:0,winrate:null,engines:{}};
-let engineView='ALL';
+let engineView='MULTI';
+let selectedEngines=new Set(['5M']);
 function allSaved(){
   let m=new Map();
   for(const x of saved)m.set('local:'+x.id,x);
@@ -681,7 +686,7 @@ function renderHistory(){
   }).join(''):'<div class="tiny">아직 없음</div>';
 }
 function renderMarkers(){
-  if(engineView==='NONE'){ try{candle.setMarkers([])}catch(e){}; return; }
+  if(selectedEngines.size===0){ try{candle.setMarkers([])}catch(e){}; return; }
   let from=cache[cur]?.[0]?.time||0;
   let marks=[];
 
@@ -689,13 +694,13 @@ function renderMarkers(){
   // ALL = execution view: hide raw observation signals; keep only POS / X / SWITCH below.
   // A specific engine (or AUTO resolving to one engine) = research view: show that engine's
   // aggregated raw signals plus POS / X / SWITCH. SQLite/Signal Lab remain untouched.
-  let effective=engineView==='AUTO'?((cur==='1M'||cur==='3M')?'SCALP':['5M','15M','1H','4H'].includes(cur)?cur:'ALL'):engineView;
-  const showRawSignals = effective!=='ALL';
+  const effective='MULTI';
+  const showRawSignals = selectedEngines.size>0;
   const bucketSec={
     '1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800,'1MO':2592000
   }[cur]||60;
   const grouped=new Map();
-  for(const s of (showRawSignals ? allSaved() : []).filter(s=>!(s.name||'').includes('MA EARLY') && s.time>=from && (effective==='ALL'||(s.engine||'5M')===effective))){
+  for(const s of (showRawSignals ? allSaved() : []).filter(s=>!(s.name||'').includes('MA EARLY') && s.time>=from && selectedEngines.has(s.engine||'5M'))){
     const bucket=Math.floor(Number(s.time)/bucketSec)*bucketSec;
     const rawName=String(s.name||'').toUpperCase().trim();
     // Canonicalize historical/new naming variants so visually identical signals on one bar really merge.
@@ -724,7 +729,7 @@ function renderMarkers(){
   for(const e of positionEvents.filter(e=>e.time>=from)){
     const ev=String(e.event||'').toUpperCase();
     if(!['OPEN','EXIT','SWITCH'].includes(ev)) continue;
-    if(effective!=='ALL' && (e.engine||'5M')!==effective) continue;
+    if(!selectedEngines.has(e.engine||'5M')) continue;
     const tf=engLabel(e.engine);
     if(ev==='EXIT'){
       const reason=/STRUCTURE INVALIDATION/i.test(e.note||'')?'STRUCT':/FLOW SWITCH/i.test(e.note||'')||/opposite signal \/ switch/i.test(e.note||'')?'SW':/FLOW EXIT/i.test(e.note||'')?'FLOW':'EXIT';
@@ -1100,10 +1105,23 @@ function mergeExitMarkers(base){
 setInterval(async()=>{await loadPositionExitMarkers();try{if(typeof render==='function')render()}catch(e){}},5000);
 loadPositionExitMarkers();
 
+function paintEngineButtons(){
+ document.querySelectorAll('.engBtn').forEach(b=>{
+   const e=b.dataset.eng;
+   const on=e==='ALL' ? selectedEngines.size===5 : e==='NONE' ? selectedEngines.size===0 : selectedEngines.has(e);
+   b.style.borderColor=on?'#4f8cff':'';
+   b.style.background=on?'#13243c':'';
+ });
+}
 document.querySelectorAll('.engBtn').forEach(x=>x.onclick=()=>{
- engineView=x.dataset.eng;
- document.querySelectorAll('.engBtn').forEach(y=>y.style.borderColor=y===x?'#4f8cff':'');
+ const e=x.dataset.eng;
+ if(e==='NONE') selectedEngines.clear();
+ else if(e==='ALL'){ selectedEngines=new Set(['SCALP','5M','15M','1H','4H']); }
+ else { selectedEngines.has(e)?selectedEngines.delete(e):selectedEngines.add(e); }
+ engineView='MULTI';
+ paintEngineButtons();
  renderMarkers();
 });
+paintEngineButtons();
 </script>
 </body></html>
