@@ -698,81 +698,63 @@ function renderMarkers(){
   // aggregated raw signals plus POS / X / SWITCH. SQLite/Signal Lab remain untouched.
   const effective='MULTI';
   const showRawSignals = selectedEngines.size>0;
-  // v6.44 STABLE NATIVE-BUCKET CLUSTER
-  // 1) Aggregate only inside each engine's own candle bucket.
-  // 2) Cross-engine merge only when the *actual latest signal times* overlap.
-  // 3) A merged marker is placed at the completion time (latest constituent signal),
-  //    never backdated to the first warning. DB / Signal Lab rows are untouched.
+  // v6.47 DISPLAY-CANDLE SIGNAL GROUPING
+  // IMPORTANT: grouping follows the candle that is CURRENTLY DISPLAYED on the chart.
+  // Example:
+  //   - 1M chart: signals at 08:25 and 08:27 stay as two separate markers.
+  //   - 5M chart: those same signals share the 08:25~08:29 candle and are grouped.
+  // This changes chart presentation only. DB / Signal Lab rows are never merged or deleted.
   const engineRank={'SCALP':0,'5M':1,'15M':2,'1H':3,'4H':4};
   const engineText=e=>e==='SCALP'?'1/3M':e;
-  const bucketSec={'SCALP':180,'5M':300,'15M':900,'1H':3600,'4H':14400};
+  const chartBucketSec={'1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800};
+  const chartBucketStart=(ts)=>{
+    ts=Number(ts)||0;
+    if(cur==='1MO'){
+      const d=new Date(ts*1000);
+      return Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),1,0,0,0)/1000;
+    }
+    const sec=chartBucketSec[cur]||60;
+    return Math.floor(ts/sec)*sec;
+  };
   const showVwapSignals = !document.getElementById('vwapSigChk') || document.getElementById('vwapSigChk').checked;
   const raw=(showRawSignals ? allSaved() : [])
     .filter(s=>!(s.name||'').includes('MA EARLY') && s.time>=from && selectedEngines.has(s.engine||'5M') && (showVwapSignals || !String(s.name||'').toUpperCase().includes('VWAP')))
     .map(s=>({...s,time:Number(s.time),entry:Number(s.entry||s.price||0)}))
     .sort((a,b)=>a.time-b.time);
 
-  const native=new Map();
+  // Group only signals that really land on the SAME currently-visible chart candle.
+  // Family remains separate so EARLY / CONF / VWAP / RETEST do not inflate each other.
+  const groups=new Map();
   for(const s of raw){
     const eng=s.engine||'5M';
-    const sec=bucketSec[eng]||300;
-    const bucket=Math.floor(s.time/sec)*sec;
+    const bucket=chartBucketStart(s.time);
     const rawName=String(s.name||'').toUpperCase();
     const family=rawName.includes('EARLY')?'EARLY':rawName.includes('CONF')?'CONF':rawName.includes('VWAP')?'VWAP':rawName.includes('RETEST')?'RETEST':rawName.includes('SCALP')?'SCALP':'NORMAL';
-    // Family stays in the key so VWAP does not silently inflate a normal signal count.
-    const key=[eng,bucket,s.dir,family].join('|');
-    let g=native.get(key);
+    const key=[bucket,s.dir,family].join('|');
+    let g=groups.get(key);
     if(!g){
-      g={dir:s.dir,count:0,engine:eng,family,bucket,firstTime:s.time,lastTime:s.time,
-         anchorPrice:s.entry||0,priceSum:0,priceN:0};
-      native.set(key,g);
+      g={dir:s.dir,count:0,family,bucket,firstTime:s.time,lastTime:s.time,engines:new Set()};
+      groups.set(key,g);
     }
     g.count++;
     g.firstTime=Math.min(g.firstTime,s.time);
     g.lastTime=Math.max(g.lastTime,s.time);
-    if(s.entry){ g.priceSum+=s.entry; g.priceN++; g.anchorPrice=g.priceSum/g.priceN; }
+    g.engines.add(eng);
   }
 
-  // Merge different engines only when their real signal timestamps are genuinely close.
-  // This is intentionally much tighter than the old rolling 5-minute window.
-  const CROSS_SEC=75, PRICE_PCT=0.22;
-  const groups=[...native.values()].sort((a,b)=>a.lastTime-b.lastTime);
-  const clusters=[];
-  for(const s of groups){
-    let best=null;
-    for(let i=clusters.length-1;i>=0;i--){
-      const g=clusters[i];
-      if(s.lastTime-g.lastTime>CROSS_SEC) break;
-      if(g.dir!==s.dir || g.engines.has(s.engine) || !g.families.has(s.family)) continue;
-      const gp=Number(g.anchorPrice||0), sp=Number(s.anchorPrice||0);
-      const priceClose=!gp||!sp||Math.abs(sp-gp)/gp*100<=PRICE_PCT;
-      if(priceClose){ best=g; break; }
-    }
-    if(best){
-      const oldN=best.priceN||0, addN=s.priceN||0;
-      if(addN){ best.anchorPrice=((best.anchorPrice||0)*oldN+(s.anchorPrice||0)*addN)/(oldN+addN); best.priceN=oldN+addN; }
-      best.count+=s.count;
-      best.firstTime=Math.min(best.firstTime,s.firstTime);
-      best.lastTime=Math.max(best.lastTime,s.lastTime);
-      best.engines.add(s.engine); best.families.add(s.family);
-    }else{
-      clusters.push({dir:s.dir,count:s.count,firstTime:s.firstTime,lastTime:s.lastTime,
-        anchorPrice:s.anchorPrice||0,priceN:s.priceN||0,
-        engines:new Set([s.engine]),families:new Set([s.family])});
-    }
-  }
-
-  for(const g of clusters){
+  for(const g of [...groups.values()].sort((a,b)=>a.bucket-b.bucket)){
     const engines=[...g.engines].sort((a,b)=>(engineRank[a]??9)-(engineRank[b]??9));
     const engs=engines.map(engineText).join('+');
-    const hasEarly=g.families.has('EARLY'), hasConf=g.families.has('CONF');
-    const hasVwap=g.families.has('VWAP'), hasRetest=g.families.has('RETEST');
+    const hasEarly=g.family==='EARLY', hasConf=g.family==='CONF';
+    const hasVwap=g.family==='VWAP', hasRetest=g.family==='RETEST';
     const color=hasEarly?'#f2c94c':hasConf?(g.dir==='LONG'?'#9ef01a':'#ffb703'):hasVwap?(g.dir==='LONG'?'#d78cff':'#9b5cff'):hasRetest?'#b56cff':engColor(engines[engines.length-1]||'5M',g.dir);
     const label=hasEarly?('EARLY '+(g.dir==='LONG'?'L':'S')+' ('+g.count+')'):
       hasConf?('★ CONF '+(g.dir==='LONG'?'L':'S')+(g.count>1?' ('+g.count+')':'')):
       ('['+engs+'] '+(hasVwap?'VWAP ':'')+(g.dir==='LONG'?'L':'S')+' ('+g.count+')');
     marks.push({
-      time:g.lastTime,
+      // Use the displayed candle start so the marker can never jump to another candle
+      // when filters or other engines are toggled.
+      time:g.bucket,
       position:g.dir==='LONG'?'belowBar':'aboveBar',
       color,
       shape:g.dir==='LONG'?'arrowUp':'arrowDown',

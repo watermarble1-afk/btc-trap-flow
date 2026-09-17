@@ -1,10 +1,22 @@
-# BTC OKX RADAR v6.46 · VWAP SIGNAL TOGGLE
+# BTC OKX RADAR v6.47 · DISPLAY-CANDLE SIGNAL FIX
 
-- Adds a **VWAP 신호** ON/OFF switch beside SIGNAL ENGINE controls on PC and mobile.
-- Toggle is chart-display only: OFF hides VWAP-family signal markers; ON restores them.
-- State is saved in browser localStorage.
-- VWAP line checkbox remains separate in indicator settings.
-- v6.45 signal logic remains unchanged: VWAP continues as internal evidence for EARLY/CONF, no new standalone VWAP L/S generation.
-- 1H / 4H logic unchanged.
-- 1/3M new SCALP generation/storage remains disabled.
-- DB schema/data untouched.
+This patch changes chart signal grouping only.
+
+## Fixed
+- Signal grouping now follows the **currently displayed chart candle**, not the signal engine's native timeframe bucket.
+- On a 1M chart, signals generated on different 1-minute candles are shown separately.
+- On a 5M chart, signals that fall inside the same displayed 5-minute candle are grouped and counted together.
+- Same principle applies to 15M / 1H / 4H / higher displayed timeframes.
+- Toggling 5M / 15M / 1H filters no longer drags older/later signals into one native-engine bucket.
+- EARLY / CONF / VWAP / RETEST families remain separate so their counts cannot inflate each other.
+
+## Unchanged
+- Signal-generation logic
+- EARLY → 5M → CONF logic
+- 1H / 4H signal logic
+- VWAP visibility toggle
+- Position simulator logic
+- SQLite / existing DB records
+- Signal Lab raw rows
+
+PC and mobile are both patched.
