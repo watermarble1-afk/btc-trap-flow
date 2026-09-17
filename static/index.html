@@ -1,5 +1,5 @@
 <!doctype html><html lang="ko"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>MY MARKET TERMINAL v2</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>MY MARKET TERMINAL v6.39</title>
 <style>
 :root{--bg:#071019;--p:#0d1722;--p2:#111e2b;--line:#223247;--txt:#e8f0f7;--mut:#8293a6;--g:#31d394;--r:#ff6678;--b:#6ba8ff}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,sans-serif}
@@ -19,12 +19,13 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
 .note{padding:12px;border:1px dashed #31465e;border-radius:10px;color:var(--mut);font-size:12px;line-height:1.5}
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.newsgrid{grid-template-columns:1fr}.status{display:none}}
 .ledger{width:100%;border-collapse:collapse;font-size:12px}.ledger th{position:sticky;top:0;background:#0d1722;color:#91a5ba;text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);white-space:nowrap}.ledger td{padding:10px 8px;border-bottom:1px solid #1d2a39;white-space:nowrap}.ledger tr:hover td{background:#122131}.pos{color:var(--g)}.neg{color:var(--r)}
+.livePosGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}.livePosCard{background:linear-gradient(180deg,#0f1c29,#0b151f);border:1px solid #29415b;border-radius:14px;padding:14px;min-height:128px}.livePosCard h3{display:flex;justify-content:space-between;align-items:center}.liveBadge{font-size:10px;padding:3px 7px;border:1px solid #35506d;border-radius:10px}.liveBody{font-size:13px;line-height:1.8}.liveBody b{font-size:15px}.liveActions{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px}@media(max-width:900px){.livePosGrid{grid-template-columns:1fr}}
 </style></head><body>
 <header><div class="brand">MY MARKET TERMINAL <em>v2</em></div>
 <nav><button class="tab on" data-p="btc">BTC</button><button class="tab" data-p="stocks">주식</button><button class="tab" data-p="news">NEWS</button><button class="tab" data-p="lab">SIGNAL LAB</button><a class="tab" href="/mobile" style="text-decoration:none">모바일</a></nav>
 <div class="status">BTC SERVER <span id="srv" class="live">● CHECK</span></div></header>
 <main>
-<section id="btc" class="page on"><iframe src="btc.html?v=627"></iframe></section>
+<section id="btc" class="page on"><iframe src="btc.html?v=639"></iframe></section>
 <section id="stocks" class="page"><iframe src="stock.html?v=64"></iframe></section>
 <section id="news" class="page">
  <div class="newsbar">
@@ -49,10 +50,12 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
   <div class="card"><h3>누적 실현수익률</h3><div id="realizedPct" class="big">0.00%</div><div class="mut">청산 POS 수익률 단순합</div></div>
   <div class="card"><h3>누적 실현손익</h3><div id="realizedUsd" class="big">$0.0</div><div class="mut">1 BTC 기준 · 수수료/레버리지 제외</div></div>
  </div>
- <div class="card" style="margin-top:12px"><h3>내 포지션 · 수동 시뮬레이터</h3><div id="myPosLab" class="mut">불러오는 중…</div><div style="display:flex;gap:8px;margin-top:8px"><button onclick="myOpen('LONG')">B 매수</button><button onclick="myOpen('SHORT')">S 매도</button><button onclick="myClose()">포지션 종료</button></div></div>
-<div class="cards" style="margin-top:12px"><div class="card"><h3>내 누적 실현수익률</h3><div id="myPct" class="big">0.00%</div></div><div class="card"><h3>내 누적 실현손익</h3><div id="myUsd" class="big">$0.0</div><div class="mut">1 BTC 기준 · 수수료/레버리지 제외</div></div></div>
-<div class="card" style="margin-top:12px"><h3>내 거래 기록</h3><div style="overflow:auto"><table><thead><tr><th>진입</th><th>방향</th><th>진입가</th><th>청산가</th><th>수익률</th><th>수익금</th></tr></thead><tbody id="myLedger"></tbody></table></div></div>
-<div class="card" style="margin-top:12px"><h3>현재 시뮬레이터 포지션 · 강제청산은 실제 OKX 주문과 무관</h3><div id="manualPositions" class="mut">불러오는 중…</div></div>
+<div class="livePosGrid">
+  <div class="livePosCard"><h3>🤖 시스템 실시간 포지션 <span class="liveBadge">AUTO POS</span></h3><div id="manualPositions" class="liveBody mut">불러오는 중…</div></div>
+  <div class="livePosCard"><h3>👤 내 실시간 포지션 <span class="liveBadge">MY POS</span></h3><div id="myPosLab" class="liveBody mut">불러오는 중…</div><div class="liveActions"><button class="btn" onclick="myOpen('LONG')">LONG 진입</button><button class="btn" onclick="myOpen('SHORT')">SHORT 진입</button><button class="btn" id="myCloseBtn" onclick="myClose()">포지션 종료</button></div></div>
+</div>
+<div class="grid" style="margin-top:12px"><div class="card"><h3>내 누적 실현수익률</h3><div id="myPct" class="big">0.00%</div><div class="mut">내 수동매매만 · 시스템 TOTAL과 분리</div></div><div class="card"><h3>내 누적 실현손익</h3><div id="myUsd" class="big">$0.0</div><div class="mut">1 BTC 기준 · 시스템 TOTAL과 분리</div></div></div>
+<div class="card" style="margin-top:12px"><h3>👤 내 포지션 타점 / 거래 기록</h3><div style="overflow:auto"><table class="ledger"><thead><tr><th>진입시간</th><th>방향</th><th>진입가</th><th>청산가</th><th>청산시간</th><th>수익률</th><th>수익금</th></tr></thead><tbody id="myLedger"></tbody></table></div></div>
  <div class="card" style="margin-top:12px">
   <h3>실제 포지션 성과 · POS L/S → HOLD ↔ PRESSURE → X / SWITCH · 승률은 청산 포지션 기준</h3>
   <div id="labFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
@@ -103,7 +106,7 @@ async function loadRSS(){
  const seen=new Set(); NEWS=all.sort((a,b)=>b.ts-a.ts).filter(x=>!seen.has(x.title)&&(seen.add(x.title),true)).slice(0,40);
  if(!NEWS.length)feed.innerHTML='<div class="note">브라우저에서 뉴스 피드 연결이 막혔음. 다음 단계에서 Railway 서버 뉴스 수집기로 옮기면 24시간 안정적으로 받을 수 있다.</div>'; else renderNews();
 }
-let LABSIG=[], LABPOS=[], LIVEPOS=[], LF='ALL', LABSYNC=false;
+let LABSIG=[], LABPOS=[], LIVEPOS=[], LIVE={}, LF='ALL', LABSYNC=false;
 function fmtN(v){return Number(v||0).toLocaleString('en-US',{maximumFractionDigits:1})}
 function eng(e){return e==='SCALP'?'1/3M':(e||'5M')}
 function buildPositions(ev){
@@ -161,6 +164,7 @@ async function syncServer(){
    fetch(API+'/api/positions',{cache:'no-store'}).then(r=>r.json())
   ]);
   srv.textContent='● LIVE';srv.style.color='var(--g)';
+  LIVE=live||{};
   LABSIG=Array.isArray(sigs)?sigs:[];LABPOS=buildPositions(Array.isArray(events)?events:[]);LIVEPOS=Array.isArray(positions)?positions:[];
   tot.textContent=LABSIG.length;win.textContent=LABSIG.filter(x=>x.status==='WIN').length;loss.textContent=LABSIG.filter(x=>x.status==='LOSS').length;open.textContent=LABSIG.filter(x=>x.status==='OPEN').length;
   renderLab();
@@ -168,7 +172,7 @@ async function syncServer(){
 }
 refresh.onclick=loadRSS; loadRSS();syncServer();setInterval(syncServer,10000);setInterval(loadRSS,300000);
 
-async function loadMy(){try{const [p,perf]=await Promise.all([fetch('/api/user-position',{cache:'no-store'}).then(r=>r.json()),fetch('/api/user-position-performance',{cache:'no-store'}).then(r=>r.json())]);let txt='현재 내 포지션 없음';if(p.side&&p.side!=='FLAT'){const pc=Number(p.live_pct||0),usd=Number(p.live_usd||0);txt=`${p.side} · 진입 $${Number(p.entry).toLocaleString()} · 현재 $${Number(p.current_price||0).toLocaleString()} · 실시간 ${pc>=0?'+':''}${pc.toFixed(3)}% · ${usd>=0?'+$':'-$'}${Math.abs(usd).toLocaleString(undefined,{maximumFractionDigits:1})}`;}document.getElementById('myPosLab').textContent=txt;document.getElementById('myPct').textContent=(perf.total_pct>=0?'+':'')+Number(perf.total_pct||0).toFixed(2)+'%';document.getElementById('myUsd').textContent=(perf.total_usd>=0?'+$':'-$')+Math.abs(Number(perf.total_usd||0)).toLocaleString(undefined,{maximumFractionDigits:1});document.getElementById('myLedger').innerHTML=(perf.trades||[]).map(t=>`<tr><td>${new Date(t.opened_ts).toLocaleString('ko-KR')}</td><td>${t.side}</td><td>$${Number(t.entry).toLocaleString()}</td><td>${t.exit==null?'보유중':'$'+Number(t.exit).toLocaleString()}</td><td>${t.closed_ts?new Date(t.closed_ts).toLocaleString('ko-KR'):'OPEN'}</td><td>${Number(t.return_pct)>=0?'+':''}${Number(t.return_pct).toFixed(3)}%</td><td>${Number(t.pnl_usd)>=0?'+$':'-$'}${Math.abs(Number(t.pnl_usd)).toLocaleString(undefined,{maximumFractionDigits:1})}</td></tr>`).join('')||'<tr><td colspan="7">기록 없음</td></tr>';}catch(e){}}
+async function loadMy(){try{const [p,perf]=await Promise.all([fetch('/api/user-position',{cache:'no-store'}).then(r=>r.json()),fetch('/api/user-position-performance',{cache:'no-store'}).then(r=>r.json())]);let el=document.getElementById('myPosLab'),btn=document.getElementById('myCloseBtn');if(p.side&&p.side!=='FLAT'){const pc=Number(p.live_pct||0),usd=Number(p.live_usd||0),mins=Math.max(0,Math.floor((Date.now()-Number(p.opened_ts||Date.now()))/60000));const hold=mins>=60?Math.floor(mins/60)+'시간 '+(mins%60)+'분':mins+'분';el.innerHTML=`<b class="${p.side==='LONG'?'pos':'neg'}">${p.side}</b> · 진입 $${Number(p.entry).toLocaleString()} · 현재 $${Number(p.current_price||0).toLocaleString()}<br><b class="${pc>=0?'pos':'neg'}">실시간 ${pc>=0?'+':''}${pc.toFixed(3)}% · ${usd>=0?'+$':'-$'}${Math.abs(usd).toLocaleString(undefined,{maximumFractionDigits:1})}</b> · 보유 ${hold}`;if(btn)btn.style.display='inline-block';}else{el.innerHTML='<span class="mut">현재 내 포지션 없음 · LONG/SHORT 진입 시 실시간 수익률·수익금이 표시됩니다.</span>';if(btn)btn.style.display='none';}document.getElementById('myPct').textContent=(perf.total_pct>=0?'+':'')+Number(perf.total_pct||0).toFixed(2)+'%';document.getElementById('myUsd').textContent=(perf.total_usd>=0?'+$':'-$')+Math.abs(Number(perf.total_usd||0)).toLocaleString(undefined,{maximumFractionDigits:1});document.getElementById('myLedger').innerHTML=(perf.trades||[]).map(t=>`<tr><td>${new Date(t.opened_ts).toLocaleString('ko-KR')}</td><td class="${t.side==='LONG'?'pos':'neg'}">${t.side}</td><td>$${Number(t.entry).toLocaleString()}</td><td>${t.exit==null?'보유중':'$'+Number(t.exit).toLocaleString()}</td><td>${t.closed_ts?new Date(t.closed_ts).toLocaleString('ko-KR'):'OPEN'}</td><td class="${Number(t.return_pct)>=0?'pos':'neg'}">${Number(t.return_pct)>=0?'+':''}${Number(t.return_pct).toFixed(3)}%</td><td class="${Number(t.pnl_usd)>=0?'pos':'neg'}">${Number(t.pnl_usd)>=0?'+$':'-$'}${Math.abs(Number(t.pnl_usd)).toLocaleString(undefined,{maximumFractionDigits:1})}</td></tr>`).join('')||'<tr><td colspan="7">기록 없음</td></tr>';}catch(e){}}
 async function myOpen(side){const r=await fetch('/api/user-position/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({side})});const j=await r.json();if(!j.ok)alert(j.error);loadMy()}
 async function myClose(){const r=await fetch('/api/user-position/close',{method:'POST'});const j=await r.json();if(!j.ok)alert(j.error);loadMy()}
 setInterval(loadMy,3000);loadMy();

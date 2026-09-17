@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.29 CONFIRMED SIGNAL")
+app=FastAPI(title="BTC Trap Flow Collector v6.39 5M15M PRECISION")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 trades=deque(maxlen=12000)
@@ -450,6 +450,49 @@ def save_signal(name,side,score,level,ext,metrics,engine="5M",atr_value=None):
     elif engine in tf_arms:
         tf_last_signal_ts[engine]=now;tf_arms[engine]=None
 
+def precision_signal_gate(engine, side, score, A):
+    """v6.39: quality gate for raw 5M/15M signals.
+    15M defines location/direction; 5M is execution confirmation.
+    This is a research confluence filter, not a probability estimate.
+    """
+    if engine not in ("5M","15M"):
+        return True, []
+    wanted=1 if side=="LONG" else -1
+    own=trend_bias_tf(engine)
+    ctx=vwap_signal_context(engine,A)
+    reasons=[]
+    if engine=="5M":
+        h=trend_bias_tf("15M")
+        if h==-wanted:
+            return False,["15M conflict"]
+        reaction=ctx["long_reaction"] if side=="LONG" else ctx["short_reaction"]
+        # execution signal needs either a real VWAP response or own-TF structure,
+        # and weak setup scores are no longer promoted.
+        if float(score or 0)<85:
+            return False,["score<85"]
+        if not reaction and own!=wanted:
+            return False,["no 5M reaction/structure"]
+        if h==wanted: reasons.append("15M aligned")
+        if reaction: reasons.append("5M VWAP reaction")
+        if own==wanted: reasons.append("5M structure")
+        return True,reasons
+    # 15M is quality-first: location + structure, with 1H acting as a veto.
+    h=trend_bias_tf("1H")
+    if h==-wanted:
+        return False,["1H conflict"]
+    reaction=ctx["long_reaction"] if side=="LONG" else ctx["short_reaction"]
+    near=ctx.get("vwap") is not None and float(ctx.get("dist_atr") or 99)<=.35
+    if float(score or 0)<85:
+        return False,["score<85"]
+    if own!=wanted:
+        return False,["15M structure not confirmed"]
+    if not (reaction or near):
+        return False,["15M location not confirmed"]
+    reasons.append("15M structure")
+    reasons.append("15M VWAP reaction" if reaction else "15M VWAP location")
+    if h==wanted: reasons.append("1H aligned")
+    return True,reasons
+
 def evaluate_tf_engine(engine):
     """Independent timeframe engine: its own candles, liquidity, ATR, arm, signals and position."""
     if engine not in ("5M","15M","1H","4H") or not last_price or len(trades)<20:return
@@ -479,13 +522,21 @@ def evaluate_tf_engine(engine):
             hot=arm["peak"]<-hot_thr or w30["ratio"]<-d30thr or prev<-prevthr
             flip=w10["ratio"]>flipthr and w10["ratio"]-prev>flipdelta
             score=35+(20 if hot else 0)+(25 if flip else 0)+(10 if oi60<-.010 else 0)+(5 if inten>1.0 else 0)+(5 if book_imb>-.20 else 0)
-            if reclaim and hot and flip and score>=80: save_signal(f"{engine} L","LONG",score,arm["level"],arm["ext"],{"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},engine,A)
+            if reclaim and hot and flip and score>=80:
+                ok,_why=precision_signal_gate(engine,"LONG",score,A)
+                if ok:
+                    nm=("5M+15M CONF L" if engine=="5M" and "15M aligned" in _why else "15M CONF L" if engine=="15M" else f"{engine} L")
+                    save_signal(nm,"LONG",score,arm["level"],arm["ext"],{"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},engine,A)
         else:
             reclaim=last_price<arm["level"]-reclaim_buf*A
             hot=arm["peak"]>hot_thr or w30["ratio"]>d30thr or prev>prevthr
             flip=w10["ratio"]<-flipthr and prev-w10["ratio"]>flipdelta
             score=35+(20 if hot else 0)+(25 if flip else 0)+(10 if oi60<-.010 else 0)+(5 if inten>1.0 else 0)+(5 if book_imb<.20 else 0)
-            if reclaim and hot and flip and score>=80: save_signal(f"{engine} S","SHORT",score,arm["level"],arm["ext"],{"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},engine,A)
+            if reclaim and hot and flip and score>=80:
+                ok,_why=precision_signal_gate(engine,"SHORT",score,A)
+                if ok:
+                    nm=("5M+15M CONF S" if engine=="5M" and "15M aligned" in _why else "15M CONF S" if engine=="15M" else f"{engine} S")
+                    save_signal(nm,"SHORT",score,arm["level"],arm["ext"],{"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},engine,A)
     tf_prev_d10[engine]=w10["ratio"]
 
 def evaluate():
@@ -823,7 +874,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.29 CONFIRMED SIGNAL","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.39 5M15M PRECISION","ok":True,"status":status}
 
 @app.get("/api/live")
 def live():
