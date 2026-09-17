@@ -83,7 +83,7 @@ body.embedded-btc header{position:relative!important}
  <div style="font-size:9px;color:#7f8ba0;margin-top:7px">예: 5·20·60·120·240 또는 직접 숫자 입력 · 설정은 이 브라우저에 저장</div>
 </div></div><div id="enginePanel" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:7px;border:1px solid #263247;border-radius:8px;background:#0b111b">
 <b style="font-size:10px">SIGNAL ENGINE</b>
-<button class="btn engBtn" data-eng="NONE">신호 제거</button><button class="btn engBtn" data-eng="SCALP">1/3M 과거</button><button class="btn engBtn" data-eng="5M">5M</button><button class="btn engBtn" data-eng="15M">15M</button><button class="btn engBtn" data-eng="1H">1H</button><button class="btn engBtn" data-eng="4H">4H</button><button class="btn engBtn" data-eng="ALL">ALL</button>
+<button class="btn engBtn" data-eng="NONE">신호 제거</button><button class="btn engBtn" data-eng="SCALP">1/3M 과거</button><button class="btn engBtn" data-eng="5M">5M</button><button class="btn engBtn" data-eng="15M">15M</button><button class="btn engBtn" data-eng="1H">1H</button><button class="btn engBtn" data-eng="4H">4H</button><button class="btn engBtn" data-eng="ALL">ALL</button><label style="display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #3d2a55;border-radius:7px;background:#171022;font-size:10px;color:#d8b4ff;cursor:pointer"><input type="checkbox" id="vwapSigChk" checked> VWAP 신호</label>
 <span id="scalpStat" style="font-size:10px;color:#8d99ad">1/3M —</span><span id="m5Stat" style="font-size:10px;color:#8d99ad">5M —</span><span id="m15Stat" style="font-size:10px;color:#8d99ad">15M —</span><span id="h1Stat" style="font-size:10px;color:#8d99ad">1H —</span><span id="h4Stat" style="font-size:10px;color:#8d99ad">4H —</span>
 <div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">복수 선택 가능 · 예: 5M + 15M 동시 표시 · 신호 제거 = 전체 OFF · ALL = 전체 ON · DB/거래기록은 그대로 보존</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
 <span style="color:#f2c94c">● EARLY</span><span style="color:#4f8cff">● 5M 압력</span><span style="color:#9ef01a">● CONF L</span><span style="color:#ffb703">● CONF S</span>
@@ -96,7 +96,7 @@ body.embedded-btc header{position:relative!important}
     <span><b style="color:#35d7e5">RETEST</b> 청록</span><span><b style="color:#c7d0dd">X</b> 포지션 정리</span><span><b class="purple">VWAP</b> 선택 봉 기준 앵커 VWAP</span>
   </div>
   <div class="warn">
-    1M·3M·5M·15M·1H·4H·1D 차트를 자유롭게 볼 수 있습니다. v6.45부터 1/3M SCALP 신규 신호/저장을 중단하고, 15M EARLY → 5M 압력전환 → CONF를 메인 신호 흐름으로 사용합니다. VWAP은 독립 L/S 신호가 아니라 내부 근거로만 사용합니다. 1H·4H 기존 신호 엔진은 유지됩니다.
+    1M·3M·5M·15M·1H·4H·1D 차트를 자유롭게 볼 수 있습니다. v6.45부터 1/3M SCALP 신규 신호/저장을 중단하고, 15M EARLY → 5M 압력전환 → CONF를 메인 신호 흐름으로 사용합니다. VWAP은 독립 신규 L/S 생성은 중단되어 내부 근거로 사용하며, 과거/기존 VWAP 마커는 VWAP 신호 스위치로 표시 ON/OFF 할 수 있습니다. 1H·4H 기존 신호 엔진은 유지됩니다.
   </div>
 </section>
 
@@ -706,8 +706,9 @@ function renderMarkers(){
   const engineRank={'SCALP':0,'5M':1,'15M':2,'1H':3,'4H':4};
   const engineText=e=>e==='SCALP'?'1/3M':e;
   const bucketSec={'SCALP':180,'5M':300,'15M':900,'1H':3600,'4H':14400};
+  const showVwapSignals = !document.getElementById('vwapSigChk') || document.getElementById('vwapSigChk').checked;
   const raw=(showRawSignals ? allSaved() : [])
-    .filter(s=>!(s.name||'').includes('MA EARLY') && s.time>=from && selectedEngines.has(s.engine||'5M'))
+    .filter(s=>!(s.name||'').includes('MA EARLY') && s.time>=from && selectedEngines.has(s.engine||'5M') && (showVwapSignals || !String(s.name||'').toUpperCase().includes('VWAP')))
     .map(s=>({...s,time:Number(s.time),entry:Number(s.entry||s.price||0)}))
     .sort((a,b)=>a.time-b.time);
 
@@ -1118,6 +1119,18 @@ function initInd(){
  setTimeout(drawInd,1200);
 }
 setTimeout(initInd,300);
+
+// v6.46: chart-only VWAP signal visibility toggle.
+// This does NOT disable VWAP as internal evidence for EARLY/CONF; it only hides/shows VWAP-family markers.
+(function initVwapSignalToggle(){
+  const el=document.getElementById('vwapSigChk');
+  if(!el)return;
+  try{ const saved=localStorage.getItem('btc_vwap_signal_visible'); if(saved!==null) el.checked=(saved==='1'); }catch(e){}
+  el.onchange=()=>{
+    try{localStorage.setItem('btc_vwap_signal_visible',el.checked?'1':'0')}catch(e){}
+    try{renderMarkers()}catch(e){}
+  };
+})();
 
 // v4.7: BTC weekly/monthly historical candles from OKX REST.
 async function loadBTCBigTF(tf){
