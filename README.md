@@ -23,3 +23,13 @@ Research only; no real orders are placed.
 - Loads up to 1000 persisted signals so refresh does not hide older MA EARLY/history merely due to the old 300-row cap.
 - Distinct per-engine marker palettes for SCALP, 5M, 15M, 1H, 4H.
 - Signal Lab lifecycle tracking is per engine and filters match the five-engine architecture.
+
+
+## v6.28 VWAP CONFLUENCE FINAL
+- MA EARLY generation retired; historical rows remain in SQLite for research.
+- Historical MA EARLY markers are hidden from BTC chart/live target to reduce clutter.
+- Added independent VWAP reclaim/rejection signals for SCALP, 5M, 15M, 1H, 4H.
+- Actual research POS now opens only through a strict confluence gate (signal + VWAP + flow + book/activity). The gate score is heuristic, not a probability.
+- Opposite signal cannot instantly flip a position; switch requires PRESSURE plus exceptional confluence.
+- Position-event API history expanded to 5000 so overnight CONFIRM traffic cannot hide OPEN events from Signal Lab.
+- Signal Lab filters now use the five independent engine keys.

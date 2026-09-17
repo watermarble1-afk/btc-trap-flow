@@ -50,8 +50,8 @@ iframe{width:100%;height:calc(100vh - 92px);border:0;border-radius:12px;backgrou
  <div class="card" style="margin-top:12px">
   <h3>실제 포지션 성과 · POS L/S → HOLD ↔ PRESSURE → X / SWITCH · 승률은 청산 포지션 기준</h3>
   <div id="labFilters" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-   <button class="chip on" data-lf="ALL">전체</button><button class="chip" data-lf="CORE">5/15M</button>
-   <button class="chip" data-lf="SCALP">1/3M</button><button class="chip" data-lf="MACRO">1H/4H</button>
+   <button class="chip on" data-lf="ALL">전체</button><button class="chip" data-lf="SCALP">1/3M</button>
+   <button class="chip" data-lf="5M">5M</button><button class="chip" data-lf="15M">15M</button><button class="chip" data-lf="1H">1H</button><button class="chip" data-lf="4H">4H</button>
    <button class="chip" data-lf="LONG">LONG</button><button class="chip" data-lf="SHORT">SHORT</button>
   </div>
   <div style="overflow:auto"><table class="ledger"><thead><tr><th>진입 시간</th><th>엔진</th><th>방향</th><th>진입가</th><th>청산가</th><th>청산 시간</th><th>보유시간</th><th>수익률</th><th>상태</th></tr></thead><tbody id="positionsBody"><tr><td colspan="9">불러오는 중…</td></tr></tbody></table></div>
@@ -133,7 +133,7 @@ async function syncServer(){
   const [live,sigs,events]=await Promise.all([
    fetch(API+'/api/live',{cache:'no-store'}).then(r=>r.json()),
    fetch(API+'/api/signals?limit=1000',{cache:'no-store'}).then(r=>r.json()),
-   fetch(API+'/api/position-events?limit=1000',{cache:'no-store'}).then(r=>r.json())
+   fetch(API+'/api/position-events?limit=5000',{cache:'no-store'}).then(r=>r.json())
   ]);
   srv.textContent='● LIVE';srv.style.color='var(--g)';
   LABSIG=Array.isArray(sigs)?sigs:[];LABPOS=buildPositions(Array.isArray(events)?events:[]);
