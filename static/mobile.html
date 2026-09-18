@@ -63,8 +63,8 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.50 · MOBILE TURN DIAGNOSTIC RADAR</h1>
-    <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 약한 미시 신호는 저장 중단 · 차트는 서버 확정 TURN만 표시 · 큰 방향 BIAS 제공</div>
+    <h1>BTC OKX RADAR v6.54 · MOBILE TURN WATCH KST</h1>
+    <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 약한 미시 신호는 저장 중단 · 차트는 WATCH + 확정 TURN만 표시 · 큰 방향 BIAS 제공</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
 </div>
@@ -97,8 +97,8 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
 <b style="font-size:10px">SIGNAL ENGINE</b>
 <button class="btn engBtn" data-eng="NONE">신호 제거</button><button class="btn engBtn" data-eng="SCALP">1/3M 과거</button><button class="btn engBtn" data-eng="5M">5M</button><button class="btn engBtn" data-eng="15M">15M</button><button class="btn engBtn" data-eng="1H">1H</button><button class="btn engBtn" data-eng="4H">4H</button><button class="btn engBtn" data-eng="ALL">ALL</button><label style="display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #3d2a55;border-radius:7px;background:#171022;font-size:10px;color:#d8b4ff;cursor:pointer"><input type="checkbox" id="vwapSigChk" checked> VWAP 신호</label>
 <span id="scalpStat" style="font-size:10px;color:#8d99ad">1/3M —</span><span id="m5Stat" style="font-size:10px;color:#8d99ad">5M —</span><span id="m15Stat" style="font-size:10px;color:#8d99ad">15M —</span><span id="h1Stat" style="font-size:10px;color:#8d99ad">1H —</span><span id="h4Stat" style="font-size:10px;color:#8d99ad">4H —</span>
-<div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">복수 선택 = 표시 엔진 선택 · 차트에는 서버 확정 TURN만 · 약한 5M 미시신호는 신규 저장 자체를 중단</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
-<span style="color:#00e5ff">◆ TURN L</span><span style="color:#ffd400">◆ TURN S</span><span style="color:#8d99ad">EARLY=WATCH · TURN=확정 변곡 후보 · 10s/30s는 타이밍 근거</span>
+<div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">복수 선택 = 표시 엔진 선택 · 차트는 WATCH(후보) + TURN(확정)만 · 나머지 연구 신호는 패널/DB 보존</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
+<span style="color:#62d7ff">○ WATCH L</span><span style="color:#ffcf66">○ WATCH S</span><span style="color:#00e5ff">◆ TURN L</span><span style="color:#ffd400">◆ TURN S</span><span style="color:#8d99ad">WATCH=변곡 후보 · TURN=확정 · 10s/30s는 타이밍 근거</span>
 <span style="color:#4f8cff">● TRAP L</span><span style="color:#ff4f64">● TRAP S</span>
 <span style="color:#27c2a4">● 1H L/S</span><span style="color:#c86cff">● 4H L/S</span><span style="color:#b37cff">● VWAP선</span><span style="color:#d7dee9">● X 종료</span></div>
 </div><div style="font-size:10px;color:#8d99ad;margin:3px 0">TIMEFRAME · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO</div><div class="hoverPctBar" id="hoverPctBar">봉에 마우스를 올리면 해당 봉의 등락률이 표시됩니다.</div><div id="chart"></div>
@@ -193,6 +193,8 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
 </div>
 
 <script>
+function kstChartTime(t){const sec=typeof t==='number'?t:(t&&t.year?Date.UTC(t.year,t.month-1,t.day)/1000:0);if(!sec)return '';return new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(sec*1000));}
+
 const INST='BTC-USDT-SWAP';
 const REST='https://www.okx.com/api/v5/market/candles?instId='+INST+'&limit=300&bar=';
 const HIST='https://www.okx.com/api/v5/market/history-candles?instId='+INST+'&limit=300&bar=';
@@ -695,17 +697,26 @@ function renderHistory(){
   }).join(''):'<div class="tiny">아직 핵심 신호 없음</div>';
 }
 function renderMarkers(){
-  // v6.49: chart = server-confirmed TURN only + user's own manual B/S/X.
-  // Old EARLY/CONF/TRAP/VWAP/auto-POS records remain in DB but never clutter the chart.
+  // v6.54: mobile matches PC — WATCH candidates + confirmed TURNs only.
+  // Everything else remains in SIGNAL STREAM / DB. WATCH is deduped per engine+side+display candle.
   const from=cache[cur]?.[0]?.time||0;
   let marks=[];
   if(selectedEngines.size===0){ try{candle.setMarkers([])}catch(e){}; return; }
+  const watchSeen=new Set();
+  const bucketSec={'1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800,'1MO':2592000}[cur]||300;
   for(const s of allSaved()){
     if(Number(s.time)<from || !selectedEngines.has(s.engine||'5M')) continue;
     const n=String(s.name||'').toUpperCase();
-    if(!n.includes('TURN')) continue;
+    const isTurn=n.includes('TURN'), isWatch=n.includes('EARLY')||n.includes('WATCH');
+    if(!isTurn && !isWatch) continue;
     const isL=String(s.dir||'').toUpperCase()==='LONG';
-    marks.push({time:Number(s.time),position:isL?'belowBar':'aboveBar',color:isL?'#00e5ff':'#ffd400',shape:isL?'arrowUp':'arrowDown',text:`◆ TURN ${isL?'L':'S'} · ${Math.round(Number(s.score||0))}`});
+    if(isWatch){
+      const b=Math.floor(Number(s.time)/bucketSec), key=(s.engine||'5M')+'|'+(isL?'L':'S')+'|'+b;
+      if(watchSeen.has(key)) continue; watchSeen.add(key);
+      marks.push({time:Number(s.time),position:isL?'belowBar':'aboveBar',color:isL?'#62d7ff':'#ffcf66',shape:'circle',text:`○ WATCH ${isL?'L':'S'}`});
+    }else{
+      marks.push({time:Number(s.time),position:isL?'belowBar':'aboveBar',color:isL?'#00e5ff':'#ffd400',shape:isL?'arrowUp':'arrowDown',text:`◆ TURN ${isL?'L':'S'} · ${Math.round(Number(s.score||0))}`});
+    }
   }
   for(const e of (myPositionEvents||[])){
     const ts=Math.floor(Number(e.ts||0)/1000), ev=String(e.event||'').toUpperCase();
@@ -987,7 +998,7 @@ function initChart(){
     layout:{background:{color:'#0a0f18'},textColor:'#8d99ad'},
     grid:{vertLines:{color:'#151d2a'},horzLines:{color:'#151d2a'}},
     rightPriceScale:{borderColor:'#253044',scaleMargins:{top:.05,bottom:.22}},
-    timeScale:{borderColor:'#253044',timeVisible:true}
+    timeScale:{borderColor:'#253044',timeVisible:true,tickMarkFormatter:(time)=>kstChartTime(time)}
   });
   candle=chart.addCandlestickSeries({upColor:'#2fd58b',downColor:'#ff5c70',borderVisible:false,wickUpColor:'#2fd58b',wickDownColor:'#ff5c70'});
   volume=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'vol'});
