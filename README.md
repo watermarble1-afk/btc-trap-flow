@@ -20,3 +20,11 @@ This patch changes chart signal grouping only.
 - Signal Lab raw rows
 
 PC and mobile are both patched.
+
+
+## v6.48 TURN RADAR
+- Raw research signals remain in DB and move to SIGNAL STREAM.
+- Main chart shows only confluence-based TURN L/S candidates.
+- TURN display score is a research heuristic, not a probability or validated edge.
+- Manual user B/S/X markers remain on chart.
+- No server-side signal generation, DB schema, position logic, or API route was changed.
