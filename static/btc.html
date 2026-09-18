@@ -51,8 +51,8 @@ body.embedded-btc header{position:relative!important}
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.48 · TURN RADAR</h1>
-    <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 연구 신호는 SIGNAL STREAM으로 분리 · 차트는 고합류 TURN 후보만 표시</div>
+    <h1>BTC OKX RADAR v6.49 · TURN BIAS RADAR</h1>
+    <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 약한 미시 신호는 저장 중단 · 차트는 서버 확정 TURN만 표시 · 큰 방향 BIAS 제공</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
 </div>
@@ -85,8 +85,8 @@ body.embedded-btc header{position:relative!important}
 <b style="font-size:10px">SIGNAL ENGINE</b>
 <button class="btn engBtn" data-eng="NONE">신호 제거</button><button class="btn engBtn" data-eng="SCALP">1/3M 과거</button><button class="btn engBtn" data-eng="5M">5M</button><button class="btn engBtn" data-eng="15M">15M</button><button class="btn engBtn" data-eng="1H">1H</button><button class="btn engBtn" data-eng="4H">4H</button><button class="btn engBtn" data-eng="ALL">ALL</button><label style="display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #3d2a55;border-radius:7px;background:#171022;font-size:10px;color:#d8b4ff;cursor:pointer"><input type="checkbox" id="vwapSigChk" checked> VWAP 신호</label>
 <span id="scalpStat" style="font-size:10px;color:#8d99ad">1/3M —</span><span id="m5Stat" style="font-size:10px;color:#8d99ad">5M —</span><span id="m15Stat" style="font-size:10px;color:#8d99ad">15M —</span><span id="h1Stat" style="font-size:10px;color:#8d99ad">1H —</span><span id="h4Stat" style="font-size:10px;color:#8d99ad">4H —</span>
-<div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">복수 선택 = TURN 계산에 포함할 엔진 선택 · 원본 신호는 SIGNAL STREAM/DB에 전부 보존 · 차트는 TURN 후보만 표시</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
-<span style="color:#00e5ff">◆ TURN L</span><span style="color:#ffd400">◆ TURN S</span><span style="color:#8d99ad">원본 EARLY/CONF/TRAP → SIGNAL STREAM</span>
+<div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">복수 선택 = 표시 엔진 선택 · 차트에는 서버 확정 TURN만 · 약한 5M 미시신호는 신규 저장 자체를 중단</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
+<span style="color:#00e5ff">◆ TURN L</span><span style="color:#ffd400">◆ TURN S</span><span style="color:#8d99ad">EARLY=WATCH · TURN=확정 변곡 후보 · 10s/30s는 타이밍 근거</span>
 <span style="color:#4f8cff">● TRAP L</span><span style="color:#ff4f64">● TRAP S</span>
 <span style="color:#27c2a4">● 1H L/S</span><span style="color:#c86cff">● 4H L/S</span><span style="color:#b37cff">● VWAP선</span><span style="color:#d7dee9">● X 종료</span></div>
 </div><div style="font-size:10px;color:#8d99ad;margin:3px 0">TIMEFRAME · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO</div><div class="hoverPctBar" id="hoverPctBar">봉에 마우스를 올리면 해당 봉의 등락률이 표시됩니다.</div><div id="chart"></div>
@@ -107,7 +107,8 @@ body.embedded-btc header{position:relative!important}
 <div><span class="tiny">금액 변화</span><div id="dayMoveUsd" style="font-size:18px;font-weight:800">—</div></div>
 <div><span class="tiny">상승률</span><div id="dayMovePct" style="font-size:18px;font-weight:800">—</div></div>
 </div></div>
-<h3>큰 구조</h3><div class="mtf" id="mtf"></div></div>
+<h3>큰 구조</h3><div class="mtf" id="mtf"></div>
+    <div id="marketBias" style="margin-top:8px;padding:8px;border:1px solid #263249;border-radius:8px;background:#0a101a;font-size:11px"><b>MARKET BIAS</b> · <span id="biasOverall">MIXED</span><div id="biasDetail" class="tiny" style="margin-top:4px">4H — · 1H — · 15M — · 5M —</div></div></div>
 
   <div class="box">
     <h3>현재 LIQUIDITY 위치</h3>
@@ -150,7 +151,7 @@ body.embedded-btc header{position:relative!important}
 
 
   <div class="box">
-    <h3>📡 SIGNAL STREAM <span class="tiny">EARLY / CONF / TRAP / VWAP / 일반 신호 전체 기록 · 차트에는 TURN 후보만 표시</span> <span style="font-size:8px;font-weight:400"><span style="color:#35d98a">●1/3 L</span> <span style="color:#4f8cff">●5/15 L</span> <span style="color:#ff78b4">●1/3 S</span> <span style="color:#ff4f64">●5/15 S</span></span></h3>
+    <h3>📡 SIGNAL STREAM <span class="tiny">핵심 신호만 · TURN / 강한 EARLY / 1H·4H 컨텍스트</span> <span style="font-size:8px;font-weight:400"><span style="color:#35d98a">●1/3 L</span> <span style="color:#4f8cff">●5/15 L</span> <span style="color:#ff78b4">●1/3 S</span> <span style="color:#ff4f64">●5/15 S</span></span></h3>
     <div class="history" id="history"><div class="tiny">아직 없음</div></div>
   </div>
 </aside>
@@ -663,63 +664,34 @@ function renderHistory(){
   renderForward();
   renderTradeLedger();
   updateDailyMove();
-  // v6.48: raw research signals live here instead of cluttering the chart.
-  const rows=allSaved().sort((a,b)=>Number(b.ts)-Number(a.ts)).slice(0,80);
-  $('history').innerHTML=rows.length?rows.map(x=>{
+  // v6.49: do not surface the old micro-noise. Keep DB history intact, but the live panel
+  // focuses on signals with a clear role: strict EARLY watches, confirmed TURNs, and HTF context.
+  const useful=allSaved().filter(x=>{
+    const n=String(x.name||'').toUpperCase(), e=String(x.engine||'');
+    return n.includes('TURN') || n.includes('EARLY') || e==='1H' || e==='4H';
+  }).sort((a,b)=>Number(b.ts)-Number(a.ts)).slice(0,60);
+  $('history').innerHTML=useful.length?useful.map(x=>{
     const tm=new Date(Number(x.ts)).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
-    const tf=engLabel(x.engine||'5M');
-    const nm=String(x.name||'SIGNAL');
-    const up=nm.toUpperCase();
-    const c=up.includes('EARLY')?'#f2c94c':up.includes('CONF')?(x.dir==='LONG'?'#9ef01a':'#ffb703'):up.includes('VWAP')?'#b56cff':engColor(x.engine||'5M',x.dir);
-    const fam=up.includes('EARLY')?'EARLY':up.includes('CONF')?'CONF':up.includes('VWAP')?'VWAP':up.includes('RETEST')?'RETEST':up.includes('TRAP')?'TRAP':'SIGNAL';
-    return `<div class="histrow"><span>${tm}</span><b style="color:${c}">[${tf}] ${nm}</b><span class="tiny">${fam} · ${x.score??'—'}</span></div>`;
-  }).join(''):'<div class="tiny">아직 없음</div>';
+    const tf=engLabel(x.engine||'5M'), nm=String(x.name||'SIGNAL'), up=nm.toUpperCase();
+    const isTurn=up.includes('TURN'), isEarly=up.includes('EARLY');
+    const c=isTurn?(x.dir==='LONG'?'#00e5ff':'#ffd400'):isEarly?'#f2c94c':engColor(x.engine||'5M',x.dir);
+    const tag=isTurn?'TURN':isEarly?'WATCH':'HTF';
+    return `<div class="histrow"><span>${tm}</span><b style="color:${c}">[${tf}] ${nm}</b><span class="tiny">${tag} · ${x.score??'—'}</span></div>`;
+  }).join(''):'<div class="tiny">아직 핵심 신호 없음</div>';
 }
 function renderMarkers(){
-  // v6.48 TURN RADAR
-  // Raw EARLY/CONF/TRAP/VWAP signals stay in SIGNAL STREAM + DB.
-  // The chart shows only confluence-based TURN candidates and manual B/S/X.
-  let from=cache[cur]?.[0]?.time||0;
+  // v6.49: chart = server-confirmed TURN only + user's own manual B/S/X.
+  // Old EARLY/CONF/TRAP/VWAP/auto-POS records remain in DB but never clutter the chart.
+  const from=cache[cur]?.[0]?.time||0;
   let marks=[];
   if(selectedEngines.size===0){ try{candle.setMarkers([])}catch(e){}; return; }
-
-  const rows=allSaved()
-    .filter(s=>s.time>=from && selectedEngines.has(s.engine||'5M'))
-    .map(s=>({...s,time:Number(s.time),entry:Number(s.entry||s.price||0)}))
-    .sort((a,b)=>a.time-b.time);
-
-  const famOf=s=>{const n=String(s.name||'').toUpperCase();return n.includes('CONF')?'CONF':n.includes('EARLY')?'EARLY':n.includes('TRAP')?'TRAP':n.includes('RETEST')?'RETEST':n.includes('VWAP')?'VWAP':'NORMAL'};
-  const famW={CONF:3,EARLY:2,TRAP:2,NORMAL:2,RETEST:1,VWAP:1};
-  const engW={SCALP:1,'5M':2,'15M':3,'1H':4,'4H':5};
-  const clusterSec=12*60, cooldownSec=15*60;
-  let lastTurn={LONG:-1e15,SHORT:-1e15};
-
-  for(let i=0;i<rows.length;i++){
-    const anchor=rows[i], dir=anchor.dir;
-    if(dir!=='LONG'&&dir!=='SHORT') continue;
-    const cluster=[];
-    for(let j=i;j>=0;j--){
-      const q=rows[j]; if(anchor.time-q.time>clusterSec) break;
-      if(q.dir===dir) cluster.push(q);
-    }
-    const families=new Set(cluster.map(famOf));
-    const engines=new Set(cluster.map(q=>q.engine||'5M'));
-    let score=0;
-    for(const f of families) score+=famW[f]||0;
-    for(const e of engines) score+=Math.min(3,engW[e]||1);
-    score+=Math.min(3,Math.max(0,cluster.length-2));
-    const hasConfirm=families.has('CONF');
-    const hasLead=families.has('EARLY')||families.has('TRAP')||families.has('NORMAL');
-    // High-confluence display gate: at least 3 observations, 2 families,
-    // and confirmation/lead agreement. This is a research display score, not probability.
-    const qualified=cluster.length>=3 && families.size>=2 && hasConfirm && hasLead && score>=9;
-    if(!qualified || anchor.time-lastTurn[dir]<cooldownSec) continue;
-    lastTurn[dir]=anchor.time;
-    const tf=[...engines].sort((a,b)=>(engW[b]||0)-(engW[a]||0))[0]||'5M';
-    marks.push({time:anchor.time,position:dir==='LONG'?'belowBar':'aboveBar',color:dir==='LONG'?'#00e5ff':'#ffd400',shape:dir==='LONG'?'arrowUp':'arrowDown',text:`◆ TURN ${dir==='LONG'?'L':'S'} · ${tf} · ${score}`});
+  for(const s of allSaved()){
+    if(Number(s.time)<from || !selectedEngines.has(s.engine||'5M')) continue;
+    const n=String(s.name||'').toUpperCase();
+    if(!n.includes('TURN')) continue;
+    const isL=String(s.dir||'').toUpperCase()==='LONG';
+    marks.push({time:Number(s.time),position:isL?'belowBar':'aboveBar',color:isL?'#00e5ff':'#ffd400',shape:isL?'arrowUp':'arrowDown',text:`◆ TURN ${isL?'L':'S'} · ${Math.round(Number(s.score||0))}`});
   }
-
-  // User's own manual trades remain visible as minimal B/S/X anchors.
   for(const e of (myPositionEvents||[])){
     const ts=Math.floor(Number(e.ts||0)/1000), ev=String(e.event||'').toUpperCase();
     if(!ts || ts<from || !['OPEN','EXIT'].includes(ev)) continue;
@@ -840,8 +812,8 @@ async function syncServer(){
       ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000),status:x.status,closed:x.closed_ts,
       metrics:{d10:x.d10,d30:x.d30,oi60:x.oi60,int:x.flow,book:x.book},source:'SERVER',engine:x.engine||'5M'
     }));
-    const latestServer=[...serverSaved].filter(x=>!(x.name||'').includes('MA EARLY')).sort((a,b)=>b.ts-a.ts)[0];
-    if(latestServer && Date.now()-latestServer.ts<15*60*1000){
+    const latestServer=[...serverSaved].filter(x=>String(x.name||'').toUpperCase().includes('TURN')).sort((a,b)=>b.ts-a.ts)[0];
+    if(latestServer && Date.now()-latestServer.ts<60*60*1000){
       liveSignal=latestServer;
       renderSignal(latestServer);
     }
@@ -919,6 +891,12 @@ setInterval(refreshLivePositionReturns,500);
 function renderContext(){
   let h1=structure(confirmed(cache['1H']||[])),h4=structure(confirmed(cache['4H']||[])),m15=structure(confirmed(cache['15M']||[])),m5=structure(confirmed(cache['5M']||[]));
   $('mtf').innerHTML=[['5M',m5],['15M',m15],['1H',h1],['4H',h4]].map(([k,v])=>`<div>${k}<b class="${v==='BULL'?'green':v==='BEAR'?'red':'yellow'}">${v}</b></div>`).join('');
+  const b=(live&&live.bias)||null;
+  let overall=b?.overall;
+  if(!overall){const s=(m5==='BULL'?1:m5==='BEAR'?-1:0)+(m15==='BULL'?2:m15==='BEAR'?-2:0)+(h1==='BULL'?3:h1==='BEAR'?-3:0)+(h4==='BULL'?4:h4==='BEAR'?-4:0);overall=s>=5?'STRONG LONG':s>=2?'LONG':s<=-5?'STRONG SHORT':s<=-2?'SHORT':'MIXED';}
+  const bo=$('biasOverall'),bd=$('biasDetail');
+  if(bo){bo.textContent=overall;bo.style.color=overall.includes('LONG')?'#35d98a':overall.includes('SHORT')?'#ff5c70':'#f1c75b';}
+  if(bd)bd.textContent=`4H ${b?.['4H']||h4} · 1H ${b?.['1H']||h1} · 15M ${b?.['15M']||m15} · 5M ${b?.['5M']||m5}`;
 }
 function renderChart(full=true){
   let a=cache[cur];if(!a?.length)return;

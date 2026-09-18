@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.45 EARLY CONF PIPELINE")
+app=FastAPI(title="BTC Trap Flow Collector v6.49 TURN BIAS RADAR")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 trades=deque(maxlen=12000)
@@ -567,11 +567,11 @@ def apply_pipeline_position(side, price, signal_id, score, A, reason):
 def evaluate_5m15m_pipeline():
     """Primary v6.45 signal hierarchy.
 
-    15M EARLY = leading warning from location + failed auction/absorption/flow fade.
-    5M L/S     = short-term pressure has actually started to turn.
-    CONF L/S   = recent 15M EARLY + current 5M turn + independent evidence agreement.
+    15M EARLY = strict reversal watch: liquidity location + real failure/absorption + second clue.
+    5M pressure = internal execution trigger only; no standalone signal is stored.
+    TURN L/S   = strict 15M reversal context + 5M execution turn + higher-TF context.
 
-    VWAP is evidence only; it no longer emits standalone VWAP L/S signals.
+    VWAP is evidence only; it never emits standalone VWAP L/S signals.
     """
     global stage_15m_context, stage_last_bucket
     if not last_price or len(trades)<20:return
@@ -617,8 +617,12 @@ def evaluate_5m15m_pipeline():
             if oi_trap:
                 groups.add("OI"); reasons.append("OI_TRAP"); score+=8
             key="EARLY_"+("SHORT" if side=="SHORT" else "LONG")
-            leading=len(groups.intersection({"FAIL","ABS","FADE","VWAP"}))>=1
-            if near_liq and leading and score>=54 and stage_last_bucket.get(key)!=b15:
+            lead_count=len(groups.intersection({"FAIL","ABS","FADE","VWAP"}))
+            hard_failure=("FAIL" in groups or "ABS" in groups)
+            # v6.49: EARLY is no longer a loose hint. Keep only liquidity-location setups
+            # with a real failure/absorption clue plus a second independent leading clue.
+            leading=(lead_count>=2 and hard_failure)
+            if near_liq and leading and score>=68 and stage_last_bucket.get(key)!=b15:
                 reason="+".join(reasons)
                 _save_stage_signal("EARLY S" if side=="SHORT" else "EARLY L",side,min(score,100),"15M",A15,reason,False)
                 stage_15m_context[side]={"ts":now,"price":p,"score":score,"reason":reason,"groups":sorted(groups)}
@@ -648,12 +652,11 @@ def evaluate_5m15m_pipeline():
         if vwap_turn: pressure_groups.append("VWAP"); ps+=18
         if candle_turn: pressure_groups.append("PRICE"); ps+=16
         key="5M_"+("SHORT" if side=="SHORT" else "LONG")
-        pressure_ok=flow_turn and (struct_turn or vwap_turn or candle_turn) and ps>=62
-        if pressure_ok and stage_last_bucket.get(key)!=b5:
-            _save_stage_signal("5M S" if side=="SHORT" else "5M L",side,min(ps,100),"5M",A5,"+".join(pressure_groups),False)
-            stage_last_bucket[key]=b5
+        # v6.49: 5M pressure remains an INTERNAL trigger. It is no longer persisted as
+        # a standalone signal because micro-flow/one-candle turns created too much noise.
+        pressure_ok=flow_turn and len(pressure_groups)>=3 and ps>=72
 
-        # ----- CONF: recent 15M warning + current 5M pressure + no late chase.
+        # ----- TURN: strong 15M reversal location + 5M execution turn + higher-TF context.
         ctx15=stage_15m_context.get(side)
         if not pressure_ok or not ctx15: continue
         age=now-int(ctx15.get("ts",0))
@@ -675,10 +678,18 @@ def evaluate_5m15m_pipeline():
         if inten>=1.05:
             conf_groups.add("ACTIVITY"); conf_reasons.append("ACTIVITY"); cs+=4
         cs=max(0,min(cs,100))
-        key="CONF_"+("SHORT" if side=="SHORT" else "LONG")
-        if cs>=80 and len(conf_groups)>=4 and stage_last_bucket.get(key)!=b15:
-            reason=" | ".join(conf_reasons)
-            _save_stage_signal("CONF S" if side=="SHORT" else "CONF L",side,cs,"5M",A5,reason,True)
+        lead_groups=set(ctx15.get("groups") or [])
+        hard_location=("FAIL" in lead_groups or "ABS" in lead_groups)
+        dual_failure=("FAIL" in lead_groups and "ABS" in lead_groups)
+        # Prefer alignment with the 1H direction. A genuine failed auction + absorption
+        # may still flag a counter-trend turn, but weak counter-trend micro-flow cannot.
+        bias_ok=(h1==wanted) or dual_failure
+        key="TURN_"+("SHORT" if side=="SHORT" else "LONG")
+        turn_ok=(cs>=88 and len(conf_groups)>=5 and hard_location and bias_ok)
+        if turn_ok and stage_last_bucket.get(key)!=b15:
+            bias_tag=("TREND" if h1==wanted else "COUNTER")
+            reason=bias_tag+" | "+" | ".join(conf_reasons)
+            _save_stage_signal("TURN S" if side=="SHORT" else "TURN L",side,cs,"5M",A5,reason,True)
             stage_last_bucket[key]=b15
 
 def evaluate_tf_engine(engine):
@@ -1089,13 +1100,26 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.45 EARLY CONF PIPELINE","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.49 TURN BIAS RADAR","ok":True,"status":status}
+
+def market_bias_snapshot():
+    vals={tf:trend_bias_tf(tf) for tf in ("5M","15M","1H","4H")}
+    # Higher timeframes carry more weight; this is context, not a trade signal.
+    weights={"5M":1,"15M":2,"1H":3,"4H":4}
+    score=sum(vals[tf]*weights[tf] for tf in vals)
+    if score>=5: overall="STRONG LONG"
+    elif score>=2: overall="LONG"
+    elif score<=-5: overall="STRONG SHORT"
+    elif score<=-2: overall="SHORT"
+    else: overall="MIXED"
+    return {"overall":overall,"score":score,**{tf:("BULL" if v>0 else "BEAR" if v<0 else "MIXED") for tf,v in vals.items()}}
 
 @app.get("/api/live")
 def live():
     a,b=flow(10000),flow(30000);H,L=liquidity15()
     return {"price":last_price,"d10":a["ratio"],"d30":b["ratio"],"oi":current_oi,"oi60":oi_delta(),
-            "flow":flow_intensity(),"book":book_imb,"liqH":H,"liqL":L,"armed":trap_arm,"status":status}
+            "flow":flow_intensity(),"book":book_imb,"liqH":H,"liqL":L,"armed":trap_arm,"status":status,
+            "bias":market_bias_snapshot()}
 
 @app.get("/api/signals")
 def signals(limit:int=100, engine:str="ALL"):

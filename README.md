@@ -1,30 +1,13 @@
-# BTC OKX RADAR v6.47 · DISPLAY-CANDLE SIGNAL FIX
+# BTC Trap Flow v6.49 — TURN BIAS RADAR
 
-This patch changes chart signal grouping only.
+Purpose: reduce signal noise and make the chart a turning-point radar.
 
-## Fixed
-- Signal grouping now follows the **currently displayed chart candle**, not the signal engine's native timeframe bucket.
-- On a 1M chart, signals generated on different 1-minute candles are shown separately.
-- On a 5M chart, signals that fall inside the same displayed 5-minute candle are grouped and counted together.
-- Same principle applies to 15M / 1H / 4H / higher displayed timeframes.
-- Toggling 5M / 15M / 1H filters no longer drags older/later signals into one native-engine bucket.
-- EARLY / CONF / VWAP / RETEST families remain separate so their counts cannot inflate each other.
-
-## Unchanged
-- Signal-generation logic
-- EARLY → 5M → CONF logic
-- 1H / 4H signal logic
-- VWAP visibility toggle
-- Position simulator logic
-- SQLite / existing DB records
-- Signal Lab raw rows
-
-PC and mobile are both patched.
-
-
-## v6.48 TURN RADAR
-- Raw research signals remain in DB and move to SIGNAL STREAM.
-- Main chart shows only confluence-based TURN L/S candidates.
-- TURN display score is a research heuristic, not a probability or validated edge.
-- Manual user B/S/X markers remain on chart.
-- No server-side signal generation, DB schema, position logic, or API route was changed.
+- No new standalone 5M micro-pressure signals are stored. 5M pressure is internal timing evidence only.
+- 15M EARLY is tightened: liquidity location + real failed-auction/absorption + another independent clue, score >= 68.
+- TURN L/S replaces loose CONF display. TURN requires strict 15M reversal context, 5M execution turn, and higher-timeframe context; threshold >= 88.
+- VWAP is evidence only, never a standalone new signal.
+- Chart shows only server-confirmed TURN L/S plus the user's manual B/S/X markers.
+- Signal Stream shows only useful live context: TURN, strict EARLY, 1H/4H context. Old DB history remains untouched.
+- MARKET BIAS shows weighted 4H/1H/15M/5M context. 10s/30s flow is treated as timing evidence, not the big-direction engine.
+- Existing SQLite DB / volume / signal research / user trades are preserved.
+- Research only; no real orders are placed.
