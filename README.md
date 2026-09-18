@@ -27,3 +27,14 @@ Deployment: upload/overwrite all extracted files in GitHub and Commit changes. R
 - ENTRY does not open, close, or switch simulator positions.
 - Signal research adds 5/10/20/30 x 5-minute-bar horizon prices (b5/b10/b20/b30) plus existing MFE/MAE.
 - Desktop/mobile synchronized; KST chart behavior retained.
+
+
+## v6.56 THREE SETUP RADAR KST
+- Replaced the new-signal path with exactly three explicit research setup families:
+  1. PULLBACK L/S — slow 1H/4H trend + 5M pullback into SMA20/60/VWAP + reclaim.
+  2. REVERSAL L/S — only near 15M liquidity, using sweep/absorption + 5M price failure + flow fade.
+  3. RETEST L/S — genuine 5M breakout/expansion first, then the first successful retest.
+- 10s/30s flow, book and OI are final timing/quality evidence; they no longer choose direction.
+- New setup signals are research-only and do not open/switch simulator positions.
+- Chart displays only PULLBACK / REVERSAL / RETEST. Legacy/research rows remain in SQLite/history.
+- KST chart/crosshair formatting retained on desktop and mobile.

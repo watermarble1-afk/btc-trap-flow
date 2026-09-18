@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.55 ENTRY TURN KST")
+app=FastAPI(title="BTC Trap Flow Collector v6.56 THREE SETUP RADAR")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 trades=deque(maxlen=12000)
@@ -41,6 +41,12 @@ tf_last_signal_ts={e:0 for e in ("5M","15M","1H","4H")}
 stage_15m_context={"LONG":None,"SHORT":None}
 stage_last_bucket={"EARLY_LONG":-1,"EARLY_SHORT":-1,"5M_LONG":-1,"5M_SHORT":-1,"CONF_LONG":-1,"CONF_SHORT":-1,
                    "ENTRY_LONG":-1,"ENTRY_SHORT":-1}
+# v6.56: quality-first setup engine. Legacy signal rows remain in DB, but new chart signals
+# come only from three explicit setup families instead of generic micro-flow scoring.
+setup_last_bucket={k:-1 for k in (
+    "PULLBACK_LONG","PULLBACK_SHORT","REVERSAL_LONG","REVERSAL_SHORT",
+    "RETEST_LONG","RETEST_SHORT","BREAKOUT_LONG","BREAKOUT_SHORT")}
+breakout_arms={"LONG":None,"SHORT":None}
 scalp_prev_d10=0.0
 status={"public":"starting","business":"starting","started":int(time.time()*1000)}
 # v6.27: throttle CPU/SQLite-heavy research work so high-rate trade WS cannot starve HTTP.
@@ -790,9 +796,145 @@ def evaluate_entry_signal():
                 _save_stage_signal("ENTRY L" if side=="LONG" else "ENTRY S",side,score,"5M",A,"+".join(reasons),False)
                 stage_last_bucket[key]=b5
 
+def evaluate_setup_signals():
+    """v6.56 quality-first three-setup engine.
+
+    1) PULLBACK: trade with slow 1H/4H direction after a 5M pullback into SMA20/60/VWAP.
+    2) REVERSAL: only near 15M liquidity, after a failed auction/absorption and 5M failure.
+    3) RETEST: genuine 5M breakout first, then the first successful retest of the broken level.
+
+    10s/30s flow never chooses direction. It is only a final timing/quality clue.
+    These are research signals only; they do not open/switch the simulator position.
+    """
+    global setup_last_bucket, breakout_arms
+    if not last_price or len(trades)<20:return
+    if len(candles["5M"])<65 or len(candles["15M"])<25 or len(candles["1H"])<8 or len(candles["4H"])<6:return
+    now=int(time.time()*1000); p=float(last_price)
+    A5=max(atr_tf("5M",24),1.0); A15=max(atr_tf("15M",24),1.0)
+    a5=list(candles["5M"]); a15=list(candles["15M"])
+    c5=a5[-1]; p5=a5[-2]; c15=a15[-1]
+    sh5=_bar_shape(c5); sh15=_bar_shape(c15)
+    w10,w30=flow(10000),flow(30000); inten=flow_intensity(); oi60=oi_delta()
+    t5,t15,t1,t4=(trend_bias_tf(tf) for tf in ("5M","15M","1H","4H"))
+    bias=market_bias_snapshot(); overall=str(bias.get("overall") or "MIXED")
+    b5=int(now//(5*60*1000)); b15=int(now//(15*60*1000))
+
+    # ---- SETUP 1: TREND PULLBACK -------------------------------------------------
+    refs=[("SMA20",sma_tf("5M",20)),("SMA60",sma_tf("5M",60)),("VWAP",vwap_tf("5M",240))]
+    refs=[(n,float(v)) for n,v in refs if v]
+    for side in ("LONG","SHORT"):
+        wanted=1 if side=="LONG" else -1
+        # Direction is decided by slow structure, not micro flow.
+        slow_ok=(t1==wanted and t4!=-wanted and t15!=-wanted)
+        if not slow_ok or not refs: continue
+        # Pick a reference that the current/previous 5M candles actually tested.
+        candidates=[]
+        for name,ref in refs:
+            if side=="LONG":
+                touched=min(float(c5["low"]),float(p5["low"]))<=ref+.16*A5 and p>=ref-.10*A5
+                had_extension=max(float(x["close"]) for x in a5[-10:-2])>=ref+.30*A5
+            else:
+                touched=max(float(c5["high"]),float(p5["high"]))>=ref-.16*A5 and p<=ref+.10*A5
+                had_extension=min(float(x["close"]) for x in a5[-10:-2])<=ref-.30*A5
+            if touched and had_extension:candidates.append((name,ref,abs(p-ref)/A5))
+        if not candidates:continue
+        name,ref,_=min(candidates,key=lambda z:z[2])
+        if side=="LONG":
+            reclaim=float(c5["close"])>=ref+.02*A5 and sh5["close_pos"]>=.55 and float(c5["close"])>=float(p5["close"])
+            flow_ok=w10["ratio"]>=-.03 and w10["ratio"]>=w30["ratio"]-.05
+            book_ok=book_imb>=-.35
+        else:
+            reclaim=float(c5["close"])<=ref-.02*A5 and sh5["close_pos"]<=.45 and float(c5["close"])<=float(p5["close"])
+            flow_ok=w10["ratio"]<=.03 and w10["ratio"]<=w30["ratio"]+.05
+            book_ok=book_imb<=.35
+        if reclaim and flow_ok and book_ok and inten>=.65:
+            score=72+(8 if t4==wanted else 0)+(6 if t15==wanted else 0)+(5 if t5==wanted else 0)+(5 if inten>=1 else 0)+(4 if abs(w10["ratio"])>=.05 else 0)
+            score=min(score,100); key="PULLBACK_"+side
+            # Max one pullback signal per direction every two native 5M bars.
+            if b5-setup_last_bucket.get(key,-99)>=2:
+                reason=f"SLOW_ALIGN|{name}_PULLBACK|PRICE_RECLAIM|FLOW_TIMING|BIAS:{overall}"
+                _save_stage_signal("PULLBACK L" if side=="LONG" else "PULLBACK S",side,score,"5M",A5,reason,False)
+                setup_last_bucket[key]=b5
+
+    # ---- SETUP 2: LIQUIDITY REVERSAL --------------------------------------------
+    H15,L15=liquidity_tf("15M",100,30)
+    if H15 is not None:
+        for side in ("SHORT","LONG"):
+            wanted=-1 if side=="SHORT" else 1
+            if side=="SHORT":
+                near=float(c15["high"])>=H15-.12*A15 or p>=H15-.10*A15
+                sweep=float(c15["high"])>H15 and float(c15["close"])<H15+.03*A15
+                absorb=w30["ratio"]>.08 and sh15["upper"]>=max(sh15["body"],.20*sh15["rng"]) and sh15["close_pos"]<.68
+                price_fail=float(c5["close"])<float(c5["open"]) and float(c5["close"])<float(p5["close"]) and sh5["close_pos"]<.48
+                flow_fade=(w30["ratio"]>.06 and w10["ratio"]<=w30["ratio"]-.08) or w10["ratio"]<=-.02
+            else:
+                near=float(c15["low"])<=L15+.12*A15 or p<=L15+.10*A15
+                sweep=float(c15["low"])<L15 and float(c15["close"])>L15-.03*A15
+                absorb=w30["ratio"]<-.08 and sh15["lower"]>=max(sh15["body"],.20*sh15["rng"]) and sh15["close_pos"]>.32
+                price_fail=float(c5["close"])>float(c5["open"]) and float(c5["close"])>float(p5["close"]) and sh5["close_pos"]>.52
+                flow_fade=(w30["ratio"]<-.06 and w10["ratio"]>=w30["ratio"]+.08) or w10["ratio"]>=.02
+            # If both 1H and 4H still oppose the reversal, demand both sweep + absorption.
+            strong_conflict=(t1==-wanted and t4==-wanted)
+            auction_ok=(sweep and absorb) if strong_conflict else (sweep or absorb)
+            if near and auction_ok and price_fail and flow_fade:
+                score=78+(8 if sweep else 0)+(7 if absorb else 0)+(5 if t15==wanted else 0)+(4 if oi60>.004 else 0)+(4 if inten>=1 else 0)
+                score=min(score,100); key="REVERSAL_"+side
+                if setup_last_bucket.get(key)!=b15:
+                    reason=("15M_LIQ|"+("SWEEP|" if sweep else "")+("ABSORB|" if absorb else "")+"5M_FAILURE|FLOW_FADE"+("|COUNTER_STRONG" if strong_conflict else ""))
+                    _save_stage_signal("REVERSAL S" if side=="SHORT" else "REVERSAL L",side,score,"5M",A5,reason,False)
+                    setup_last_bucket[key]=b15
+
+    # ---- SETUP 3: BREAKOUT -> FIRST RETEST ---------------------------------------
+    # Arm only on a genuine range break: strong close + expansion + volume.
+    prev12=a5[-13:-1]; prev20=a5[-21:-1]
+    if len(prev12)>=10 and len(prev20)>=15:
+        hi=max(float(x["high"]) for x in prev12); lo=min(float(x["low"]) for x in prev12)
+        vols=[float(x.get("volume",0) or 0) for x in prev20 if float(x.get("volume",0) or 0)>0]
+        medv=median(vols) if vols else 0; vol=float(c5.get("volume",0) or 0)
+        body_frac=sh5["body"]/max(sh5["rng"],1e-9)
+        if float(c5["close"])>hi+.08*A5 and sh5["close_pos"]>.68 and body_frac>.48 and (medv<=0 or vol>=1.15*medv) and t15!=-1:
+            if setup_last_bucket.get("BREAKOUT_LONG")!=b5:
+                breakout_arms["LONG"]={"level":hi,"ts":now,"bucket":b5,"atr":A5,"break_px":float(c5["close"])}
+                setup_last_bucket["BREAKOUT_LONG"]=b5
+        if float(c5["close"])<lo-.08*A5 and sh5["close_pos"]<.32 and body_frac>.48 and (medv<=0 or vol>=1.15*medv) and t15!=1:
+            if setup_last_bucket.get("BREAKOUT_SHORT")!=b5:
+                breakout_arms["SHORT"]={"level":lo,"ts":now,"bucket":b5,"atr":A5,"break_px":float(c5["close"])}
+                setup_last_bucket["BREAKOUT_SHORT"]=b5
+
+    for side in ("LONG","SHORT"):
+        arm=breakout_arms.get(side)
+        if not arm:continue
+        age=now-int(arm["ts"]); level=float(arm["level"]); AA=max(float(arm.get("atr") or A5),1.0)
+        if age>45*60*1000:
+            breakout_arms[side]=None; continue
+        # Do not count the breakout bar itself as the retest.
+        if b5<=int(arm.get("bucket",b5)):continue
+        if side=="LONG":
+            invalid=float(c5["close"])<level-.25*AA
+            tested=float(c5["low"])<=level+.18*AA
+            held=float(c5["close"])>=level+.03*AA and sh5["close_pos"]>.52
+            flow_ok=w10["ratio"]>=-.04 and w30["ratio"]>=-.10
+        else:
+            invalid=float(c5["close"])>level+.25*AA
+            tested=float(c5["high"])>=level-.18*AA
+            held=float(c5["close"])<=level-.03*AA and sh5["close_pos"]<.48
+            flow_ok=w10["ratio"]<=.04 and w30["ratio"]<=.10
+        if invalid:
+            breakout_arms[side]=None; continue
+        if tested and held and flow_ok:
+            key="RETEST_"+side
+            if setup_last_bucket.get(key)!=b5:
+                score=82+(6 if t15==(1 if side=="LONG" else -1) else 0)+(5 if inten>=1 else 0)+(4 if abs(w10["ratio"])>=.04 else 0)
+                reason=f"BREAKOUT_RETEST|LEVEL:{level:.1f}|HOLD|FLOW_TIMING"
+                _save_stage_signal("RETEST L" if side=="LONG" else "RETEST S",side,min(score,100),"5M",A5,reason,False)
+                setup_last_bucket[key]=b5
+            breakout_arms[side]=None
+
+
 def evaluate():
-    evaluate_5m15m_pipeline()
-    evaluate_entry_signal()
+    # v6.56: only the three explicit setup families create new research signals.
+    # Legacy functions stay in the file for historical compatibility but are no longer called.
+    evaluate_setup_signals()
 
 def evaluate_scalp():
     """SCALP engine: 3M liquidity/structure + 1M sweep/reclaim + micro-flow flip."""
@@ -1115,7 +1257,7 @@ async def public_loop():
                             print("position_manager",repr(e))
                         last_heavy_ms["manager"]=now_ms
                     if now_ms-last_heavy_ms["evaluate"]>=350:
-                        evaluate();evaluate_macro()
+                        evaluate()
                         last_heavy_ms["evaluate"]=now_ms
                     if now_ms-last_heavy_ms["outcomes"]>=1000:
                         update_outcomes(); update_signal_research(); last_heavy_ms["outcomes"]=now_ms
@@ -1158,7 +1300,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.55 ENTRY TURN KST","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.56 THREE SETUP RADAR","ok":True,"status":status}
 
 def market_bias_snapshot():
     vals={tf:trend_bias_tf(tf) for tf in ("5M","15M","1H","4H")}
