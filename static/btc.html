@@ -51,7 +51,7 @@ body.embedded-btc header{position:relative!important}
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.51 · TURN DASHBOARD + DAILY LIVE</h1>
+    <h1>BTC OKX RADAR v6.52 · LIVE TURN DASHBOARD</h1>
     <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 약한 미시 신호는 저장 중단 · 차트는 서버 확정 TURN만 표시 · 큰 방향 BIAS 제공</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
@@ -199,6 +199,7 @@ let saved=JSON.parse(localStorage.getItem('trapflow_v17_signals')||'[]');
 const SERVER_API=location.origin;
 let serverSaved=[];
 let positionEvents=[];
+let serverLive=null;
 let liveEnginePositions=[];
 let myPosition={side:"FLAT"}, myPositionEvents=[];
 let livePosition={side:'FLAT'};
@@ -706,19 +707,21 @@ function renderMarkers(){
 }
 function updateDailyMove(){
   try{
-    const arr=(cache&&cache['1D'])||[];
-    if(!arr.length) return;
-    const d=arr[arr.length-1], o=Number(d.open??d.o);
-    const livePx=Number(currentPrice()||live?.price||d.close||d.c);
-    if(!Number.isFinite(o)||!Number.isFinite(livePx)||!o) return;
+    const sd=serverLive?.daily||null;
+    let o=Number(sd?.open), livePx=Number(sd?.price||serverLive?.price||currentPrice());
+    if(!(o>0)){
+      const arr=(cache&&cache['1D'])||[];
+      if(arr.length){const d=arr[arr.length-1];o=Number(d.open??d.o);if(!(livePx>0))livePx=Number(d.close??d.c)}
+    }
+    const a=$('dayMoveUsd'), b=$('dayMovePct'), t=$('topDayMove');
+    if(!(o>0)||!(livePx>0)){if(t)t.textContent='일봉 데이터 연결 중…';return;}
     const diff=livePx-o, pct=diff/o*100, col=diff>=0?'#35d98a':'#ff5c70';
     const usd=(diff>=0?'+$':'-$')+Math.abs(diff).toLocaleString(undefined,{maximumFractionDigits:1});
     const pc=(pct>=0?'+':'')+pct.toFixed(2)+'%';
-    const a=$('dayMoveUsd'), b=$('dayMovePct'), t=$('topDayMove');
     if(a){a.textContent=usd;a.style.color=col}
     if(b){b.textContent=pc;b.style.color=col}
     if(t){t.textContent=`오늘 ${usd} · ${pc}`;t.style.color=col}
-  }catch(e){}
+  }catch(e){console.warn('daily move',e)}
 }
 
 function renderTradeLedger(){
@@ -814,7 +817,9 @@ async function syncServer(){
       fetch(SERVER_API+'/api/user-position',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/user-position-events',{cache:'no-store'}).then(r=>r.json())
     ]);
-    renderTurnRadar(live?.radar);updateDailyMove();
+    serverLive=live;
+    if(Number(serverLive?.price)>0 && $('price')) $('price').textContent='$'+fmt(Number(serverLive.price));
+    renderTurnRadar(serverLive?.radar);renderContext();updateDailyMove();
     serverSaved=(Array.isArray(sigs)?sigs:[]).map(x=>({
       id:'srv_'+x.id,name:x.name,dir:x.side,score:x.score,entry:x.entry,sl:x.sl,tp1:x.tp1,tp2:x.tp2,
       ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000),status:x.status,closed:x.closed_ts,
@@ -931,7 +936,7 @@ function renderTurnRadar(r){
 function renderContext(){
   let h1=structure(confirmed(cache['1H']||[])),h4=structure(confirmed(cache['4H']||[])),m15=structure(confirmed(cache['15M']||[])),m5=structure(confirmed(cache['5M']||[]));
   $('mtf').innerHTML=[['5M',m5],['15M',m15],['1H',h1],['4H',h4]].map(([k,v])=>`<div>${k}<b class="${v==='BULL'?'green':v==='BEAR'?'red':'yellow'}">${v}</b></div>`).join('');
-  const b=(live&&live.bias)||null;
+  const b=(serverLive&&serverLive.bias)||null;
   let overall=b?.overall;
   if(!overall){const s=(m5==='BULL'?1:m5==='BEAR'?-1:0)+(m15==='BULL'?2:m15==='BEAR'?-2:0)+(h1==='BULL'?3:h1==='BEAR'?-3:0)+(h4==='BULL'?4:h4==='BEAR'?-4:0);overall=s>=5?'STRONG LONG':s>=2?'LONG':s<=-5?'STRONG SHORT':s<=-2?'SHORT':'MIXED';}
   const bo=$('biasOverall'),bd=$('biasDetail');

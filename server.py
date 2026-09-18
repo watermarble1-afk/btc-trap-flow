@@ -15,12 +15,12 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.50 TURN DIAGNOSTIC RADAR")
+app=FastAPI(title="BTC Trap Flow Collector v6.52 LIVE PIPELINE FIX")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 trades=deque(maxlen=12000)
 oi_hist=deque(maxlen=2000)
-candles={"1M":deque(maxlen=900),"3M":deque(maxlen=900),"5M":deque(maxlen=900),"15M":deque(maxlen=900),"1H":deque(maxlen=900),"4H":deque(maxlen=900)}
+candles={"1M":deque(maxlen=900),"3M":deque(maxlen=900),"5M":deque(maxlen=900),"15M":deque(maxlen=900),"1H":deque(maxlen=900),"4H":deque(maxlen=900),"1D":deque(maxlen=900)}
 book_imb=0.0
 current_oi=None
 last_price=None
@@ -1004,7 +1004,7 @@ def update_outcomes():
 
 async def seed():
     async with httpx.AsyncClient(timeout=15) as h:
-        for label,bar in [("1M","1m"),("3M","3m"),("5M","5m"),("15M","15m"),("1H","1H"),("4H","4H")]:
+        for label,bar in [("1M","1m"),("3M","3m"),("5M","5m"),("15M","15m"),("1H","1H"),("4H","4H"),("1D","1D")]:
             try:
                 # Fetch enough history for SMA480. OKX candles are newest-first; paginate older bars.
                 raw=[]; after=None
@@ -1065,7 +1065,7 @@ async def public_loop():
             status["public"]="reconnecting";print("public",e);await asyncio.sleep(2)
 
 async def business_loop():
-    mapping={"candle1m":"1M","candle3m":"3M","candle5m":"5M","candle15m":"15M","candle1H":"1H","candle4H":"4H"}
+    mapping={"candle1m":"1M","candle3m":"3M","candle5m":"5M","candle15m":"15M","candle1H":"1H","candle4H":"4H","candle1D":"1D"}
     while True:
         try:
             async with websockets.connect(BIZ,ping_interval=20,ping_timeout=20) as ws:
@@ -1100,7 +1100,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.50 TURN DIAGNOSTIC RADAR","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.52 LIVE PIPELINE FIX","ok":True,"status":status}
 
 def market_bias_snapshot():
     vals={tf:trend_bias_tf(tf) for tf in ("5M","15M","1H","4H")}
@@ -1178,12 +1178,22 @@ def turn_radar_snapshot():
       "flow_reversal":{"long":round(flowL,1),"short":round(flowS,1),"d10":r10,"d30":r30,"book":bk,"intensity":round(inten,2),"oi60":round(oi,4)},
       "note":"scores are heuristic evidence strength, not probability"}
 
+def daily_move_snapshot():
+    a=list(candles.get("1D",[]))
+    if not a:
+        return {"open":None,"price":last_price,"usd":None,"pct":None}
+    d=a[-1]; o=float(d.get("open") or 0); p=float(last_price or d.get("close") or 0)
+    if not o or not p:
+        return {"open":o or None,"price":p or None,"usd":None,"pct":None}
+    diff=p-o
+    return {"open":o,"price":p,"usd":diff,"pct":diff/o*100,"ts":d.get("ts")}
+
 @app.get("/api/live")
 def live():
     a,b=flow(10000),flow(30000);H,L=liquidity15()
     return {"price":last_price,"d10":a["ratio"],"d30":b["ratio"],"oi":current_oi,"oi60":oi_delta(),
             "flow":flow_intensity(),"book":book_imb,"liqH":H,"liqL":L,"armed":trap_arm,"status":status,
-            "bias":market_bias_snapshot(),"radar":turn_radar_snapshot()}
+            "bias":market_bias_snapshot(),"radar":turn_radar_snapshot(),"daily":daily_move_snapshot()}
 
 @app.get("/api/signals")
 def signals(limit:int=100, engine:str="ALL"):
