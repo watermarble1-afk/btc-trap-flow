@@ -34,3 +34,11 @@ Deploy by uploading all extracted files to GitHub and committing. Railway auto-d
 - 1D: resets monthly at 00:00 UTC on day 1.
 - Price basis: typical price (H+L+C)/3 weighted by candle volume.
 - Existing 3-SETUP PREP -> ARMED -> TRIGGER logic remains intact; all VWAP evidence now references this synchronized value.
+
+
+## v6.60 — SIGNAL CANDLE ANCHOR
+- PULLBACK / REVERSAL / RETEST markers anchor to the opening timestamp of the displayed timeframe candle.
+- Marker labels include the actual signal HH:mm time.
+- Labels shortened to PB / RV / RT to reduce overlap while preserving direction and score.
+- Manual OPEN / EXIT markers follow the same candle anchoring rule.
+- Signal/VWAP/PREP-ARMED-TRIGGER logic unchanged from v6.59.

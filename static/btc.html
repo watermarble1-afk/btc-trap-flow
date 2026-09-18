@@ -702,18 +702,24 @@ function renderMarkers(){
     const isPull=n.includes('PULLBACK'), isRev=n.includes('REVERSAL'), isRet=n.includes('RETEST');
     if(!isPull && !isRev && !isRet) continue;
     const isL=String(s.dir||'').toUpperCase()==='LONG';
-    const b=Math.floor(Number(s.time)/bucketSec), key=(isPull?'PULLBACK':isRev?'REVERSAL':'RETEST')+'|'+(isL?'L':'S')+'|'+b;
+    // v6.60: anchor every signal marker to the exact opening timestamp of the displayed candle.
+    const rawTs=Number(s.time);
+    const b=Math.floor(rawTs/bucketSec), candleTs=b*bucketSec;
+    const key=(isPull?'PULLBACK':isRev?'REVERSAL':'RETEST')+'|'+(isL?'L':'S')+'|'+b;
     if(watchSeen.has(key)) continue; watchSeen.add(key);
-    if(isPull) marks.push({time:Number(s.time),position:isL?'belowBar':'aboveBar',color:isL?'#35d98a':'#ff5c70',shape:isL?'arrowUp':'arrowDown',text:`${isL?'▲':'▼'} PULLBACK ${isL?'L':'S'} · ${Math.round(Number(s.score||0))}`});
-    else if(isRev) marks.push({time:Number(s.time),position:isL?'belowBar':'aboveBar',color:isL?'#00e5ff':'#ffd400',shape:'diamond',text:`◆ REVERSAL ${isL?'L':'S'} · ${Math.round(Number(s.score||0))}`});
-    else marks.push({time:Number(s.time),position:isL?'belowBar':'aboveBar',color:'#b56cff',shape:'circle',text:`● RETEST ${isL?'L':'S'} · ${Math.round(Number(s.score||0))}`});
+    const tm=new Date(rawTs*1000).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit',hour12:false});
+    const score=Math.round(Number(s.score||0));
+    if(isPull) marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:isL?'#35d98a':'#ff5c70',shape:isL?'arrowUp':'arrowDown',text:`${isL?'▲':'▼'} PB ${isL?'L':'S'} ${score} · ${tm}`});
+    else if(isRev) marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:isL?'#00e5ff':'#ffd400',shape:'diamond',text:`◆ RV ${isL?'L':'S'} ${score} · ${tm}`});
+    else marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:'#b56cff',shape:'circle',text:`● RT ${isL?'L':'S'} ${score} · ${tm}`});
   }
   for(const e of (myPositionEvents||[])){
     const ts=Math.floor(Number(e.ts||0)/1000), ev=String(e.event||'').toUpperCase();
     if(!ts || ts<from || !['OPEN','EXIT'].includes(ev)) continue;
     const isL=String(e.side||'').toUpperCase()==='LONG';
-    if(ev==='OPEN') marks.push({time:ts,position:isL?'belowBar':'aboveBar',color:isL?'#35d98a':'#ff5c70',shape:isL?'arrowUp':'arrowDown',text:isL?'B':'S'});
-    else marks.push({time:ts,position:isL?'aboveBar':'belowBar',color:'#ffffff',shape:'circle',text:'X'});
+    const candleTs=Math.floor(ts/bucketSec)*bucketSec;
+    if(ev==='OPEN') marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:isL?'#35d98a':'#ff5c70',shape:isL?'arrowUp':'arrowDown',text:isL?'B':'S'});
+    else marks.push({time:candleTs,position:isL?'aboveBar':'belowBar',color:'#ffffff',shape:'circle',text:'X'});
   }
   marks.sort((a,b)=>a.time-b.time);
   try{candle.setMarkers(marks)}catch(e){}
