@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.53 TURN WATCH KST")
+app=FastAPI(title="BTC Trap Flow Collector v6.55 ENTRY TURN KST")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 trades=deque(maxlen=12000)
@@ -39,7 +39,8 @@ tf_last_signal_ts={e:0 for e in ("5M","15M","1H","4H")}
 # v6.45 staged signal pipeline: 15M EARLY -> 5M pressure -> CONF.
 # SCALP generation is disabled; 1H/4H engines remain unchanged.
 stage_15m_context={"LONG":None,"SHORT":None}
-stage_last_bucket={"EARLY_LONG":-1,"EARLY_SHORT":-1,"5M_LONG":-1,"5M_SHORT":-1,"CONF_LONG":-1,"CONF_SHORT":-1}
+stage_last_bucket={"EARLY_LONG":-1,"EARLY_SHORT":-1,"5M_LONG":-1,"5M_SHORT":-1,"CONF_LONG":-1,"CONF_SHORT":-1,
+                   "ENTRY_LONG":-1,"ENTRY_SHORT":-1}
 scalp_prev_d10=0.0
 status={"public":"starting","business":"starting","started":int(time.time()*1000)}
 # v6.27: throttle CPU/SQLite-heavy research work so high-rate trade WS cannot starve HTTP.
@@ -111,6 +112,9 @@ def db():
       p5 REAL, p15 REAL, p30 REAL, p60 REAL,
       FOREIGN KEY(signal_id) REFERENCES signals(id)
     )""")
+    rcols={r[1] for r in c.execute("PRAGMA table_info(signal_research)").fetchall()}
+    for col in ("b5","b10","b20","b30"):
+        if col not in rcols:c.execute(f"ALTER TABLE signal_research ADD COLUMN {col} REAL")
     c.commit(); return c
 
 def median(xs):
@@ -738,8 +742,57 @@ def evaluate_tf_engine(engine):
                     save_signal(nm,"SHORT",score,arm["level"],arm["ext"],{"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},engine,A)
     tf_prev_d10[engine]=w10["ratio"]
 
+def evaluate_entry_signal():
+    """v6.55 actionable ENTRY layer.
+    Finds pullback/retest entries inside the slow market bias. It does NOT open/switch
+    simulator positions. 10s/30s flow is only the final timing clue, not the direction source.
+    """
+    global stage_last_bucket
+    if not last_price or len(candles["5M"])<25 or len(trades)<20:return
+    now=int(time.time()*1000); p=float(last_price); A=max(atr_tf("5M",24),1.0)
+    a=list(candles["5M"]); c=a[-1]; sh=_bar_shape(c)
+    bias=market_bias_snapshot(); overall=str(bias.get("overall") or "MIXED")
+    t5=trend_bias_tf("5M"); t15=trend_bias_tf("15M"); t1=trend_bias_tf("1H")
+    w10,w30=flow(10000),flow(30000); inten=flow_intensity()
+    refs=[("SMA20",sma_tf("5M",20)),("SMA60",sma_tf("5M",60)),("VWAP",vwap_tf("5M",240))]
+    refs=[(n,float(v)) for n,v in refs if v]
+    if not refs:return
+    nearest_name,nearest=min(refs,key=lambda z:abs(p-z[1])); dist=abs(p-nearest)/A
+    b5=int(now//(5*60*1000))
+    for side in ("LONG","SHORT"):
+        wanted=1 if side=="LONG" else -1
+        # Direction comes from slow structure. STRONG bias is preferred; ordinary bias needs 1H agreement.
+        bias_ok=(side=="LONG" and overall in ("LONG","STRONG LONG")) or (side=="SHORT" and overall in ("SHORT","STRONG SHORT"))
+        if not bias_ok: continue
+        if t15==-wanted or (overall in ("LONG","SHORT") and t1!=wanted): continue
+        touched=(float(c["low"])<=nearest+.18*A if side=="LONG" else float(c["high"])>=nearest-.18*A)
+        near=(dist<=.42)
+        price_recover=(float(c["close"])>=nearest and sh["close_pos"]>=.52) if side=="LONG" else (float(c["close"])<=nearest and sh["close_pos"]<=.48)
+        candle_ok=(float(c["close"])>=float(c["open"])) if side=="LONG" else (float(c["close"])<=float(c["open"]))
+        # Micro flow may be neutral, but must be improving in the trade direction.
+        flow_recover=(w10["ratio"]>=-.05 and w10["ratio"]>=w30["ratio"]-.03) if side=="LONG" else (w10["ratio"]<=.05 and w10["ratio"]<=w30["ratio"]+.03)
+        reasons=[]; score=0
+        if "STRONG" in overall: score+=28; reasons.append(overall.replace(' ','_'))
+        else: score+=20; reasons.append(overall)
+        if t1==wanted: score+=16; reasons.append("1H_ALIGN")
+        if t15==wanted: score+=16; reasons.append("15M_ALIGN")
+        if t5==wanted: score+=10; reasons.append("5M_ALIGN")
+        if near or touched: score+=15; reasons.append(nearest_name+"_RETEST")
+        if price_recover: score+=10; reasons.append("PRICE_RECLAIM")
+        if candle_ok: score+=5; reasons.append("CANDLE")
+        if flow_recover: score+=8; reasons.append("FLOW_RECOVER")
+        if inten>=.85: score+=4; reasons.append("ACTIVITY")
+        score=min(score,100)
+        # Needs actual pullback location + price response. Flow only confirms timing.
+        if (near or touched) and price_recover and candle_ok and flow_recover and score>=76:
+            key="ENTRY_"+side
+            if stage_last_bucket.get(key)!=b5:
+                _save_stage_signal("ENTRY L" if side=="LONG" else "ENTRY S",side,score,"5M",A,"+".join(reasons),False)
+                stage_last_bucket[key]=b5
+
 def evaluate():
     evaluate_5m15m_pipeline()
+    evaluate_entry_signal()
 
 def evaluate_scalp():
     """SCALP engine: 3M liquidity/structure + 1M sweep/reclaim + micro-flow flip."""
@@ -965,10 +1018,10 @@ def update_signal_research():
     if not last_price:return
     now=int(time.time()*1000); px=float(last_price); c=db()
     # Only recent signals need live excursion updates. Older rows remain available.
-    rows=c.execute("""SELECT s.id,s.ts,s.side,s.entry,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60
+    rows=c.execute("""SELECT s.id,s.ts,s.side,s.entry,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.b5,r.b10,r.b20,r.b30
       FROM signals s LEFT JOIN signal_research r ON r.signal_id=s.id
-      WHERE s.ts>=? ORDER BY s.ts DESC LIMIT 1500""",(now-2*60*60*1000,)).fetchall()
-    for sid,ts,side,entry,mfe,mae,p5,p15,p30,p60 in rows:
+      WHERE s.ts>=? ORDER BY s.ts DESC LIMIT 2000""",(now-3*60*60*1000,)).fetchall()
+    for sid,ts,side,entry,mfe,mae,p5,p15,p30,p60,b5,b10,b20,b30 in rows:
         if not entry: continue
         entry=float(entry); move=(px-entry)/entry*100.0
         fav=move if side=='LONG' else -move
@@ -977,12 +1030,17 @@ def update_signal_research():
         vals=[p5,p15,p30,p60]; horizons=[5,15,30,60]
         for i,m in enumerate(horizons):
             if vals[i] is None and now-int(ts)>=m*60000: vals[i]=px
-        c.execute("""INSERT INTO signal_research(signal_id,started_ts,last_ts,mfe_pct,mae_pct,p5,p15,p30,p60)
-          VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(signal_id) DO UPDATE SET
+        bars=[b5,b10,b20,b30]; bar_h=[5,10,20,30]
+        for i,nbar in enumerate(bar_h):
+            if bars[i] is None and now-int(ts)>=nbar*5*60000: bars[i]=px
+        c.execute("""INSERT INTO signal_research(signal_id,started_ts,last_ts,mfe_pct,mae_pct,p5,p15,p30,p60,b5,b10,b20,b30)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(signal_id) DO UPDATE SET
           last_ts=excluded.last_ts,mfe_pct=excluded.mfe_pct,mae_pct=excluded.mae_pct,
           p5=COALESCE(signal_research.p5,excluded.p5),p15=COALESCE(signal_research.p15,excluded.p15),
-          p30=COALESCE(signal_research.p30,excluded.p30),p60=COALESCE(signal_research.p60,excluded.p60)""",
-          (sid,ts,now,mfe,mae,*vals))
+          p30=COALESCE(signal_research.p30,excluded.p30),p60=COALESCE(signal_research.p60,excluded.p60),
+          b5=COALESCE(signal_research.b5,excluded.b5),b10=COALESCE(signal_research.b10,excluded.b10),
+          b20=COALESCE(signal_research.b20,excluded.b20),b30=COALESCE(signal_research.b30,excluded.b30)""",
+          (sid,ts,now,mfe,mae,*vals,*bars))
     c.commit();c.close()
 
 def update_outcomes():
@@ -1100,7 +1158,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.53 TURN WATCH KST","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.55 ENTRY TURN KST","ok":True,"status":status}
 
 def market_bias_snapshot():
     vals={tf:trend_bias_tf(tf) for tf in ("5M","15M","1H","4H")}
@@ -1210,7 +1268,7 @@ def signal_research(limit:int=500, engine:str="ALL"):
     where=""; args=[]
     if engine.upper() in ("SCALP","5M","15M","1H","4H"):
         where="WHERE s.engine=?";args.append(engine.upper())
-    q=f"""SELECT s.id,s.ts,s.engine,s.name,s.side,s.entry,s.score,s.reason,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60
+    q=f"""SELECT s.id,s.ts,s.engine,s.name,s.side,s.entry,s.score,s.reason,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.b5,r.b10,r.b20,r.b30
       FROM signals s LEFT JOIN signal_research r ON r.signal_id=s.id {where}
       ORDER BY s.ts DESC LIMIT ?"""
     args.append(min(max(int(limit),1),1500))
