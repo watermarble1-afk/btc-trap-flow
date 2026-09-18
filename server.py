@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.57 THREE SETUP LEAD KST")
+app=FastAPI(title="BTC Trap Flow Collector v6.59 THREE SETUP VWAP HOTFIX KST")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 trades=deque(maxlen=12000)
@@ -208,11 +208,11 @@ def vwap_tf(tf,n=240):
     if not a:return None
     latest_ts=int(a[-1].get("ts",0) or 0)
     if latest_ts<=0:return None
-    dt=_dt.datetime.fromtimestamp(latest_ts/1000.0,tz=_dt.timezone.utc)
+    dt=datetime.fromtimestamp(latest_ts/1000.0,tz=timezone.utc)
     if tf=="1D":
-        anchor=_dt.datetime(dt.year,dt.month,1,tzinfo=_dt.timezone.utc)
+        anchor=datetime(dt.year,dt.month,1,tzinfo=timezone.utc)
     else:
-        anchor=_dt.datetime(dt.year,dt.month,dt.day,tzinfo=_dt.timezone.utc)
+        anchor=datetime(dt.year,dt.month,dt.day,tzinfo=timezone.utc)
     anchor_ms=int(anchor.timestamp()*1000)
     session=[x for x in a if int(x.get("ts",0) or 0)>=anchor_ms]
     if not session:return None
@@ -1361,7 +1361,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.57 THREE SETUP LEAD KST","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.59 THREE SETUP VWAP HOTFIX KST","ok":True,"status":status}
 
 def market_bias_snapshot():
     vals={tf:trend_bias_tf(tf) for tf in ("5M","15M","1H","4H")}
