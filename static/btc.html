@@ -51,19 +51,19 @@ body.embedded-btc header{position:relative!important}
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.50 · TURN DIAGNOSTIC RADAR</h1>
+    <h1>BTC OKX RADAR v6.51 · TURN DASHBOARD + DAILY LIVE</h1>
     <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 약한 미시 신호는 저장 중단 · 차트는 서버 확정 TURN만 표시 · 큰 방향 BIAS 제공</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
 </div>
 
 <div class="cards">
-  <div class="card"><div class="lbl">BTC-USDT-SWAP</div><div class="val" id="price">—</div></div>
-  <div class="card"><div class="lbl">10초 체결 DELTA</div><div class="val" id="d10">—</div></div>
-  <div class="card"><div class="lbl">30초 체결 DELTA</div><div class="val" id="d30">—</div></div>
-  <div class="card"><div class="lbl">FLOW 강도</div><div class="val" id="flow">WARMING</div></div>
-  <div class="card"><div class="lbl">OI 변화</div><div class="val" id="oi">—</div></div>
-  <div class="card"><div class="lbl">BOOK 5단계</div><div class="val" id="book">—</div></div>
+  <div class="card"><div class="lbl">BTC PRICE · TODAY</div><div class="val" id="price">—</div><div class="tiny" id="topDayMove">일봉 —</div></div>
+  <div class="card"><div class="lbl">MARKET BIAS</div><div class="val" id="topBias">—</div><div class="tiny" id="topBiasDetail">4H · 1H · 15M · 5M</div></div>
+  <div class="card"><div class="lbl">TURN ZONE</div><div class="val" id="topZone">—</div><div class="tiny" id="topZoneDetail">15M liquidity / ATR</div></div>
+  <div class="card"><div class="lbl">STRUCTURE</div><div class="val" id="topStructure">—</div><div class="tiny" id="topStructureDetail">5M / 15M</div></div>
+  <div class="card"><div class="lbl">REVERSAL PRESSURE</div><div class="val" id="topPressure">—</div><div class="tiny" id="topPressureDetail">10s·30s / OI / Book</div></div>
+  <div class="card"><div class="lbl">TURN RADAR</div><div class="val" id="topRadar">—</div><div class="tiny" id="topRadarDetail">근거 합류 점수</div></div>
   <div class="card"><div class="lbl">포지션 누적 성과</div><div class="val" id="fwd">0W / 0L</div></div>
 </div>
 
@@ -708,14 +708,19 @@ function updateDailyMove(){
   try{
     const arr=(cache&&cache['1D'])||[];
     if(!arr.length) return;
-    const d=arr[arr.length-1], o=Number(d.open??d.o), c=Number(d.close??d.c);
-    if(!Number.isFinite(o)||!Number.isFinite(c)||!o) return;
-    const diff=c-o, pct=diff/o*100, col=diff>=0?'#35d98a':'#ff5c70';
-    const a=$('dayMoveUsd'), b=$('dayMovePct');
-    if(a){a.textContent=(diff>=0?'+$':'-$')+Math.abs(diff).toLocaleString(undefined,{maximumFractionDigits:1});a.style.color=col}
-    if(b){b.textContent=(pct>=0?'+':'')+pct.toFixed(2)+'%';b.style.color=col}
+    const d=arr[arr.length-1], o=Number(d.open??d.o);
+    const livePx=Number(currentPrice()||live?.price||d.close||d.c);
+    if(!Number.isFinite(o)||!Number.isFinite(livePx)||!o) return;
+    const diff=livePx-o, pct=diff/o*100, col=diff>=0?'#35d98a':'#ff5c70';
+    const usd=(diff>=0?'+$':'-$')+Math.abs(diff).toLocaleString(undefined,{maximumFractionDigits:1});
+    const pc=(pct>=0?'+':'')+pct.toFixed(2)+'%';
+    const a=$('dayMoveUsd'), b=$('dayMovePct'), t=$('topDayMove');
+    if(a){a.textContent=usd;a.style.color=col}
+    if(b){b.textContent=pc;b.style.color=col}
+    if(t){t.textContent=`오늘 ${usd} · ${pc}`;t.style.color=col}
   }catch(e){}
 }
+
 function renderTradeLedger(){
   const el=$('tradeLedger'); if(!el)return;
   const ev=[...(positionEvents||[])].sort((a,b)=>Number(a.ts)-Number(b.ts));
@@ -809,7 +814,7 @@ async function syncServer(){
       fetch(SERVER_API+'/api/user-position',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/user-position-events',{cache:'no-store'}).then(r=>r.json())
     ]);
-    renderTurnRadar(live?.radar);
+    renderTurnRadar(live?.radar);updateDailyMove();
     serverSaved=(Array.isArray(sigs)?sigs:[]).map(x=>({
       id:'srv_'+x.id,name:x.name,dir:x.side,score:x.score,entry:x.entry,sl:x.sl,tp1:x.tp1,tp2:x.tp2,
       ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000),status:x.status,closed:x.closed_ts,
@@ -895,6 +900,15 @@ function renderTurnRadar(r){
   if(!r)return;
   const side=r.side||'LONG', pick=(o)=>Number(o?.[side.toLowerCase()]||0);
   const col=side==='LONG'?'#35d98a':'#ff5c70';
+  const topZone=$('topZone'); if(topZone){topZone.textContent=(r.location?.zone||'—');topZone.style.color=col;}
+  const topZoneDetail=$('topZoneDetail'); if(topZoneDetail)topZoneDetail.textContent=`HIGH ${r.location?.d_high_atr??'—'} ATR · LOW ${r.location?.d_low_atr??'—'} ATR`;
+  const topStructure=$('topStructure'); if(topStructure){const st5=r.structure?.['5M']||'—',st15=r.structure?.['15M']||'—';topStructure.textContent=st5===st15?st5:'TRANSITION';topStructure.style.color=topStructure.textContent==='BULL'?'#35d98a':topStructure.textContent==='BEAR'?'#ff5c70':'#f1c75b';}
+  const topStructureDetail=$('topStructureDetail'); if(topStructureDetail)topStructureDetail.textContent=`5M ${r.structure?.['5M']||'—'} · 15M ${r.structure?.['15M']||'—'}`;
+  const fl=Number(r.flow_reversal?.long||0), fs=Number(r.flow_reversal?.short||0);
+  const topPressure=$('topPressure'); if(topPressure){topPressure.textContent=`L ${fl.toFixed(0)} / S ${fs.toFixed(0)}`;topPressure.style.color=fl>fs?'#35d98a':fs>fl?'#ff5c70':'#f1c75b';}
+  const topPressureDetail=$('topPressureDetail'); if(topPressureDetail)topPressureDetail.textContent=`10s ${(Number(r.flow_reversal?.d10||0)*100).toFixed(0)}% · 30s ${(Number(r.flow_reversal?.d30||0)*100).toFixed(0)}% · Book ${(Number(r.flow_reversal?.book||0)*100).toFixed(0)}%`;
+  const topRadar=$('topRadar'); if(topRadar){topRadar.textContent=`${r.state||'—'} · ${side==='LONG'?'L':'S'} ${Number(r.score||0).toFixed(0)}`;topRadar.style.color=col;}
+  const topRadarDetail=$('topRadarDetail'); if(topRadarDetail)topRadarDetail.textContent=`LONG ${Number(r.long_score||0).toFixed(0)} · SHORT ${Number(r.short_score||0).toFixed(0)}`;
   const state=$('turnRadarState'); if(state){state.textContent=`${r.state} · TURN ${side==='LONG'?'L':'S'} · ${Number(r.score||0).toFixed(0)}`;state.style.color=col;}
   if($('turnZone'))$('turnZone').textContent=(r.location?.zone||'—')+' TURN ZONE';
   if($('distHigh'))$('distHigh').textContent=(r.location?.d_high_atr??'—')+' ATR';
@@ -923,6 +937,8 @@ function renderContext(){
   const bo=$('biasOverall'),bd=$('biasDetail');
   if(bo){bo.textContent=overall;bo.style.color=overall.includes('LONG')?'#35d98a':overall.includes('SHORT')?'#ff5c70':'#f1c75b';}
   if(bd)bd.textContent=`4H ${b?.['4H']||h4} · 1H ${b?.['1H']||h1} · 15M ${b?.['15M']||m15} · 5M ${b?.['5M']||m5}`;
+  const tb=$('topBias'); if(tb){tb.textContent=overall;tb.style.color=overall.includes('LONG')?'#35d98a':overall.includes('SHORT')?'#ff5c70':'#f1c75b';}
+  const td=$('topBiasDetail'); if(td)td.textContent=`4H ${b?.['4H']||h4} · 1H ${b?.['1H']||h1} · 15M ${b?.['15M']||m15} · 5M ${b?.['5M']||m5}`;
 }
 function renderChart(full=true){
   let a=cache[cur];if(!a?.length)return;
