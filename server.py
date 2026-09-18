@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.49 TURN BIAS RADAR")
+app=FastAPI(title="BTC Trap Flow Collector v6.50 TURN DIAGNOSTIC RADAR")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 trades=deque(maxlen=12000)
@@ -1100,7 +1100,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.49 TURN BIAS RADAR","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.50 TURN DIAGNOSTIC RADAR","ok":True,"status":status}
 
 def market_bias_snapshot():
     vals={tf:trend_bias_tf(tf) for tf in ("5M","15M","1H","4H")}
@@ -1114,12 +1114,76 @@ def market_bias_snapshot():
     else: overall="MIXED"
     return {"overall":overall,"score":score,**{tf:("BULL" if v>0 else "BEAR" if v<0 else "MIXED") for tf,v in vals.items()}}
 
+
+
+def _clamp100(x):
+    return max(0.0,min(100.0,float(x)))
+
+def _sma_slope(tf,n,back=3):
+    a=list(candles.get(tf,[]))
+    if len(a)<n+back:return 0.0
+    now=sum(float(x["close"]) for x in a[-n:])/n
+    old=sum(float(x["close"]) for x in a[-n-back:-back])/n
+    A=max(atr_tf(tf),1.0)
+    return (now-old)/A
+
+def turn_radar_snapshot():
+    """Live diagnostic radar. Scores are heuristic evidence-strength scores, not probabilities."""
+    p=float(last_price or 0); A=max(atr_tf("5M"),1.0)
+    H,L=liquidity15(); b10=flow(10000); b30=flow(30000); inten=flow_intensity(); oi=oi_delta()
+    bias=market_bias_snapshot(); bscore=float(bias.get("score",0))
+    # Regime: higher-TF structure, deliberately slow.
+    regime_side="LONG" if bscore>=2 else "SHORT" if bscore<=-2 else "MIXED"
+    regime_strength=_clamp100(abs(bscore)/10*100)
+    # Location: closeness to 15M liquidity plus MA/VWAP confluence.
+    dH=(H-p)/A if H is not None and p else 99; dL=(p-L)/A if L is not None and p else 99
+    locS=_clamp100(100-max(0,dH)*38) if dH>=-.35 else 15
+    locL=_clamp100(100-max(0,dL)*38) if dL>=-.35 else 15
+    ma20=sma_tf("5M",20); ma60=sma_tf("5M",60); ma120=sma_tf("5M",120); vw=vwap_tf("5M",240)
+    refs=[x for x in (ma20,ma60,ma120,vw) if x]
+    prox=min([abs(p-x)/A for x in refs],default=9)
+    ma_prox=_clamp100(100-prox*55)
+    slope20=_sma_slope("5M",20); slope60=_sma_slope("5M",60)
+    # Structure: 5M + 15M agreement, with MA slope as secondary context.
+    t5=trend_bias_tf("5M"); t15=trend_bias_tf("15M")
+    structL=_clamp100(35+25*(t5==1)+25*(t15==1)+15*(slope20>0))
+    structS=_clamp100(35+25*(t5==-1)+25*(t15==-1)+15*(slope20<0))
+    # Flow reversal/absorption proxy: extreme aggression + opposing book/30s loss of follow-through.
+    r10=float(b10["ratio"]); r30=float(b30["ratio"]); bk=float(book_imb or 0)
+    flowS=_clamp100(20 + 35*max(0,r30) + 30*max(0,-r10+r30) + 20*max(0,-bk) + 10*max(0,inten-1))
+    flowL=_clamp100(20 + 35*max(0,-r30) + 30*max(0,r10-r30) + 20*max(0,bk) + 10*max(0,inten-1))
+    # MA/VWAP context: proximity + side/reclaim context, never a standalone trigger.
+    ctxL=ma_prox; ctxS=ma_prox
+    if vw:
+        if p>=vw: ctxL=_clamp100(ctxL+12)
+        else: ctxS=_clamp100(ctxS+12)
+    if ma20:
+        if p>=ma20: ctxL=_clamp100(ctxL+8)
+        else: ctxS=_clamp100(ctxS+8)
+    # Counter-trend turns require stronger evidence; regime is context, not a hard veto.
+    def total(side):
+        loc=locL if side=="LONG" else locS; st=structL if side=="LONG" else structS; fc=flowL if side=="LONG" else flowS; mc=ctxL if side=="LONG" else ctxS
+        raw=.32*loc+.25*st+.23*fc+.20*mc
+        if regime_side not in ("MIXED",side): raw-=8
+        return _clamp100(raw)
+    ltot,stot=total("LONG"),total("SHORT")
+    side="LONG" if ltot>=stot else "SHORT"; score=max(ltot,stot)
+    state="CONFIRMED" if score>=82 else "ARMED" if score>=70 else "WATCH" if score>=55 else "NEUTRAL"
+    return {
+      "side":side,"state":state,"score":round(score,1),"long_score":round(ltot,1),"short_score":round(stot,1),
+      "regime":{"side":regime_side,"strength":round(regime_strength,1),"bias":bias},
+      "location":{"long":round(locL,1),"short":round(locS,1),"d_high_atr":round(dH,2),"d_low_atr":round(dL,2),"zone":"UPPER" if locS>=70 else "LOWER" if locL>=70 else "MID"},
+      "structure":{"long":round(structL,1),"short":round(structS,1),"5M":("BULL" if t5>0 else "BEAR" if t5<0 else "MIXED"),"15M":("BULL" if t15>0 else "BEAR" if t15<0 else "MIXED")},
+      "ma_vwap":{"long":round(ctxL,1),"short":round(ctxS,1),"proximity":round(ma_prox,1),"sma20":ma20,"sma60":ma60,"sma120":ma120,"vwap":vw,"slope20":round(slope20,3),"slope60":round(slope60,3)},
+      "flow_reversal":{"long":round(flowL,1),"short":round(flowS,1),"d10":r10,"d30":r30,"book":bk,"intensity":round(inten,2),"oi60":round(oi,4)},
+      "note":"scores are heuristic evidence strength, not probability"}
+
 @app.get("/api/live")
 def live():
     a,b=flow(10000),flow(30000);H,L=liquidity15()
     return {"price":last_price,"d10":a["ratio"],"d30":b["ratio"],"oi":current_oi,"oi60":oi_delta(),
             "flow":flow_intensity(),"book":book_imb,"liqH":H,"liqL":L,"armed":trap_arm,"status":status,
-            "bias":market_bias_snapshot()}
+            "bias":market_bias_snapshot(),"radar":turn_radar_snapshot()}
 
 @app.get("/api/signals")
 def signals(limit:int=100, engine:str="ALL"):

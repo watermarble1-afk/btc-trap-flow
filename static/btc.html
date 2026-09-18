@@ -51,7 +51,7 @@ body.embedded-btc header{position:relative!important}
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.49 · TURN BIAS RADAR</h1>
+    <h1>BTC OKX RADAR v6.50 · TURN DIAGNOSTIC RADAR</h1>
     <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 약한 미시 신호는 저장 중단 · 차트는 서버 확정 TURN만 표시 · 큰 방향 BIAS 제공</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
@@ -107,35 +107,37 @@ body.embedded-btc header{position:relative!important}
 <div><span class="tiny">금액 변화</span><div id="dayMoveUsd" style="font-size:18px;font-weight:800">—</div></div>
 <div><span class="tiny">상승률</span><div id="dayMovePct" style="font-size:18px;font-weight:800">—</div></div>
 </div></div>
-<h3>큰 구조</h3><div class="mtf" id="mtf"></div>
-    <div id="marketBias" style="margin-top:8px;padding:8px;border:1px solid #263249;border-radius:8px;background:#0a101a;font-size:11px"><b>MARKET BIAS</b> · <span id="biasOverall">MIXED</span><div id="biasDetail" class="tiny" style="margin-top:4px">4H — · 1H — · 15M — · 5M —</div></div></div>
+<h3>MARKET REGIME <span class="tiny">큰 방향 · 느리게 변화</span></h3><div class="mtf" id="mtf"></div>
+    <div id="marketBias" style="margin-top:8px;padding:8px;border:1px solid #263249;border-radius:8px;background:#0a101a;font-size:11px"><b>REGIME</b> · <span id="biasOverall">MIXED</span><div id="biasDetail" class="tiny" style="margin-top:4px">4H — · 1H — · 15M — · 5M —</div></div></div>
 
   <div class="box">
-    <h3>현재 LIQUIDITY 위치</h3>
-    <div class="row"><span>15M High</span><b id="liqH">—</b></div>
-    <div class="row"><span>15M Low</span><b id="liqL">—</b></div>
-    <div class="row"><span>현재 거리</span><b id="liqDist">—</b></div>
+    <h3>TURN LOCATION <span class="tiny">변곡이 나올 위치인가</span></h3>
+    <div class="row"><span>ZONE</span><b id="turnZone">—</b></div>
+    <div class="row"><span>15M High 거리</span><b id="distHigh">—</b></div>
+    <div class="row"><span>15M Low 거리</span><b id="distLow">—</b></div>
+    <div class="row"><span>LONG 위치점수</span><b id="locLong">—</b></div>
+    <div class="row"><span>SHORT 위치점수</span><b id="locShort">—</b></div>
   </div>
 
   <div class="box">
-    <h3>실시간 주문흐름</h3>
-    <div class="row"><span>10s Buy / Sell</span><b id="bs10">—</b></div>
-    <div class="row"><span>30s Buy / Sell</span><b id="bs30">—</b></div>
-    <div class="row"><span>OI 현재</span><b id="oiNow">—</b></div>
-    <div class="row"><span>OI 60s Δ</span><b id="oi60">—</b></div>
-    <div class="row"><span>Book imbalance</span><b id="bookImb">—</b></div>
-    <div class="flowbar"><div class="flowfill" id="flowfill"></div></div>
-    <div class="tiny" style="margin-top:4px">왼쪽 = 공격 매도 우위 / 오른쪽 = 공격 매수 우위</div>
+    <h3>REVERSAL PRESSURE <span class="tiny">체결은 마지막 확인용</span></h3>
+    <div class="row"><span>10s Delta</span><b id="radD10">—</b></div>
+    <div class="row"><span>30s Delta</span><b id="radD30">—</b></div>
+    <div class="row"><span>Flow intensity</span><b id="radInt">—</b></div>
+    <div class="row"><span>Book</span><b id="radBook">—</b></div>
+    <div class="row"><span>LONG 반전압력</span><b id="flowLong">—</b></div>
+    <div class="row"><span>SHORT 반전압력</span><b id="flowShort">—</b></div>
   </div>
 
   <div class="box">
-    <h3>현재 타점</h3>
-    <div id="sig" class="signal yellow">WAIT</div>
-    <div class="row"><span>ENTRY</span><b id="entry">—</b></div>
-    <div class="row"><span>INVALIDATION</span><b id="sl">—</b></div>
-    <div class="row"><span>TP1</span><b id="tp1">—</b></div>
-    <div class="row"><span>TP2 / 다음 유동성</span><b id="tp2">—</b></div>
-    <div class="reason" id="why" style="margin-top:7px">실시간 flow 데이터 수집 중…</div>
+    <h3>TURN RADAR <span class="tiny">확률 아님 · 근거 합류 점수</span></h3>
+    <div id="turnRadarState" class="signal yellow">NEUTRAL</div>
+    <div class="row"><span>LOCATION</span><b id="radLocation">—</b></div>
+    <div class="row"><span>STRUCTURE</span><b id="radStructure">—</b></div>
+    <div class="row"><span>MA / VWAP</span><b id="radMa">—</b></div>
+    <div class="row"><span>FLOW REVERSAL</span><b id="radFlow">—</b></div>
+    <div class="reason" id="radWhy" style="margin-top:7px">서버 분석값 수집 중…</div>
+    <div style="display:none"><span id="liqH"></span><span id="liqL"></span><span id="liqDist"></span><span id="bs10"></span><span id="bs30"></span><span id="oiNow"></span><span id="oi60"></span><span id="bookImb"></span><div id="flowfill"></div><div id="sig"></div><span id="entry"></span><span id="sl"></span><span id="tp1"></span><span id="tp2"></span><div id="why"></div></div>
   </div>
 
   <div class="box mySidePosition">
@@ -151,7 +153,7 @@ body.embedded-btc header{position:relative!important}
 
 
   <div class="box">
-    <h3>📡 SIGNAL STREAM <span class="tiny">핵심 신호만 · TURN / 강한 EARLY / 1H·4H 컨텍스트</span> <span style="font-size:8px;font-weight:400"><span style="color:#35d98a">●1/3 L</span> <span style="color:#4f8cff">●5/15 L</span> <span style="color:#ff78b4">●1/3 S</span> <span style="color:#ff4f64">●5/15 S</span></span></h3>
+    <h3>🧭 TURN EVENT LOG <span class="tiny">확정 TURN과 핵심 컨텍스트만</span> <span style="font-size:8px;font-weight:400"><span style="color:#35d98a">●1/3 L</span> <span style="color:#4f8cff">●5/15 L</span> <span style="color:#ff78b4">●1/3 S</span> <span style="color:#ff4f64">●5/15 S</span></span></h3>
     <div class="history" id="history"><div class="tiny">아직 없음</div></div>
   </div>
 </aside>
@@ -807,6 +809,7 @@ async function syncServer(){
       fetch(SERVER_API+'/api/user-position',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/user-position-events',{cache:'no-store'}).then(r=>r.json())
     ]);
+    renderTurnRadar(live?.radar);
     serverSaved=(Array.isArray(sigs)?sigs:[]).map(x=>({
       id:'srv_'+x.id,name:x.name,dir:x.side,score:x.score,entry:x.entry,sl:x.sl,tp1:x.tp1,tp2:x.tp2,
       ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000),status:x.status,closed:x.closed_ts,
@@ -887,6 +890,29 @@ function refreshLivePositionReturns(){
   });
 }
 setInterval(refreshLivePositionReturns,500);
+
+function renderTurnRadar(r){
+  if(!r)return;
+  const side=r.side||'LONG', pick=(o)=>Number(o?.[side.toLowerCase()]||0);
+  const col=side==='LONG'?'#35d98a':'#ff5c70';
+  const state=$('turnRadarState'); if(state){state.textContent=`${r.state} · TURN ${side==='LONG'?'L':'S'} · ${Number(r.score||0).toFixed(0)}`;state.style.color=col;}
+  if($('turnZone'))$('turnZone').textContent=(r.location?.zone||'—')+' TURN ZONE';
+  if($('distHigh'))$('distHigh').textContent=(r.location?.d_high_atr??'—')+' ATR';
+  if($('distLow'))$('distLow').textContent=(r.location?.d_low_atr??'—')+' ATR';
+  if($('locLong'))$('locLong').textContent=Number(r.location?.long||0).toFixed(0)+'/100';
+  if($('locShort'))$('locShort').textContent=Number(r.location?.short||0).toFixed(0)+'/100';
+  if($('radD10'))$('radD10').textContent=(Number(r.flow_reversal?.d10||0)*100).toFixed(0)+'%';
+  if($('radD30'))$('radD30').textContent=(Number(r.flow_reversal?.d30||0)*100).toFixed(0)+'%';
+  if($('radInt'))$('radInt').textContent=Number(r.flow_reversal?.intensity||0).toFixed(2)+'×';
+  if($('radBook'))$('radBook').textContent=(Number(r.flow_reversal?.book||0)*100).toFixed(0)+'%';
+  if($('flowLong'))$('flowLong').textContent=Number(r.flow_reversal?.long||0).toFixed(0)+'/100';
+  if($('flowShort'))$('flowShort').textContent=Number(r.flow_reversal?.short||0).toFixed(0)+'/100';
+  if($('radLocation'))$('radLocation').textContent=pick(r.location).toFixed(0)+'/100';
+  if($('radStructure'))$('radStructure').textContent=pick(r.structure).toFixed(0)+'/100';
+  if($('radMa'))$('radMa').textContent=pick(r.ma_vwap).toFixed(0)+'/100';
+  if($('radFlow'))$('radFlow').textContent=pick(r.flow_reversal).toFixed(0)+'/100';
+  if($('radWhy'))$('radWhy').innerHTML=`· REGIME ${r.regime?.side||'MIXED'}<br>· 5M ${r.structure?.['5M']||'—'} / 15M ${r.structure?.['15M']||'—'}<br>· LONG ${Number(r.long_score||0).toFixed(0)} vs SHORT ${Number(r.short_score||0).toFixed(0)}<br>· 점수는 확률이 아닌 실시간 근거 합류 강도`;
+}
 
 function renderContext(){
   let h1=structure(confirmed(cache['1H']||[])),h4=structure(confirmed(cache['4H']||[])),m15=structure(confirmed(cache['15M']||[])),m5=structure(confirmed(cache['5M']||[]));
