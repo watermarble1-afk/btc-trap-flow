@@ -63,8 +63,8 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.56 · MOBILE THREE SETUP KST</h1>
-    <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 3개 셋업만 신규 저장 · PULLBACK / REVERSAL / RETEST · 10s/30s는 마지막 타이밍 확인 · 큰 방향 BIAS 제공</div>
+    <h1>BTC OKX RADAR v6.55 · MOBILE ENTRY TURN KST</h1>
+    <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 약한 미시 신호는 저장 중단 · PREP → ARMED → TRIGGER 선행 감지 · 차트는 PULLBACK · REVERSAL · RETEST만 표시 · 큰 방향 BIAS 제공</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
 </div>
@@ -75,7 +75,7 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
   <div class="card"><div class="lbl">TURN ZONE</div><div class="val" id="topZone">—</div><div class="tiny" id="topZoneDetail">15M liquidity / ATR</div></div>
   <div class="card"><div class="lbl">STRUCTURE</div><div class="val" id="topStructure">—</div><div class="tiny" id="topStructureDetail">5M / 15M</div></div>
   <div class="card"><div class="lbl">REVERSAL PRESSURE</div><div class="val" id="topPressure">—</div><div class="tiny" id="topPressureDetail">10s·30s / OI / Book</div></div>
-  <div class="card"><div class="lbl">TURN RADAR</div><div class="val" id="topRadar">—</div><div class="tiny" id="topRadarDetail">근거 합류 점수</div></div>
+  <div class="card"><div class="lbl">SETUP RADAR</div><div class="val" id="topRadar">—</div><div class="tiny" id="topRadarDetail">PREP → ARMED → TRIGGER</div></div>
   <div class="card"><div class="lbl">포지션 누적 성과</div><div class="val" id="fwd">0W / 0L</div></div>
 </div>
 
@@ -97,9 +97,9 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
 <b style="font-size:10px">SIGNAL ENGINE</b>
 <button class="btn engBtn" data-eng="NONE">신호 제거</button><button class="btn engBtn" data-eng="SCALP">1/3M 과거</button><button class="btn engBtn" data-eng="5M">5M</button><button class="btn engBtn" data-eng="15M">15M</button><button class="btn engBtn" data-eng="1H">1H</button><button class="btn engBtn" data-eng="4H">4H</button><button class="btn engBtn" data-eng="ALL">ALL</button><label style="display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #3d2a55;border-radius:7px;background:#171022;font-size:10px;color:#d8b4ff;cursor:pointer"><input type="checkbox" id="vwapSigChk" checked> VWAP 신호</label>
 <span id="scalpStat" style="font-size:10px;color:#8d99ad">1/3M —</span><span id="m5Stat" style="font-size:10px;color:#8d99ad">5M —</span><span id="m15Stat" style="font-size:10px;color:#8d99ad">15M —</span><span id="h1Stat" style="font-size:10px;color:#8d99ad">1H —</span><span id="h4Stat" style="font-size:10px;color:#8d99ad">4H —</span>
-<div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">복수 선택 = 표시 엔진 선택 · 차트에는 3개 최종 셋업만 표시 · 기타 과거/연구 신호는 DB/기록에 보존</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
-<span style="color:#35d98a">▲ PULLBACK L</span><span style="color:#ff78b4">▼ PULLBACK S</span><span style="color:#00e5ff">◆ REVERSAL L</span><span style="color:#ffd400">◆ REVERSAL S</span><span style="color:#4f8cff">▲ RETEST L</span><span style="color:#ff9c50">▼ RETEST S</span><span style="color:#8d99ad">방향=1H/4H/15M 구조 · 위치=MA/VWAP/유동성 · 10s/30s=마지막 타이밍 확인</span>
-<span style="color:#4f8cff">● 과거 TRAP L</span><span style="color:#ff4f64">● 과거 TRAP S</span>
+<div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">복수 선택 = 표시 엔진 선택 · 차트는 3개 SETUP만 표시 · 기존 WATCH/EARLY/ENTRY/TURN 기록은 DB에 보존</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
+<span style="color:#35d98a">▲ PULLBACK L</span><span style="color:#ff5c70">▼ PULLBACK S</span><span style="color:#00e5ff">◆ REVERSAL L</span><span style="color:#ffd400">◆ REVERSAL S</span><span style="color:#b56cff">● RETEST</span><span style="color:#8d99ad">PREP(낌새) → ARMED(자리) → TRIGGER(타점) · 10s/30s는 마지막 확인만</span>
+<span style="color:#4f8cff">● TRAP L</span><span style="color:#ff4f64">● TRAP S</span>
 <span style="color:#27c2a4">● 1H L/S</span><span style="color:#c86cff">● 4H L/S</span><span style="color:#b37cff">● VWAP선</span><span style="color:#d7dee9">● X 종료</span></div>
 </div><div style="font-size:10px;color:#8d99ad;margin:3px 0">TIMEFRAME · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO</div><div class="hoverPctBar" id="hoverPctBar">봉에 마우스를 올리면 해당 봉의 등락률이 표시됩니다.</div><div id="chart"></div>
   <div class="legend">
@@ -108,7 +108,7 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
     <span><b style="color:#35d7e5">RETEST</b> 청록</span><span><b style="color:#c7d0dd">X</b> 포지션 정리</span><span><b class="purple">VWAP</b> 선택 봉 기준 앵커 VWAP</span>
   </div>
   <div class="warn">
-    v6.56 신규 신호는 딱 3종만 사용합니다. PULLBACK은 큰 추세 방향 눌림 재진입, REVERSAL은 15M 유동성 sweep/흡수 뒤 실패 반전, RETEST는 진짜 5M 돌파 뒤 첫 되돌림 재확인입니다. 10s/30s Delta·Book·OI는 방향 결정이 아니라 마지막 타이밍/품질 확인에만 사용합니다. 과거 신호/포지션 기록은 삭제하지 않습니다.
+    1M·3M·5M·15M·1H·4H·1D 차트를 자유롭게 볼 수 있습니다. v6.58부터 3-SETUP 엔진이 PREP → ARMED → TRIGGER로 상태를 나눠 선행 징후와 실제 타점을 분리합니다. PULLBACK은 눌림 위치, REVERSAL은 15M 유동성 sweep/실패, RETEST는 확인된 돌파 후 첫 되돌림을 추적합니다. 10s/30s 체결은 방향 결정이 아니라 마지막 타이밍 확인에만 사용합니다.
   </div>
 </section>
 
@@ -142,7 +142,7 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
   </div>
 
   <div class="box">
-    <h3>TURN RADAR <span class="tiny">확률 아님 · 근거 합류 점수</span></h3>
+    <h3>SETUP RADAR <span class="tiny">낌새 → 대기 → 타점 · 확률 아님</span></h3>
     <div id="turnRadarState" class="signal yellow">NEUTRAL</div>
     <div class="row"><span>LOCATION</span><b id="radLocation">—</b></div>
     <div class="row"><span>STRUCTURE</span><b id="radStructure">—</b></div>
@@ -685,45 +685,42 @@ function renderHistory(){
   // focuses on signals with a clear role: strict EARLY watches, confirmed TURNs, and HTF context.
   const useful=allSaved().filter(x=>{
     const n=String(x.name||'').toUpperCase(), e=String(x.engine||'');
-    return n.includes('PULLBACK') || n.includes('REVERSAL') || n.includes('RETEST') || e==='1H' || e==='4H';
+    return n.includes('PULLBACK') || n.includes('REVERSAL') || n.includes('RETEST') || n.includes('TURN') || n.includes('ENTRY') || n.includes('EARLY') || e==='1H' || e==='4H';
   }).sort((a,b)=>Number(b.ts)-Number(a.ts)).slice(0,60);
   $('history').innerHTML=useful.length?useful.map(x=>{
     const tm=new Date(Number(x.ts)).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
     const tf=engLabel(x.engine||'5M'), nm=String(x.name||'SIGNAL'), up=nm.toUpperCase();
-    const isPull=up.includes('PULLBACK'), isRev=up.includes('REVERSAL'), isRet=up.includes('RETEST');
-    const c=isPull?(x.dir==='LONG'?'#35d98a':'#ff78b4'):isRev?(x.dir==='LONG'?'#00e5ff':'#ffd400'):isRet?(x.dir==='LONG'?'#4f8cff':'#ff9c50'):engColor(x.engine||'5M',x.dir);
-    const tag=isPull?'PULLBACK':isRev?'REVERSAL':isRet?'RETEST':'HTF';
+    const isPull=up.includes('PULLBACK'), isRev=up.includes('REVERSAL'), isRet=up.includes('RETEST'), isTurn=up.includes('TURN'), isEntry=up.includes('ENTRY'), isEarly=up.includes('EARLY');
+    const c=isPull?(x.dir==='LONG'?'#35d98a':'#ff5c70'):isRev?(x.dir==='LONG'?'#00e5ff':'#ffd400'):isRet?'#b56cff':isTurn?'#8d99ad':isEntry?'#8d99ad':isEarly?'#8d99ad':engColor(x.engine||'5M',x.dir);
+    const tag=isPull?'PULLBACK':isRev?'REVERSAL':isRet?'RETEST':isTurn?'OLD TURN':isEntry?'OLD ENTRY':isEarly?'OLD WATCH':'HTF';
     return `<div class="histrow"><span>${tm}</span><b style="color:${c}">[${tf}] ${nm}</b><span class="tiny">${tag} · ${x.score??'—'}</span></div>`;
   }).join(''):'<div class="tiny">아직 핵심 신호 없음</div>';
 }
 function renderMarkers(){
-  // v6.56: chart shows only the three explicit setup families.
-  // All legacy/research signals remain in SQLite/history but do not clutter the chart.
+  // v6.54: mobile matches PC — WATCH candidates + confirmed TURNs only.
+  // Everything else remains in SIGNAL STREAM / DB. WATCH is deduped per engine+side+display candle.
   const from=cache[cur]?.[0]?.time||0;
   let marks=[];
   if(selectedEngines.size===0){ try{candle.setMarkers([])}catch(e){}; return; }
-  const seen=new Set();
+  const watchSeen=new Set();
   const bucketSec={'1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800,'1MO':2592000}[cur]||300;
   for(const s of allSaved()){
     if(Number(s.time)<from || !selectedEngines.has(s.engine||'5M')) continue;
-    const n=String(s.name||'').toUpperCase(), isL=String(s.dir||'').toUpperCase()==='LONG';
+    const n=String(s.name||'').toUpperCase();
     const isPull=n.includes('PULLBACK'), isRev=n.includes('REVERSAL'), isRet=n.includes('RETEST');
     if(!isPull && !isRev && !isRet) continue;
-    const b=Math.floor(Number(s.time)/bucketSec), family=isPull?'PULLBACK':isRev?'REVERSAL':'RETEST';
-    const key=family+'|'+(s.engine||'5M')+'|'+(isL?'L':'S')+'|'+b;
-    if(seen.has(key)) continue; seen.add(key);
-    let color,shape,text;
-    if(isPull){ color=isL?'#35d98a':'#ff78b4'; shape=isL?'arrowUp':'arrowDown'; text=`${isL?'▲':'▼'} PB ${isL?'L':'S'} · ${Math.round(Number(s.score||0))}`; }
-    else if(isRev){ color=isL?'#00e5ff':'#ffd400'; shape='diamond'; text=`◆ REV ${isL?'L':'S'} · ${Math.round(Number(s.score||0))}`; }
-    else { color=isL?'#4f8cff':'#ff9c50'; shape=isL?'arrowUp':'arrowDown'; text=`${isL?'▲':'▼'} RT ${isL?'L':'S'} · ${Math.round(Number(s.score||0))}`; }
-    marks.push({time:Number(s.time),position:isL?'belowBar':'aboveBar',color,shape,text});
+    const isL=String(s.dir||'').toUpperCase()==='LONG';
+    const b=Math.floor(Number(s.time)/bucketSec), key=(isPull?'PULLBACK':isRev?'REVERSAL':'RETEST')+'|'+(isL?'L':'S')+'|'+b;
+    if(watchSeen.has(key)) continue; watchSeen.add(key);
+    if(isPull) marks.push({time:Number(s.time),position:isL?'belowBar':'aboveBar',color:isL?'#35d98a':'#ff5c70',shape:isL?'arrowUp':'arrowDown',text:`${isL?'▲':'▼'} PULLBACK ${isL?'L':'S'} · ${Math.round(Number(s.score||0))}`});
+    else if(isRev) marks.push({time:Number(s.time),position:isL?'belowBar':'aboveBar',color:isL?'#00e5ff':'#ffd400',shape:'diamond',text:`◆ REVERSAL ${isL?'L':'S'} · ${Math.round(Number(s.score||0))}`});
+    else marks.push({time:Number(s.time),position:isL?'belowBar':'aboveBar',color:'#b56cff',shape:'circle',text:`● RETEST ${isL?'L':'S'} · ${Math.round(Number(s.score||0))}`});
   }
-  // Preserve only manual/simulator open/exit lifecycle marks; these are not new setup signals.
   for(const e of (myPositionEvents||[])){
     const ts=Math.floor(Number(e.ts||0)/1000), ev=String(e.event||'').toUpperCase();
     if(!ts || ts<from || !['OPEN','EXIT'].includes(ev)) continue;
     const isL=String(e.side||'').toUpperCase()==='LONG';
-    if(ev==='OPEN') marks.push({time:ts,position:isL?'belowBar':'aboveBar',color:'#9aa6b8',shape:'circle',text:isL?'POS L':'POS S'});
+    if(ev==='OPEN') marks.push({time:ts,position:isL?'belowBar':'aboveBar',color:isL?'#35d98a':'#ff5c70',shape:isL?'arrowUp':'arrowDown',text:isL?'B':'S'});
     else marks.push({time:ts,position:isL?'aboveBar':'belowBar',color:'#ffffff',shape:'circle',text:'X'});
   }
   marks.sort((a,b)=>a.time-b.time);
@@ -843,13 +840,13 @@ async function syncServer(){
     ]);
     serverLive=live;
     if(Number(serverLive?.price)>0 && $('price')) $('price').textContent='$'+fmt(Number(serverLive.price));
-    renderTurnRadar(serverLive?.radar);renderContext();updateDailyMove();
+    renderTurnRadar(serverLive?.radar);renderSetupWatch(serverLive?.setup_watch);renderContext();updateDailyMove();
     serverSaved=(Array.isArray(sigs)?sigs:[]).map(x=>({
       id:'srv_'+x.id,name:x.name,dir:x.side,score:x.score,entry:x.entry,sl:x.sl,tp1:x.tp1,tp2:x.tp2,
       ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000),status:x.status,closed:x.closed_ts,
       metrics:{d10:x.d10,d30:x.d30,oi60:x.oi60,int:x.flow,book:x.book},source:'SERVER',engine:x.engine||'5M'
     }));
-    const latestServer=[...serverSaved].filter(x=>String(x.name||'').toUpperCase().includes('TURN')).sort((a,b)=>b.ts-a.ts)[0];
+    const latestServer=[...serverSaved].filter(x=>/PULLBACK|REVERSAL|RETEST/i.test(String(x.name||''))).sort((a,b)=>b.ts-a.ts)[0];
     if(latestServer && Date.now()-latestServer.ts<60*60*1000){
       liveSignal=latestServer;
       renderSignal(latestServer);
@@ -924,6 +921,36 @@ function refreshLivePositionReturns(){
   });
 }
 setInterval(refreshLivePositionReturns,500);
+
+function renderSetupWatch(sw){
+  if(!sw)return;
+  const best=sw.best||null;
+  const rank={TRIGGER:3,ARMED:2,PREP:1,IDLE:0};
+  const items=Array.isArray(sw.items)?sw.items:[];
+  const pick=best||items.sort((a,b)=>(rank[b.stage]||0)-(rank[a.stage]||0)||Number(b.score||0)-Number(a.score||0))[0];
+  const top=$('topRadar'), detail=$('topRadarDetail'), state=$('turnRadarState'), why=$('radWhy');
+  if(!pick){
+    if(top){top.textContent='SCANNING';top.style.color='#8d99ad'}
+    if(detail)detail.textContent='3-SETUP 조건 탐색 중';
+    if(state){state.textContent='SCANNING · 유효 셋업 없음';state.style.color='#8d99ad'}
+    return;
+  }
+  const side=String(pick.side||'LONG'), stage=String(pick.stage||'PREP'), setup=String(pick.setup||'SETUP');
+  const col=stage==='TRIGGER'?'#35d98a':stage==='ARMED'?'#f1c75b':'#8fb5ff';
+  const sideTag=side==='LONG'?'L':'S';
+  if(top){top.textContent=`${stage} · ${setup} ${sideTag} · ${Number(pick.score||0).toFixed(0)}`;top.style.color=col}
+  if(detail){
+    const lv=Number(pick.level||0); detail.textContent=(pick.reasons||[]).slice(0,3).join(' · ')+(lv>0?` · $${fmt(lv)}`:'');
+  }
+  if(state){state.textContent=`${stage} · ${setup} ${sideTag} · ${Number(pick.score||0).toFixed(0)}`;state.style.color=col}
+  if(why){
+    const same=items.filter(x=>x.stage==='ARMED'||x.stage==='PREP').slice(0,4);
+    const lines=[`· 현재 ${stage} / ${setup} ${sideTag}`,`· ${(pick.reasons||[]).join(' → ')||'근거 수집 중'}`];
+    if(same.length>1)lines.push('· 대기: '+same.map(x=>`${x.setup} ${x.side==='LONG'?'L':'S'} ${x.stage} ${Number(x.score||0).toFixed(0)}`).join(' / '));
+    lines.push('· PREP=낌새 · ARMED=자리 도착 · TRIGGER=실제 신호');
+    why.innerHTML=lines.join('<br>');
+  }
+}
 
 function renderTurnRadar(r){
   if(!r)return;

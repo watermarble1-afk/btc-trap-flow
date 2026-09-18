@@ -1,40 +1,36 @@
-# BTC OKX RADAR v6.54 — FINAL UI SYNC
+# BTC OKX RADAR v6.58 THREE SETUP LEAD KST
 
-Base: v6.52 LIVE PIPELINE FIX.
+Research-only BTC signal dashboard. No real orders are placed.
 
-Changes only to presentation/visibility (signal generation thresholds are unchanged):
-- Chart now shows deduplicated WATCH candidates (EARLY/WATCH) plus confirmed TURN markers.
-- Other research signals remain in SIGNAL STREAM / SQLite history; they are not deleted.
-- WATCH markers are deduplicated by selected chart timeframe bucket to avoid returning to marker spam.
-- Confirmed TURN markers remain prominent.
-- Lightweight Charts time-axis/crosshair labels are formatted in Asia/Seoul (KST).
-- PC/mobile version labels updated.
+## v6.58 core redesign
+The 3-SETUP engine now separates **early recognition** from the actual signal.
 
-Deployment: upload/overwrite all extracted files in GitHub and Commit changes. Railway auto-deploys. Keep the Railway volume/database untouched.
+- `PREP` — context is favorable and price is approaching a useful location.
+- `ARMED` — price has touched/swept/broken the location and the engine is waiting for response.
+- `TRIGGER` — price response + 1M micro structure + flow timing align. Only this stage is persisted as a signal marker.
+
+### PULLBACK
+Higher-timeframe trend alignment -> approach 5M SMA20/SMA60/VWAP -> touch/probe -> reclaim -> 1M structure break -> flow turn.
+
+### REVERSAL
+Approach 15M liquidity -> sweep or absorption -> failed auction back inside the level -> 5M rejection -> 1M structure turn -> flow fade/turn.
+
+### RETEST
+Compression/range-edge warning -> confirmed 5M displacement breakout -> first return to the broken level -> hold/rejection -> 1M structure + resumed flow.
+
+## Important design rules
+- 10s/30s delta is **timing evidence only**, never the primary direction source.
+- PREP/ARMED states are live diagnostics and are not written to the signal DB.
+- Only PULLBACK / REVERSAL / RETEST `TRIGGER` events are saved as new 3-SETUP signals.
+- Existing DB/history and forward `signal_research` MFE/MAE/horizon measurement remain intact.
+- No automatic real trading is performed.
+
+Deploy by uploading all extracted files to GitHub and committing. Railway auto-deploys from the repository.
 
 
-## v6.54
-- PC/mobile chart marker policy synchronized: WATCH candidates + confirmed TURN only.
-- Mobile header/legend/help text synchronized with PC.
-- KST chart time retained on both PC and mobile.
-- Signal generation, DB schema, position logic, server pipeline unchanged from v6.53.
-
-
-## v6.55 ENTRY TURN KST
-- Added signal-only ENTRY L/S layer for pullback/retest timing inside slow 4H/1H/15M market bias.
-- 10s/30s flow is only final timing confirmation, not the direction source.
-- Chart now shows only ENTRY + confirmed TURN markers; EARLY/WATCH remains in Signal Stream/DB.
-- ENTRY does not open, close, or switch simulator positions.
-- Signal research adds 5/10/20/30 x 5-minute-bar horizon prices (b5/b10/b20/b30) plus existing MFE/MAE.
-- Desktop/mobile synchronized; KST chart behavior retained.
-
-
-## v6.56 THREE SETUP RADAR KST
-- Replaced the new-signal path with exactly three explicit research setup families:
-  1. PULLBACK L/S — slow 1H/4H trend + 5M pullback into SMA20/60/VWAP + reclaim.
-  2. REVERSAL L/S — only near 15M liquidity, using sweep/absorption + 5M price failure + flow fade.
-  3. RETEST L/S — genuine 5M breakout/expansion first, then the first successful retest.
-- 10s/30s flow, book and OI are final timing/quality evidence; they no longer choose direction.
-- New setup signals are research-only and do not open/switch simulator positions.
-- Chart displays only PULLBACK / REVERSAL / RETEST. Legacy/research rows remain in SQLite/history.
-- KST chart/crosshair formatting retained on desktop and mobile.
+## v6.58 VWAP SYNC
+- Signal-engine VWAP changed from 240-bar rolling VWAP to the same anchored VWAP shown on the chart.
+- Intraday (1M/3M/5M/15M/1H/4H): resets at 00:00 UTC.
+- 1D: resets monthly at 00:00 UTC on day 1.
+- Price basis: typical price (H+L+C)/3 weighted by candle volume.
+- Existing 3-SETUP PREP -> ARMED -> TRIGGER logic remains intact; all VWAP evidence now references this synchronized value.

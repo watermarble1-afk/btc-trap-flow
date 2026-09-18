@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.56 THREE SETUP RADAR")
+app=FastAPI(title="BTC Trap Flow Collector v6.57 THREE SETUP LEAD KST")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 trades=deque(maxlen=12000)
@@ -41,12 +41,10 @@ tf_last_signal_ts={e:0 for e in ("5M","15M","1H","4H")}
 stage_15m_context={"LONG":None,"SHORT":None}
 stage_last_bucket={"EARLY_LONG":-1,"EARLY_SHORT":-1,"5M_LONG":-1,"5M_SHORT":-1,"CONF_LONG":-1,"CONF_SHORT":-1,
                    "ENTRY_LONG":-1,"ENTRY_SHORT":-1}
-# v6.56: quality-first setup engine. Legacy signal rows remain in DB, but new chart signals
-# come only from three explicit setup families instead of generic micro-flow scoring.
-setup_last_bucket={k:-1 for k in (
-    "PULLBACK_LONG","PULLBACK_SHORT","REVERSAL_LONG","REVERSAL_SHORT",
-    "RETEST_LONG","RETEST_SHORT","BREAKOUT_LONG","BREAKOUT_SHORT")}
-breakout_arms={"LONG":None,"SHORT":None}
+# v6.57: three-setup lead state. PREP/ARMED are live-only early warnings; only TRIGGER is persisted.
+setup_arms={f"{setup}_{side}":None for setup in ("PULLBACK","REVERSAL","RETEST") for side in ("LONG","SHORT")}
+setup_watch={"updated_ts":0,"best":None,"items":[]}
+setup_flow_prev={"ts":0,"d10":0.0,"d30":0.0}
 scalp_prev_d10=0.0
 status={"public":"starting","business":"starting","started":int(time.time()*1000)}
 # v6.27: throttle CPU/SQLite-heavy research work so high-rate trade WS cannot starve HTTP.
@@ -200,11 +198,27 @@ def sma_tf(tf,n):
     return sum(float(x["close"]) for x in a[-n:])/n
 
 def vwap_tf(tf,n=240):
-    a=list(candles.get(tf,[]))[-n:]
+    """Session-anchored VWAP used by the signal engine.
+
+    Intraday TFs reset at 00:00 UTC, exactly like the chart VWAP.
+    1D resets at the first UTC day of each month.  ``n`` is retained only
+    for backwards-compatible callers; it no longer creates a rolling window.
+    """
+    a=list(candles.get(tf,[]))
     if not a:return None
-    den=sum(float(x.get("volume",0) or 0) for x in a)
+    latest_ts=int(a[-1].get("ts",0) or 0)
+    if latest_ts<=0:return None
+    dt=_dt.datetime.fromtimestamp(latest_ts/1000.0,tz=_dt.timezone.utc)
+    if tf=="1D":
+        anchor=_dt.datetime(dt.year,dt.month,1,tzinfo=_dt.timezone.utc)
+    else:
+        anchor=_dt.datetime(dt.year,dt.month,dt.day,tzinfo=_dt.timezone.utc)
+    anchor_ms=int(anchor.timestamp()*1000)
+    session=[x for x in a if int(x.get("ts",0) or 0)>=anchor_ms]
+    if not session:return None
+    den=sum(float(x.get("volume",0) or 0) for x in session)
     if den<=0:return None
-    return sum(((float(x["high"])+float(x["low"])+float(x["close"]))/3.0)*float(x.get("volume",0) or 0) for x in a)/den
+    return sum(((float(x["high"])+float(x["low"])+float(x["close"]))/3.0)*float(x.get("volume",0) or 0) for x in session)/den
 
 def vwap_signal_context(tf, atr_value):
     """VWAP-only location context. MA EARLY is retired in v6.29.
@@ -748,192 +762,239 @@ def evaluate_tf_engine(engine):
                     save_signal(nm,"SHORT",score,arm["level"],arm["ext"],{"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},engine,A)
     tf_prev_d10[engine]=w10["ratio"]
 
-def evaluate_entry_signal():
-    """v6.55 actionable ENTRY layer.
-    Finds pullback/retest entries inside the slow market bias. It does NOT open/switch
-    simulator positions. 10s/30s flow is only the final timing clue, not the direction source.
-    """
-    global stage_last_bucket
-    if not last_price or len(candles["5M"])<25 or len(trades)<20:return
-    now=int(time.time()*1000); p=float(last_price); A=max(atr_tf("5M",24),1.0)
-    a=list(candles["5M"]); c=a[-1]; sh=_bar_shape(c)
-    bias=market_bias_snapshot(); overall=str(bias.get("overall") or "MIXED")
-    t5=trend_bias_tf("5M"); t15=trend_bias_tf("15M"); t1=trend_bias_tf("1H")
-    w10,w30=flow(10000),flow(30000); inten=flow_intensity()
-    refs=[("SMA20",sma_tf("5M",20)),("SMA60",sma_tf("5M",60)),("VWAP",vwap_tf("5M",240))]
-    refs=[(n,float(v)) for n,v in refs if v]
-    if not refs:return
-    nearest_name,nearest=min(refs,key=lambda z:abs(p-z[1])); dist=abs(p-nearest)/A
-    b5=int(now//(5*60*1000))
-    for side in ("LONG","SHORT"):
-        wanted=1 if side=="LONG" else -1
-        # Direction comes from slow structure. STRONG bias is preferred; ordinary bias needs 1H agreement.
-        bias_ok=(side=="LONG" and overall in ("LONG","STRONG LONG")) or (side=="SHORT" and overall in ("SHORT","STRONG SHORT"))
-        if not bias_ok: continue
-        if t15==-wanted or (overall in ("LONG","SHORT") and t1!=wanted): continue
-        touched=(float(c["low"])<=nearest+.18*A if side=="LONG" else float(c["high"])>=nearest-.18*A)
-        near=(dist<=.42)
-        price_recover=(float(c["close"])>=nearest and sh["close_pos"]>=.52) if side=="LONG" else (float(c["close"])<=nearest and sh["close_pos"]<=.48)
-        candle_ok=(float(c["close"])>=float(c["open"])) if side=="LONG" else (float(c["close"])<=float(c["open"]))
-        # Micro flow may be neutral, but must be improving in the trade direction.
-        flow_recover=(w10["ratio"]>=-.05 and w10["ratio"]>=w30["ratio"]-.03) if side=="LONG" else (w10["ratio"]<=.05 and w10["ratio"]<=w30["ratio"]+.03)
-        reasons=[]; score=0
-        if "STRONG" in overall: score+=28; reasons.append(overall.replace(' ','_'))
-        else: score+=20; reasons.append(overall)
-        if t1==wanted: score+=16; reasons.append("1H_ALIGN")
-        if t15==wanted: score+=16; reasons.append("15M_ALIGN")
-        if t5==wanted: score+=10; reasons.append("5M_ALIGN")
-        if near or touched: score+=15; reasons.append(nearest_name+"_RETEST")
-        if price_recover: score+=10; reasons.append("PRICE_RECLAIM")
-        if candle_ok: score+=5; reasons.append("CANDLE")
-        if flow_recover: score+=8; reasons.append("FLOW_RECOVER")
-        if inten>=.85: score+=4; reasons.append("ACTIVITY")
-        score=min(score,100)
-        # Needs actual pullback location + price response. Flow only confirms timing.
-        if (near or touched) and price_recover and candle_ok and flow_recover and score>=76:
-            key="ENTRY_"+side
-            if stage_last_bucket.get(key)!=b5:
-                _save_stage_signal("ENTRY L" if side=="LONG" else "ENTRY S",side,score,"5M",A,"+".join(reasons),False)
-                stage_last_bucket[key]=b5
-
 def evaluate_setup_signals():
-    """v6.56 quality-first three-setup engine.
+    """v6.57 THREE SETUP LEAD research engine.
 
-    1) PULLBACK: trade with slow 1H/4H direction after a 5M pullback into SMA20/60/VWAP.
-    2) REVERSAL: only near 15M liquidity, after a failed auction/absorption and 5M failure.
-    3) RETEST: genuine 5M breakout first, then the first successful retest of the broken level.
+    The engine separates early recognition from the actual timing signal:
+      PREP   = context is favorable and price is approaching a useful location.
+      ARMED  = price has touched/swept/broken the location; wait for response.
+      TRIGGER= price response + micro structure + flow confirmation. Only this is stored.
 
-    10s/30s flow never chooses direction. It is only a final timing/quality clue.
-    These are research signals only; they do not open/switch the simulator position.
+    Direction is never decided by 10s/30s flow alone. Flow is the final timing layer.
     """
-    global setup_last_bucket, breakout_arms
-    if not last_price or len(trades)<20:return
-    if len(candles["5M"])<65 or len(candles["15M"])<25 or len(candles["1H"])<8 or len(candles["4H"])<6:return
+    global stage_last_bucket, setup_watch, setup_flow_prev
+    if not last_price or len(trades)<20 or len(candles['5M'])<25 or len(candles['15M'])<12:return
     now=int(time.time()*1000); p=float(last_price)
-    A5=max(atr_tf("5M",24),1.0); A15=max(atr_tf("15M",24),1.0)
-    a5=list(candles["5M"]); a15=list(candles["15M"])
-    c5=a5[-1]; p5=a5[-2]; c15=a15[-1]
-    sh5=_bar_shape(c5); sh15=_bar_shape(c15)
+    A5=max(atr_tf('5M',24),1.0); A15=max(atr_tf('15M',24),1.0)
+    a5=list(candles['5M']); c5=a5[-1]; sh5=_bar_shape(c5)
+    a15=list(candles['15M']); c15=a15[-1]; sh15=_bar_shape(c15)
     w10,w30=flow(10000),flow(30000); inten=flow_intensity(); oi60=oi_delta()
-    t5,t15,t1,t4=(trend_bias_tf(tf) for tf in ("5M","15M","1H","4H"))
-    bias=market_bias_snapshot(); overall=str(bias.get("overall") or "MIXED")
-    b5=int(now//(5*60*1000)); b15=int(now//(15*60*1000))
+    d10=float(w10['ratio']); d30=float(w30['ratio'])
+    prev10=float(setup_flow_prev.get('d10') or 0.0)
+    flow_accel=d10-prev10
+    bias=market_bias_snapshot(); overall=str(bias.get('overall') or 'MIXED')
+    t5,t15,t1,t4=(trend_bias_tf(x) for x in ('5M','15M','1H','4H'))
+    b5=int(now//300000); b15=int(now//900000)
+    items=[]
 
-    # ---- SETUP 1: TREND PULLBACK -------------------------------------------------
-    refs=[("SMA20",sma_tf("5M",20)),("SMA60",sma_tf("5M",60)),("VWAP",vwap_tf("5M",240))]
+    # Update the comparison sample only every ~5s so acceleration is not packet noise.
+    if now-int(setup_flow_prev.get('ts') or 0)>=5000:
+        setup_flow_prev={'ts':now,'d10':d10,'d30':d30}
+
+    def micro_break(side):
+        a=[x for x in candles.get('1M',[]) if x.get('confirm')=='1']
+        if len(a)<4:return False
+        z=a[-4:-1]
+        return p>max(float(x['high']) for x in z) if side=='LONG' else p<min(float(x['low']) for x in z)
+
+    def flow_timing(side, loose=False):
+        if side=='LONG':
+            base=(d10>=(-.005 if loose else .02) and d10>=d30-.04)
+            turn=(flow_accel>=.035 or d10>=.09 or (d30<-.06 and d10>d30+.08))
+        else:
+            base=(d10<=(.005 if loose else -.02) and d10<=d30+.04)
+            turn=(flow_accel<=-.035 or d10<=-.09 or (d30>.06 and d10<d30-.08))
+        return base and turn
+
+    def put(setup,side,stage,score,reasons,level=None,expires=None):
+        item={'setup':setup,'side':side,'stage':stage,'score':round(max(0,min(100,float(score))),1),
+              'reasons':list(reasons),'level':level,'expires_ts':expires}
+        items.append(item)
+        return item
+
+    def arm_key(setup,side): return f'{setup}_{side}'
+
+    def set_arm(setup,side,level,extreme,ttl_ms,meta=None):
+        k=arm_key(setup,side); old=setup_arms.get(k)
+        # Keep an existing arm unless the level materially changed or it expired.
+        if old and now<int(old.get('expires_ts') or 0) and abs(float(old.get('level') or level)-level)<=.18*A5:
+            if side=='LONG': old['extreme']=min(float(old.get('extreme') or extreme),float(extreme))
+            else: old['extreme']=max(float(old.get('extreme') or extreme),float(extreme))
+            old['meta']={**(old.get('meta') or {}),**(meta or {})}
+            return old
+        setup_arms[k]={'ts':now,'level':float(level),'extreme':float(extreme),'expires_ts':now+ttl_ms,
+                       'fired':False,'meta':meta or {}}
+        return setup_arms[k]
+
+    def valid_arm(setup,side):
+        a=setup_arms.get(arm_key(setup,side))
+        if a and now>=int(a.get('expires_ts') or 0):
+            setup_arms[arm_key(setup,side)]=None; return None
+        return a
+
+    def clear_arm(setup,side): setup_arms[arm_key(setup,side)]=None
+
+    def emit(setup,side,score,reasons,bucket,level=None):
+        key=f'SETUP_{setup}_{side}'
+        if stage_last_bucket.get(key)==bucket:return False
+        _save_stage_signal(f'{setup} {"L" if side=="LONG" else "S"}',side,min(100,max(0,score)),'5M',A5,' | '.join(reasons),False)
+        stage_last_bucket[key]=bucket
+        a=setup_arms.get(arm_key(setup,side))
+        if a:
+            a['fired']=True; a['fired_ts']=now; a['trigger_score']=float(score); a['trigger_reasons']=list(reasons)
+        put(setup,side,'TRIGGER',score,reasons,level,a.get('expires_ts') if a else None)
+        return True
+
+    # ------------------------------------------------------------------
+    # 1) PULLBACK: higher-TF trend -> approach MA/VWAP -> probe/reclaim -> micro break + flow.
+    refs=[('SMA20',sma_tf('5M',20)),('SMA60',sma_tf('5M',60)),('VWAP',vwap_tf('5M',240))]
     refs=[(n,float(v)) for n,v in refs if v]
-    for side in ("LONG","SHORT"):
-        wanted=1 if side=="LONG" else -1
-        # Direction is decided by slow structure, not micro flow.
-        slow_ok=(t1==wanted and t4!=-wanted and t15!=-wanted)
-        if not slow_ok or not refs: continue
-        # Pick a reference that the current/previous 5M candles actually tested.
-        candidates=[]
-        for name,ref in refs:
-            if side=="LONG":
-                touched=min(float(c5["low"]),float(p5["low"]))<=ref+.16*A5 and p>=ref-.10*A5
-                had_extension=max(float(x["close"]) for x in a5[-10:-2])>=ref+.30*A5
+    for side in ('LONG','SHORT'):
+        wanted=1 if side=='LONG' else -1
+        slow_votes=sum(x==wanted for x in (t15,t1,t4)); opp_votes=sum(x==-wanted for x in (t15,t1,t4))
+        hard_conflict=(t1==-wanted and t4==-wanted)
+        if not refs or slow_votes<2 or hard_conflict:
+            clear_arm('PULLBACK',side); continue
+        ranked=sorted(refs,key=lambda z:abs(p-z[1]))
+        near_name,ref=ranked[0]; dist=abs(p-ref)/A5
+        confluence=sum(abs(ref-v)<=.22*A5 for _,v in refs)
+        approaching=(p>=ref-.12*A5 and p<=ref+.72*A5) if side=='LONG' else (p<=ref+.12*A5 and p>=ref-.72*A5)
+        touched=(float(c5['low'])<=ref+.16*A5 and p>=ref-.20*A5) if side=='LONG' else (float(c5['high'])>=ref-.16*A5 and p<=ref+.20*A5)
+        context_score=28+slow_votes*11+(6 if overall.endswith('LONG' if side=='LONG' else 'SHORT') else 0)+(4*max(0,confluence-1))
+        if approaching and dist<=.72:
+            put('PULLBACK',side,'PREP',context_score+max(0,16-dist*20),[f'HTF_ALIGN={slow_votes}',f'APPROACH_{near_name}',f'CONFLUENCE={confluence}'],ref)
+        if touched:
+            arm=set_arm('PULLBACK',side,ref,float(c5['low'] if side=='LONG' else c5['high']),22*60*1000,
+                        {'ref':near_name,'slow_votes':slow_votes,'confluence':confluence})
+        else: arm=valid_arm('PULLBACK',side)
+        if not arm: continue
+        if arm.get('fired'):
+            if now-int(arm.get('fired_ts') or now)<=120000:
+                put('PULLBACK',side,'TRIGGER',arm.get('trigger_score',90),arm.get('trigger_reasons') or ['TRIGGERED'],arm.get('level'),arm.get('expires_ts'))
+            continue
+        ref=float(arm['level'])
+        # If the pullback slices too deeply through the location, wait for a fresh setup.
+        invalid=(p<ref-.48*A5) if side=='LONG' else (p>ref+.48*A5)
+        if invalid: clear_arm('PULLBACK',side); continue
+        response=(p>=ref+.025*A5 and sh5['close_pos']>=.54) if side=='LONG' else (p<=ref-.025*A5 and sh5['close_pos']<=.46)
+        candle_ok=(float(c5['close'])>=float(c5['open'])) if side=='LONG' else (float(c5['close'])<=float(c5['open']))
+        micro=micro_break(side); ft=flow_timing(side,loose=True)
+        not_chasing=(p-ref<=.52*A5) if side=='LONG' else (ref-p<=.52*A5)
+        score=context_score+18+ (14 if response else 0)+(10 if micro else 0)+(11 if ft else 0)+(5 if candle_ok else 0)+(4 if inten>=.9 else 0)
+        put('PULLBACK',side,'ARMED',score,[f'{arm.get("meta",{}).get("ref",near_name)}_TOUCH','WAIT_RECLAIM','WAIT_MICRO_FLOW'],ref,arm['expires_ts'])
+        if response and candle_ok and micro and ft and not_chasing and score>=80 and not arm.get('fired'):
+            emit('PULLBACK',side,score,[f'HTF_ALIGN={slow_votes}',f'{arm.get("meta",{}).get("ref",near_name)}_RECLAIM','1M_STRUCTURE','FLOW_TURN'],b5,ref)
+
+    # ------------------------------------------------------------------
+    # 2) REVERSAL: approach 15M liquidity -> sweep/absorption -> failed auction -> 5M/1M turn.
+    H15,L15=liquidity_tf('15M',100,30)
+    if H15 is not None and L15 is not None:
+        for side in ('LONG','SHORT'):
+            wanted=1 if side=='LONG' else -1; level=float(L15 if side=='LONG' else H15)
+            loc_dist=((p-level)/A15) if side=='LONG' else ((level-p)/A15)
+            near=(-.20<=loc_dist<=.42)
+            if near:
+                put('REVERSAL',side,'PREP',52+max(0,18-abs(loc_dist)*28),['15M_LIQ_APPROACH',f'DIST={loc_dist:.2f}ATR'],level)
+            if side=='SHORT':
+                swept=float(c15['high'])>level+.015*A15
+                wick=sh15['upper']>=max(sh15['body'],.18*sh15['rng'])
+                aggression=d30>.06
+                failed=p<level-.015*A15
+                reject5=sh5['close_pos']<.48 and float(c5['close'])<=float(c5['open'])
             else:
-                touched=max(float(c5["high"]),float(p5["high"]))>=ref-.16*A5 and p<=ref+.10*A5
-                had_extension=min(float(x["close"]) for x in a5[-10:-2])<=ref-.30*A5
-            if touched and had_extension:candidates.append((name,ref,abs(p-ref)/A5))
-        if not candidates:continue
-        name,ref,_=min(candidates,key=lambda z:z[2])
-        if side=="LONG":
-            reclaim=float(c5["close"])>=ref+.02*A5 and sh5["close_pos"]>=.55 and float(c5["close"])>=float(p5["close"])
-            flow_ok=w10["ratio"]>=-.03 and w10["ratio"]>=w30["ratio"]-.05
-            book_ok=book_imb>=-.35
-        else:
-            reclaim=float(c5["close"])<=ref-.02*A5 and sh5["close_pos"]<=.45 and float(c5["close"])<=float(p5["close"])
-            flow_ok=w10["ratio"]<=.03 and w10["ratio"]<=w30["ratio"]+.05
-            book_ok=book_imb<=.35
-        if reclaim and flow_ok and book_ok and inten>=.65:
-            score=72+(8 if t4==wanted else 0)+(6 if t15==wanted else 0)+(5 if t5==wanted else 0)+(5 if inten>=1 else 0)+(4 if abs(w10["ratio"])>=.05 else 0)
-            score=min(score,100); key="PULLBACK_"+side
-            # Max one pullback signal per direction every two native 5M bars.
-            if b5-setup_last_bucket.get(key,-99)>=2:
-                reason=f"SLOW_ALIGN|{name}_PULLBACK|PRICE_RECLAIM|FLOW_TIMING|BIAS:{overall}"
-                _save_stage_signal("PULLBACK L" if side=="LONG" else "PULLBACK S",side,score,"5M",A5,reason,False)
-                setup_last_bucket[key]=b5
+                swept=float(c15['low'])<level-.015*A15
+                wick=sh15['lower']>=max(sh15['body'],.18*sh15['rng'])
+                aggression=d30<-.06
+                failed=p>level+.015*A15
+                reject5=sh5['close_pos']>.52 and float(c5['close'])>=float(c5['open'])
+            absorption=near and wick and aggression
+            if swept or absorption:
+                ext=float(c15['low'] if side=='LONG' else c15['high'])
+                arm=set_arm('REVERSAL',side,level,ext,50*60*1000,{'swept':swept,'absorption':absorption})
+            else: arm=valid_arm('REVERSAL',side)
+            if not arm: continue
+            if arm.get('fired'):
+                if now-int(arm.get('fired_ts') or now)<=120000:
+                    put('REVERSAL',side,'TRIGGER',arm.get('trigger_score',90),arm.get('trigger_reasons') or ['TRIGGERED'],arm.get('level'),arm.get('expires_ts'))
+                continue
+            level=float(arm['level'])
+            # A true reversal must get back inside liquidity; if auction accepts far beyond, invalidate.
+            accepted=(p<level-.55*A15) if side=='LONG' else (p>level+.55*A15)
+            if accepted: clear_arm('REVERSAL',side); continue
+            micro=micro_break(side); ft=flow_timing(side,loose=True)
+            fade=(d10>d30+.06) if side=='LONG' else (d10<d30-.06)
+            ctx_align=sum(x==wanted for x in (t1,t4))
+            score=46+(16 if arm.get('meta',{}).get('swept') else 0)+(12 if arm.get('meta',{}).get('absorption') else 0)+(12 if failed else 0)+(8 if reject5 else 0)+(8 if micro else 0)+(8 if (ft or fade) else 0)+(4 if oi60>.003 else 0)+(4*ctx_align)
+            put('REVERSAL',side,'ARMED',score,['LIQ_TOUCHED','WAIT_FAILED_AUCTION','WAIT_PRICE_FLOW_TURN'],level,arm['expires_ts'])
+            strong_price=failed and reject5 and micro
+            timing=(ft or (fade and ((d10>=-.01) if side=='LONG' else (d10<=.01))))
+            if strong_price and timing and score>=82 and not arm.get('fired'):
+                reasons=['15M_LIQ','SWEEP' if arm.get('meta',{}).get('swept') else 'ABSORB','FAILED_AUCTION','5M_REJECT','1M_STRUCTURE','FLOW_FADE']
+                emit('REVERSAL',side,score,reasons,b15,level)
 
-    # ---- SETUP 2: LIQUIDITY REVERSAL --------------------------------------------
-    H15,L15=liquidity_tf("15M",100,30)
-    if H15 is not None:
-        for side in ("SHORT","LONG"):
-            wanted=-1 if side=="SHORT" else 1
-            if side=="SHORT":
-                near=float(c15["high"])>=H15-.12*A15 or p>=H15-.10*A15
-                sweep=float(c15["high"])>H15 and float(c15["close"])<H15+.03*A15
-                absorb=w30["ratio"]>.08 and sh15["upper"]>=max(sh15["body"],.20*sh15["rng"]) and sh15["close_pos"]<.68
-                price_fail=float(c5["close"])<float(c5["open"]) and float(c5["close"])<float(p5["close"]) and sh5["close_pos"]<.48
-                flow_fade=(w30["ratio"]>.06 and w10["ratio"]<=w30["ratio"]-.08) or w10["ratio"]<=-.02
-            else:
-                near=float(c15["low"])<=L15+.12*A15 or p<=L15+.10*A15
-                sweep=float(c15["low"])<L15 and float(c15["close"])>L15-.03*A15
-                absorb=w30["ratio"]<-.08 and sh15["lower"]>=max(sh15["body"],.20*sh15["rng"]) and sh15["close_pos"]>.32
-                price_fail=float(c5["close"])>float(c5["open"]) and float(c5["close"])>float(p5["close"]) and sh5["close_pos"]>.52
-                flow_fade=(w30["ratio"]<-.06 and w10["ratio"]>=w30["ratio"]+.08) or w10["ratio"]>=.02
-            # If both 1H and 4H still oppose the reversal, demand both sweep + absorption.
-            strong_conflict=(t1==-wanted and t4==-wanted)
-            auction_ok=(sweep and absorb) if strong_conflict else (sweep or absorb)
-            if near and auction_ok and price_fail and flow_fade:
-                score=78+(8 if sweep else 0)+(7 if absorb else 0)+(5 if t15==wanted else 0)+(4 if oi60>.004 else 0)+(4 if inten>=1 else 0)
-                score=min(score,100); key="REVERSAL_"+side
-                if setup_last_bucket.get(key)!=b15:
-                    reason=("15M_LIQ|"+("SWEEP|" if sweep else "")+("ABSORB|" if absorb else "")+"5M_FAILURE|FLOW_FADE"+("|COUNTER_STRONG" if strong_conflict else ""))
-                    _save_stage_signal("REVERSAL S" if side=="SHORT" else "REVERSAL L",side,score,"5M",A5,reason,False)
-                    setup_last_bucket[key]=b15
+    # ------------------------------------------------------------------
+    # 3) RETEST: warn near range edge -> arm only after confirmed displacement break -> first hold/reject.
+    confirmed5=[x for x in a5 if x.get('confirm')=='1']
+    if len(confirmed5)>=24:
+        base=confirmed5[-21:]
+        hi=max(float(x['high']) for x in base[:-1]); lo=min(float(x['low']) for x in base[:-1])
+        width=(hi-lo)/A5
+        for side,level in (('LONG',hi),('SHORT',lo)):
+            wanted=1 if side=='LONG' else -1
+            slow_ok=(t15==wanted or t1==wanted) and not (t15==-wanted and t1==-wanted)
+            dist=((level-p)/A5) if side=='LONG' else ((p-level)/A5)
+            compression=width<=4.2
+            if slow_ok and compression and -.12<=dist<=.38:
+                put('RETEST',side,'PREP',54+(10 if t15==wanted else 0)+(8 if t1==wanted else 0)+(6 if width<=3.0 else 0),['RANGE_EDGE','COMPRESSION','WAIT_BREAK'],level)
 
-    # ---- SETUP 3: BREAKOUT -> FIRST RETEST ---------------------------------------
-    # Arm only on a genuine range break: strong close + expansion + volume.
-    prev12=a5[-13:-1]; prev20=a5[-21:-1]
-    if len(prev12)>=10 and len(prev20)>=15:
-        hi=max(float(x["high"]) for x in prev12); lo=min(float(x["low"]) for x in prev12)
-        vols=[float(x.get("volume",0) or 0) for x in prev20 if float(x.get("volume",0) or 0)>0]
-        medv=median(vols) if vols else 0; vol=float(c5.get("volume",0) or 0)
-        body_frac=sh5["body"]/max(sh5["rng"],1e-9)
-        if float(c5["close"])>hi+.08*A5 and sh5["close_pos"]>.68 and body_frac>.48 and (medv<=0 or vol>=1.15*medv) and t15!=-1:
-            if setup_last_bucket.get("BREAKOUT_LONG")!=b5:
-                breakout_arms["LONG"]={"level":hi,"ts":now,"bucket":b5,"atr":A5,"break_px":float(c5["close"])}
-                setup_last_bucket["BREAKOUT_LONG"]=b5
-        if float(c5["close"])<lo-.08*A5 and sh5["close_pos"]<.32 and body_frac>.48 and (medv<=0 or vol>=1.15*medv) and t15!=1:
-            if setup_last_bucket.get("BREAKOUT_SHORT")!=b5:
-                breakout_arms["SHORT"]={"level":lo,"ts":now,"bucket":b5,"atr":A5,"break_px":float(c5["close"])}
-                setup_last_bucket["BREAKOUT_SHORT"]=b5
+        # Scan the last 4 confirmed bars so a restart shortly after the break can still recover the arm.
+        for idx in range(max(20,len(confirmed5)-4),len(confirmed5)):
+            br=confirmed5[idx]; prior=confirmed5[max(0,idx-20):idx]
+            if len(prior)<12: continue
+            hi0=max(float(x['high']) for x in prior); lo0=min(float(x['low']) for x in prior)
+            sh=_bar_shape(br); body_ratio=sh['body']/max(sh['rng'],1e-9)
+            if float(br['close'])>hi0+.055*A5 and body_ratio>=.48 and sh['close_pos']>=.66:
+                set_arm('RETEST','LONG',hi0,float(br['low']),32*60*1000,{'break_ts':br['ts'],'break_px':br['close']})
+            if float(br['close'])<lo0-.055*A5 and body_ratio>=.48 and sh['close_pos']<=.34:
+                set_arm('RETEST','SHORT',lo0,float(br['high']),32*60*1000,{'break_ts':br['ts'],'break_px':br['close']})
 
-    for side in ("LONG","SHORT"):
-        arm=breakout_arms.get(side)
-        if not arm:continue
-        age=now-int(arm["ts"]); level=float(arm["level"]); AA=max(float(arm.get("atr") or A5),1.0)
-        if age>45*60*1000:
-            breakout_arms[side]=None; continue
-        # Do not count the breakout bar itself as the retest.
-        if b5<=int(arm.get("bucket",b5)):continue
-        if side=="LONG":
-            invalid=float(c5["close"])<level-.25*AA
-            tested=float(c5["low"])<=level+.18*AA
-            held=float(c5["close"])>=level+.03*AA and sh5["close_pos"]>.52
-            flow_ok=w10["ratio"]>=-.04 and w30["ratio"]>=-.10
-        else:
-            invalid=float(c5["close"])>level+.25*AA
-            tested=float(c5["high"])>=level-.18*AA
-            held=float(c5["close"])<=level-.03*AA and sh5["close_pos"]<.48
-            flow_ok=w10["ratio"]<=.04 and w30["ratio"]<=.10
-        if invalid:
-            breakout_arms[side]=None; continue
-        if tested and held and flow_ok:
-            key="RETEST_"+side
-            if setup_last_bucket.get(key)!=b5:
-                score=82+(6 if t15==(1 if side=="LONG" else -1) else 0)+(5 if inten>=1 else 0)+(4 if abs(w10["ratio"])>=.04 else 0)
-                reason=f"BREAKOUT_RETEST|LEVEL:{level:.1f}|HOLD|FLOW_TIMING"
-                _save_stage_signal("RETEST L" if side=="LONG" else "RETEST S",side,min(score,100),"5M",A5,reason,False)
-                setup_last_bucket[key]=b5
-            breakout_arms[side]=None
+        for side in ('LONG','SHORT'):
+            arm=valid_arm('RETEST',side)
+            if not arm: continue
+            if arm.get('fired'):
+                if now-int(arm.get('fired_ts') or now)<=120000:
+                    put('RETEST',side,'TRIGGER',arm.get('trigger_score',90),arm.get('trigger_reasons') or ['TRIGGERED'],arm.get('level'),arm.get('expires_ts'))
+                continue
+            wanted=1 if side=='LONG' else -1; level=float(arm['level'])
+            # Do not call the breakout itself a retest. Wait at least ~1 minute after break close.
+            age=now-int(arm.get('meta',{}).get('break_ts') or arm['ts'])
+            if age<60*1000: continue
+            deep=(p<level-.28*A5) if side=='LONG' else (p>level+.28*A5)
+            if deep: clear_arm('RETEST',side); continue
+            in_zone=(level-.12*A5<=p<=level+.25*A5) if side=='LONG' else (level-.25*A5<=p<=level+.12*A5)
+            touch=(float(c5['low'])<=level+.14*A5) if side=='LONG' else (float(c5['high'])>=level-.14*A5)
+            hold=(p>=level and sh5['close_pos']>=.54) if side=='LONG' else (p<=level and sh5['close_pos']<=.46)
+            micro=micro_break(side); ft=flow_timing(side,loose=True)
+            slow_ok=(t15==wanted or t1==wanted) and not (t15==-wanted and t1==-wanted)
+            score=48+(12 if slow_ok else 0)+(16 if in_zone and touch else 0)+(12 if hold else 0)+(8 if micro else 0)+(8 if ft else 0)+(4 if inten>=.9 else 0)
+            put('RETEST',side,'ARMED',score,['BREAK_CONFIRMED','WAIT_LEVEL_RETEST','WAIT_HOLD_FLOW'],level,arm['expires_ts'])
+            if slow_ok and in_zone and touch and hold and micro and ft and score>=82:
+                emit('RETEST',side,score,['STRUCT_BREAK','FIRST_RETEST','LEVEL_HOLD','1M_STRUCTURE','FLOW_RESUME'],b5,level)
 
+    # Keep one record per setup/side, preferring the most advanced state.
+    rank={'IDLE':0,'PREP':1,'ARMED':2,'TRIGGER':3}
+    dedup={}
+    for x in items:
+        k=(x['setup'],x['side']); old=dedup.get(k)
+        if old is None or (rank.get(x['stage'],0),x['score'])>(rank.get(old['stage'],0),old['score']):dedup[k]=x
+    out=list(dedup.values())
+    out.sort(key=lambda x:(rank.get(x['stage'],0),x['score']),reverse=True)
+    setup_watch={'updated_ts':now,'best':out[0] if out else None,'items':out,
+                 'flow':{'d10':round(d10,4),'d30':round(d30,4),'accel':round(flow_accel,4),'intensity':round(float(inten),2)}}
 
 def evaluate():
-    # v6.56: only the three explicit setup families create new research signals.
-    # Legacy functions stay in the file for historical compatibility but are no longer called.
+    # v6.57: old WATCH/EARLY/TURN pipeline is retained in source for audit/history,
+    # but new live 5M signal generation is the three-setup engine only.
     evaluate_setup_signals()
 
 def evaluate_scalp():
@@ -1257,7 +1318,7 @@ async def public_loop():
                             print("position_manager",repr(e))
                         last_heavy_ms["manager"]=now_ms
                     if now_ms-last_heavy_ms["evaluate"]>=350:
-                        evaluate()
+                        evaluate();evaluate_macro()
                         last_heavy_ms["evaluate"]=now_ms
                     if now_ms-last_heavy_ms["outcomes"]>=1000:
                         update_outcomes(); update_signal_research(); last_heavy_ms["outcomes"]=now_ms
@@ -1300,7 +1361,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.56 THREE SETUP RADAR","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.57 THREE SETUP LEAD KST","ok":True,"status":status}
 
 def market_bias_snapshot():
     vals={tf:trend_bias_tf(tf) for tf in ("5M","15M","1H","4H")}
@@ -1393,7 +1454,7 @@ def live():
     a,b=flow(10000),flow(30000);H,L=liquidity15()
     return {"price":last_price,"d10":a["ratio"],"d30":b["ratio"],"oi":current_oi,"oi60":oi_delta(),
             "flow":flow_intensity(),"book":book_imb,"liqH":H,"liqL":L,"armed":trap_arm,"status":status,
-            "bias":market_bias_snapshot(),"radar":turn_radar_snapshot(),"daily":daily_move_snapshot()}
+            "bias":market_bias_snapshot(),"radar":turn_radar_snapshot(),"setup_watch":setup_watch,"daily":daily_move_snapshot()}
 
 @app.get("/api/signals")
 def signals(limit:int=100, engine:str="ALL"):
