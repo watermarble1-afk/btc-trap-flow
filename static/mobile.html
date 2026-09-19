@@ -20,6 +20,7 @@ h1{font-size:20px;margin:0}.sub{font-size:11px;color:var(--muted);margin-top:3px
 .signalAnchorLayer{position:absolute;inset:0;z-index:30;pointer-events:none;overflow:hidden}.sigAnchorLine{position:absolute;width:0;border-left:1px dashed currentColor;opacity:.9}.sigAnchorDot{position:absolute;width:7px;height:7px;border:2px solid currentColor;border-radius:50%;background:#0b111b;transform:translate(-50%,-50%)}.sigAnchorBadge{position:absolute;transform:translate(-50%,-50%);font-size:9px;font-weight:900;line-height:1;white-space:nowrap;padding:4px 6px;border:1px solid currentColor;border-radius:6px;background:rgba(7,10,16,.93);box-shadow:0 1px 6px #000a}.legend{font-size:10px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap;margin-top:6px}.green{color:var(--g)}.red{color:var(--r)}.yellow{color:var(--y)}.blue{color:var(--b)}.purple{color:var(--c)}
 .box{border:1px solid var(--line);border-radius:9px;padding:9px;margin-bottom:8px;background:#0b111b}.box h3{font-size:13px;margin:0 0 7px}.row{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid #192130;font-size:11px}.row:last-child{border:0}.reason{font-size:11px;color:#b4bfd0;line-height:1.65}
 .flowbar{height:8px;border-radius:99px;background:#161e2b;overflow:hidden;margin-top:5px;position:relative}.flowfill{position:absolute;top:0;height:100%;width:0;left:50%;background:#718096}.tiny{font-size:9px;color:#778398}
+.pressureDeck{margin-top:10px;border:1px solid #263249;border-radius:11px;background:#0b111b;padding:10px}.pressureHead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:8px}.pressureTitle{font-size:13px;font-weight:900}.pressureSummary{font-size:10px;color:#9eabc0;text-align:right;line-height:1.5}.pressureGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.pressureTf{border:1px solid #202b3d;border-radius:9px;padding:9px;background:#0d1521;min-width:0}.pressureTfHead{display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:900}.pressureNums{display:flex;justify-content:space-between;margin-top:7px;font-size:12px;font-weight:900}.pressureTrack{height:7px;border-radius:99px;overflow:hidden;background:#1a2230;margin:7px 0;display:flex}.pressureBuy{height:100%;background:#2fd58b}.pressureSell{height:100%;background:#ff5c70}.pressureMeta{display:grid;grid-template-columns:1fr 1fr;gap:3px;font-size:9px;color:#8794a8}.pressureWarm{color:#f1c75b}.pressureTurn{margin-top:8px;padding-top:7px;border-top:1px solid #1e2838;font-size:10px;color:#aeb9c9}.microTag{display:inline-block;margin-left:6px;padding:2px 5px;border:1px solid #344159;border-radius:99px;font-size:8px;color:#8ea0b8}@media(max-width:800px){.pressureGrid{grid-template-columns:repeat(2,1fr)}.pressureSummary{text-align:left}.pressureHead{display:block}}
 .mtf{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}.mtf>div{text-align:center;border:1px solid var(--line);border-radius:7px;padding:6px;font-size:10px}.mtf b{display:block;margin-top:2px}
 .signal{font-size:17px;font-weight:900}.warn{font-size:10px;line-height:1.55;color:#d4c18f;background:#17130c;border-radius:8px;padding:8px;margin-top:8px}
 .dot{font-size:10px}.history{max-height:165px;overflow:auto}.histrow{display:grid;grid-template-columns:75px 1fr 60px;gap:6px;font-size:10px;padding:5px 0;border-bottom:1px solid #192130}
@@ -64,8 +65,8 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.61 · RESEARCH FOUNDATION KST</h1>
-    <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 약한 미시 신호는 저장 중단 · PREP → ARMED → TRIGGER 선행 감지 · 차트는 PULLBACK · REVERSAL · RETEST만 표시 · 큰 방향 BIAS 제공</div>
+    <h1>BTC OKX RADAR v6.63 · MTF PRESSURE KST</h1>
+    <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 약한 미시 신호는 저장 중단 · PREP → ARMED → TRIGGER 선행 감지 · 1M/3M/5M/15M 압력 + MICRO 타점 · 큰 방향 BIAS 제공</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
 </div>
@@ -75,8 +76,8 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
   <div class="card"><div class="lbl">MARKET BIAS</div><div class="val" id="topBias">—</div><div class="tiny" id="topBiasDetail">4H · 1H · 15M · 5M</div></div>
   <div class="card"><div class="lbl">TURN ZONE</div><div class="val" id="topZone">—</div><div class="tiny" id="topZoneDetail">15M liquidity / ATR</div></div>
   <div class="card"><div class="lbl">STRUCTURE</div><div class="val" id="topStructure">—</div><div class="tiny" id="topStructureDetail">5M / 15M</div></div>
-  <div class="card"><div class="lbl">REVERSAL PRESSURE</div><div class="val" id="topPressure">—</div><div class="tiny" id="topPressureDetail">10s·30s / OI / Book</div></div>
-  <div class="card"><div class="lbl">SETUP RADAR</div><div class="val" id="topRadar">—</div><div class="tiny" id="topRadarDetail">PREP → ARMED → TRIGGER</div></div>
+  <div class="card"><div class="lbl">MTF FLOW PRESSURE</div><div class="val" id="topPressure">—</div><div class="tiny" id="topPressureDetail">1M · 3M · 5M · 15M</div></div>
+  <div class="card"><div class="lbl">EXECUTION</div><div class="val" id="topRadar">WAIT</div><div class="tiny" id="topRadarDetail">Decision Layer · RAW와 분리</div></div>
   <div class="card"><div class="lbl">포지션 누적 성과</div><div class="val" id="fwd">0W / 0L</div></div>
 </div>
 
@@ -96,18 +97,23 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
  <div style="font-size:9px;color:#7f8ba0;margin-top:7px">예: 5·20·60·120·240 또는 직접 숫자 입력 · 설정은 이 브라우저에 저장</div>
 </div></div><div id="enginePanel" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:7px;border:1px solid #263247;border-radius:8px;background:#0b111b">
 <b style="font-size:10px">SIGNAL ENGINE</b>
-<button class="btn engBtn" data-eng="NONE">신호 제거</button><button class="btn engBtn" data-eng="SCALP">1/3M 과거</button><button class="btn engBtn" data-eng="5M">3-SETUP LIVE</button><button class="btn engBtn" data-eng="15M">15M 과거</button><button class="btn engBtn" data-eng="1H">1H</button><button class="btn engBtn" data-eng="4H">4H</button><button class="btn engBtn" data-eng="ALL">ALL</button><label style="display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #3d2a55;border-radius:7px;background:#171022;font-size:10px;color:#d8b4ff;cursor:pointer"><input type="checkbox" id="vwapSigChk" checked> VWAP 신호</label>
+<button class="btn engBtn" data-eng="NONE">신호 제거</button><button class="btn engBtn" data-eng="SCALP">1/3M 과거</button><button class="btn engBtn" data-eng="5M">3-SETUP LIVE</button><button class="btn engBtn" data-eng="15M">15M 과거</button><button class="btn engBtn" data-eng="1H">1H</button><button class="btn engBtn" data-eng="4H">4H</button><button class="btn engBtn" data-eng="ALL">ALL</button><label style="display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #3d2a55;border-radius:7px;background:#171022;font-size:10px;color:#d8b4ff;cursor:pointer"><input type="checkbox" id="vwapSigChk" checked> VWAP 신호</label><label style="display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #24445b;border-radius:7px;background:#0d1822;font-size:10px;color:#8fc9ff;cursor:pointer"><input type="checkbox" id="rawResearchChk"> RAW 연구신호 보기</label>
 <span id="scalpStat" style="font-size:10px;color:#8d99ad">1/3M —</span><span id="m5Stat" style="font-size:10px;color:#8d99ad">5M —</span><span id="m15Stat" style="font-size:10px;color:#8d99ad">15M —</span><span id="h1Stat" style="font-size:10px;color:#8d99ad">1H —</span><span id="h4Stat" style="font-size:10px;color:#8d99ad">4H —</span>
-<div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">현재 신규 3-SETUP은 5M 엔진에서 생성 · 1H/4H는 별도 상위TF 엔진 · 1/3M·15M은 과거 DB 표시용</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
+<div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">기본 차트는 DECISION TRIGGER만 표시 · PB/RV/RT 원신호는 DB에 계속 기록되며 RAW 연구신호 보기에서만 노출</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
 <span style="color:#35d98a">▲ PULLBACK L</span><span style="color:#ff5c70">▼ PULLBACK S</span><span style="color:#00e5ff">◆ REVERSAL L</span><span style="color:#ffd400">◆ REVERSAL S</span><span style="color:#b56cff">● RETEST</span><span style="color:#8d99ad">PREP(낌새) → ARMED(자리) → TRIGGER(타점) · 10s/30s는 마지막 확인만</span>
 
 <span style="color:#27c2a4">● 1H L/S</span><span style="color:#c86cff">● 4H L/S</span><span style="color:#b37cff">● VWAP선</span><span style="color:#d7dee9">● X 종료</span></div>
 </div><div style="font-size:10px;color:#8d99ad;margin:3px 0">TIMEFRAME · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO</div><div class="hoverPctBar" id="hoverPctBar">봉에 마우스를 올리면 해당 봉의 등락률이 표시됩니다.</div><div id="chart"></div>
+  <div class="pressureDeck" id="mtfPressurePanel">
+    <div class="pressureHead"><div><div class="pressureTitle">MTF ORDER FLOW · 매집/체결 압력 <span class="microTag">메인 방향 입력</span></div><div class="tiny">1M이 먼저 움직이고 3M→5M→15M이 따라오는지 추적 · 수치는 확률이 아니라 공격적 체결 비중</div></div><div class="pressureSummary" id="pressureSummary">분봉 체결 데이터 수집 중…</div></div>
+    <div class="pressureGrid" id="pressureGrid"></div>
+    <div class="pressureTurn" id="pressureTurn">FAST 1M+3M — · SLOW 5M+15M — · MICRO 10s/30s는 최종 타점 확인만</div>
+  </div>
   <div class="legend">
     <span><b style="color:#35d7e5">RETEST</b> 청록</span><span><b style="color:#c7d0dd">X</b> 포지션 정리</span><span><b class="purple">VWAP</b> 선택 봉 기준 앵커 VWAP</span>
   </div>
   <div class="warn">
-    1M·3M·5M·15M·1H·4H·1D 차트를 자유롭게 볼 수 있습니다. v6.61 연구 기준판은 3-SETUP 엔진의 조건은 동결하고 PREP/ARMED/TRIGGER와 비교군을 기록합니다. 기존 3-SETUP 엔진이 PREP → ARMED → TRIGGER로 상태를 나눠 선행 징후와 실제 타점을 분리합니다. PULLBACK은 눌림 위치, REVERSAL은 15M 유동성 sweep/실패, RETEST는 확인된 돌파 후 첫 되돌림을 추적합니다. 10s/30s 체결은 방향 결정이 아니라 마지막 타이밍 확인에만 사용합니다.
+    1M·3M·5M·15M·1H·4H·1D 차트를 자유롭게 볼 수 있습니다. v6.63은 1M·3M·5M·15M 체결 압력을 메인 방향 입력으로 사용하고 Decision Layer가 RAW 3-SETUP 충돌·중복을 정리해 실전 화면에는 하나의 실행 상태만 보여줍니다. 기존 3-SETUP 엔진이 PREP → ARMED → TRIGGER로 상태를 나눠 선행 징후와 실제 타점을 분리합니다. PULLBACK은 눌림 위치, REVERSAL은 15M 유동성 sweep/실패, RETEST는 확인된 돌파 후 첫 되돌림을 추적합니다. 10s/30s 체결은 방향 결정에서 제외하고 마지막 MICRO 타이밍 확인에만 사용합니다.
   </div>
 </section>
 
@@ -131,18 +137,28 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
   </div>
 
   <div class="box">
-    <h3>REVERSAL PRESSURE <span class="tiny">체결은 마지막 확인용</span></h3>
+    <h3>MICRO TIMING <span class="tiny">10s/30s는 방향 결정 금지</span></h3>
     <div class="row"><span>10s Delta</span><b id="radD10">—</b></div>
     <div class="row"><span>30s Delta</span><b id="radD30">—</b></div>
     <div class="row"><span>Flow intensity</span><b id="radInt">—</b></div>
     <div class="row"><span>Book</span><b id="radBook">—</b></div>
-    <div class="row"><span>LONG 반전압력</span><b id="flowLong">—</b></div>
-    <div class="row"><span>SHORT 반전압력</span><b id="flowShort">—</b></div>
+    <div class="row"><span>MTF LONG 압력</span><b id="flowLong">—</b></div>
+    <div class="row"><span>MTF SHORT 압력</span><b id="flowShort">—</b></div>
+  </div>
+
+  <div class="box" id="decisionBox">
+    <h3>EXECUTION DECISION <span class="tiny">RAW 신호 충돌 해결 · 확률 아님</span></h3>
+    <div id="decisionState" class="signal yellow">WAIT</div>
+    <div class="row"><span>안정 방향</span><b id="decisionBias">NEUTRAL</b></div>
+    <div class="row"><span>LONG evidence</span><b id="decisionLong">0</b></div>
+    <div class="row"><span>SHORT evidence</span><b id="decisionShort">0</b></div>
+    <div class="row"><span>동의 SETUP</span><b id="decisionAgree">—</b></div>
+    <div class="reason" id="decisionWhy" style="margin-top:7px">RAW 3-SETUP을 하나의 실행 상태로 정리 중…</div>
   </div>
 
   <div class="box">
-    <h3>SETUP RADAR <span class="tiny">낌새 → 대기 → 타점 · 확률 아님</span></h3>
-    <div id="turnRadarState" class="signal yellow">NEUTRAL</div>
+    <h3>RAW SETUP RADAR <span class="tiny">연구용 · PREP → ARMED → TRIGGER</span></h3>
+    <div id="setupRawState" class="signal yellow">SCANNING</div>
     <div class="row"><span>LOCATION</span><b id="radLocation">—</b></div>
     <div class="row"><span>STRUCTURE</span><b id="radStructure">—</b></div>
     <div class="row"><span>MA / VWAP</span><b id="radMa">—</b></div>
@@ -154,7 +170,7 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
   <div class="box">
     <h3>RESEARCH LAB <span class="tiny">조건 동결 · 비교군 기록</span></h3>
     <div id="researchSummary" class="reason">연구 데이터 집계 중…</div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"><a href="/api/research/export" target="_blank" style="color:#8fb5ff;font-size:10px">JSON 전체</a><a href="/api/research/export.csv?kind=signals" style="color:#8fb5ff;font-size:10px">BASE CSV</a><a href="/api/research/export.csv?kind=setup" style="color:#8fb5ff;font-size:10px">SETUP CSV</a><a href="/api/research/export.csv?kind=shadow" style="color:#8fb5ff;font-size:10px">SHADOW CSV</a><a href="/api/research/export.csv?kind=user" style="color:#8fb5ff;font-size:10px">USER CSV</a></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"><a href="/api/research/export" target="_blank" style="color:#8fb5ff;font-size:10px">JSON 전체</a><a href="/api/research/export.csv?kind=signals" style="color:#8fb5ff;font-size:10px">BASE CSV</a><a href="/api/research/export.csv?kind=setup" style="color:#8fb5ff;font-size:10px">SETUP CSV</a><a href="/api/research/export.csv?kind=shadow" style="color:#8fb5ff;font-size:10px">SHADOW CSV</a><a href="/api/research/export.csv?kind=user" style="color:#8fb5ff;font-size:10px">USER CSV</a><a href="/api/research/export.csv?kind=decision" style="color:#8fb5ff;font-size:10px">DECISION CSV</a></div>
   </div>
 
   <div class="box mySidePosition">
@@ -221,6 +237,7 @@ let positionEvents=[];
 let serverLive=null;
 let liveEnginePositions=[];
 let myPosition={side:"FLAT"}, myPositionEvents=[];
+let decisionEvents=[];
 let livePosition={side:'FLAT'};
 
 const $=id=>document.getElementById(id);
@@ -573,26 +590,28 @@ function renderForward(){
   $('fwd').textContent=`${p.wins||0}W / ${p.losses||0}L · ${wr}`;
 }
 function renderHistory(){
-  renderForward();
-  renderTradeLedger();
-  updateDailyMove();
-  // v6.49: do not surface the old micro-noise. Keep DB history intact, but the live panel
-  // focuses on signals with a clear role: strict EARLY watches, confirmed TURNs, and HTF context.
-  const useful=allSaved().filter(x=>{
-    const n=String(x.name||'').toUpperCase(), e=String(x.engine||'');
-    return n.includes('PULLBACK') || n.includes('REVERSAL') || n.includes('RETEST') || n.includes('TURN') || n.includes('ENTRY') || n.includes('EARLY') || e==='1H' || e==='4H';
-  }).sort((a,b)=>Number(b.ts)-Number(a.ts)).slice(0,60);
-  $('history').innerHTML=useful.length?useful.map(x=>{
-    const tm=new Date(Number(x.ts)).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
-    const tf=engLabel(x.engine||'5M'), nm=String(x.name||'SIGNAL'), up=nm.toUpperCase();
-    const isPull=up.includes('PULLBACK'), isRev=up.includes('REVERSAL'), isRet=up.includes('RETEST'), isTurn=up.includes('TURN'), isEntry=up.includes('ENTRY'), isEarly=up.includes('EARLY');
-    const c=isPull?(x.dir==='LONG'?'#35d98a':'#ff5c70'):isRev?(x.dir==='LONG'?'#00e5ff':'#ffd400'):isRet?'#b56cff':isTurn?'#8d99ad':isEntry?'#8d99ad':isEarly?'#8d99ad':engColor(x.engine||'5M',x.dir);
-    const tag=isPull?'PULLBACK':isRev?'REVERSAL':isRet?'RETEST':isTurn?'OLD TURN':isEntry?'OLD ENTRY':isEarly?'OLD WATCH':'HTF';
-    return `<div class="histrow"><span>${tm}</span><b style="color:${c}">[${tf}] ${nm}</b><span class="tiny">${tag} · ${x.score??'—'}</span></div>`;
-  }).join(''):'<div class="tiny">아직 핵심 신호 없음</div>';
+  renderForward();renderTradeLedger();updateDailyMove();
+  const rows=[...(decisionEvents||[])].sort((a,b)=>Number(b.ts)-Number(a.ts)).slice(0,60);
+  $('history').innerHTML=rows.length?rows.map(x=>{
+    const tm=new Date(Number(x.ts)).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}), ev=String(x.event||''), side=String(x.side||'');
+    const c=ev==='INVALIDATE'?'#d7dee9':side==='LONG'?'#35d98a':side==='SHORT'?'#ff5c70':'#f1c75b';
+    const label=ev==='TRIGGER'?`EXEC ${side}`:ev==='BIAS'?`BIAS ${side}`:`X ${side}`;
+    return `<div class="histrow"><span>${tm}</span><b style="color:${c}">${label}</b><span class="tiny">${x.setups||'—'} · E ${Number(x.evidence||0).toFixed(0)}/${Number(x.opposite_evidence||0).toFixed(0)}</span></div>`;
+  }).join(''):'<div class="tiny">v6.62부터 실행결정 기록 시작 · RAW 신호는 연구 DB에 계속 저장</div>';
 }
+
 function signalAnchorRows(){
   const from=cache[cur]?.[0]?.time||0, bucketSec={'1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800,'1MO':2592000}[cur]||300;
+  const raw=!!$('rawResearchChk')?.checked;
+  if(!raw){
+    const out=[];
+    for(const e of (decisionEvents||[])){
+      const ev=String(e.event||'').toUpperCase();if(!['TRIGGER','INVALIDATE'].includes(ev))continue;
+      const rawTs=Math.floor(Number(e.ts||0)/1000);if(!rawTs||rawTs<from)continue;
+      out.push({mode:'DECISION',event:ev,setup:ev==='TRIGGER'?'EXEC':'X',side:String(e.side||'').toUpperCase()==='LONG'?'L':'S',candleTs:Math.floor(rawTs/bucketSec)*bucketSec,rawTs,score:Math.round(Number(e.evidence||0)),name:e.setups||ev,entry:Number(e.price||0)});
+    }
+    return out;
+  }
   const seen=new Set(), out=[];
   for(const s of allSaved()){
     if(!selectedEngines.has(s.engine||'5M'))continue;
@@ -600,10 +619,11 @@ function signalAnchorRows(){
     const n=String(s.name||'').toUpperCase(), setup=n.includes('PULLBACK')?'PB':n.includes('REVERSAL')?'RV':n.includes('RETEST')?'RT':null;if(!setup)continue;
     const side=String(s.dir||s.side||'').toUpperCase()==='LONG'?'L':'S', candleTs=Math.floor(rawTs/bucketSec)*bucketSec;
     const key=`${setup}|${side}|${candleTs}`;if(seen.has(key))continue;seen.add(key);
-    out.push({setup,side,candleTs,rawTs,score:Math.round(Number(s.score||0)),name:s.name||setup,entry:Number(s.entry||0)});
+    out.push({mode:'RAW',setup,side,candleTs,rawTs,score:Math.round(Number(s.score||0)),name:s.name||setup,entry:Number(s.entry||0)});
   }
   return out;
 }
+
 function renderSignalAnchors(){
   const host=$('chart');if(!host||!chart||!candle)return;
   let layer=host.querySelector('.signalAnchorLayer');if(!layer){layer=document.createElement('div');layer.className='signalAnchorLayer';host.appendChild(layer)}
@@ -614,24 +634,34 @@ function renderSignalAnchors(){
     const x=chart.timeScale().timeToCoordinate(a.candleTs);if(x==null)continue;
     const isL=a.side==='L', y=candle.priceToCoordinate(isL?Number(bar.low):Number(bar.high));if(y==null)continue;
     const sk=`${a.candleTs}|${a.side}`, idx=stack[sk]||0;stack[sk]=idx+1;
-    const col=a.setup==='PB'?(isL?'#35d98a':'#ff5c70'):a.setup==='RV'?(isL?'#00e5ff':'#ffd400'):'#b56cff';
+    const col=a.mode==='DECISION'?(a.event==='INVALIDATE'?'#d7dee9':(isL?'#35d98a':'#ff5c70')):a.setup==='PB'?(isL?'#35d98a':'#ff5c70'):a.setup==='RV'?(isL?'#00e5ff':'#ffd400'):'#b56cff';
     const badgeY=Math.max(12,Math.min(host.clientHeight-22,y+(isL?1:-1)*(30+idx*24)));
     const line=document.createElement('div');line.className='sigAnchorLine';line.style.color=col;line.style.left=x+'px';line.style.top=Math.min(y,badgeY)+'px';line.style.height=Math.max(6,Math.abs(badgeY-y))+'px';layer.appendChild(line);
     const dot=document.createElement('div');dot.className='sigAnchorDot';dot.style.color=col;dot.style.left=x+'px';dot.style.top=y+'px';layer.appendChild(dot);
-    const badge=document.createElement('div');badge.className='sigAnchorBadge';badge.style.color=col;badge.style.left=x+'px';badge.style.top=badgeY+'px';badge.textContent=`${isL?'▲':'▼'} ${a.setup} ${a.side} ${a.score}`;
+    const badge=document.createElement('div');badge.className='sigAnchorBadge';badge.style.color=col;badge.style.left=x+'px';badge.style.top=badgeY+'px';badge.textContent=a.mode==='DECISION'?(a.event==='INVALIDATE'?`× ${a.side}`:`${isL?'▲':'▼'} EXEC ${a.side}`):`${isL?'▲':'▼'} ${a.setup} ${a.side} ${a.score}`;
     const tm=new Date(a.rawTs*1000).toLocaleString('ko-KR',{hour12:false});badge.title=`${a.name} · ${tm} · score ${a.score}${a.entry?` · $${fmt(a.entry)}`:''}`;layer.appendChild(badge);
   }
 }
 function renderMarkers(){
   const from=cache[cur]?.[0]?.time||0, marks=[];
-  if(selectedEngines.size===0){try{candle.setMarkers([])}catch(e){};renderSignalAnchors();return}
-  const seen=new Set(), bucketSec={'1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800,'1MO':2592000}[cur]||300;
-  for(const s of allSaved()){
-    if(!selectedEngines.has(s.engine||'5M'))continue;
-    const rawTs=Number(s.time||Math.floor(Number(s.ts||0)/1000));if(!rawTs||rawTs<from)continue;
-    const n=String(s.name||'').toUpperCase(), isPull=n.includes('PULLBACK'),isRev=n.includes('REVERSAL'),isRet=n.includes('RETEST');if(!isPull&&!isRev&&!isRet)continue;
-    const isL=String(s.dir||s.side||'').toUpperCase()==='LONG', candleTs=Math.floor(rawTs/bucketSec)*bucketSec, key=`${isPull?'PB':isRev?'RV':'RT'}|${isL?'L':'S'}|${candleTs}`;if(seen.has(key))continue;seen.add(key);
-    marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:isPull?(isL?'#35d98a':'#ff5c70'):isRev?(isL?'#00e5ff':'#ffd400'):'#b56cff',shape:isPull?(isL?'arrowUp':'arrowDown'):isRev?'diamond':'circle',text:''});
+  const raw=!!$('rawResearchChk')?.checked;
+  const bucketSec={'1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800,'1MO':2592000}[cur]||300;
+  if(raw){
+    const seen=new Set();
+    for(const s of allSaved()){
+      if(!selectedEngines.has(s.engine||'5M'))continue;
+      const rawTs=Number(s.time||Math.floor(Number(s.ts||0)/1000));if(!rawTs||rawTs<from)continue;
+      const n=String(s.name||'').toUpperCase(), isPull=n.includes('PULLBACK'),isRev=n.includes('REVERSAL'),isRet=n.includes('RETEST');if(!isPull&&!isRev&&!isRet)continue;
+      const isL=String(s.dir||s.side||'').toUpperCase()==='LONG', candleTs=Math.floor(rawTs/bucketSec)*bucketSec, key=`${isPull?'PB':isRev?'RV':'RT'}|${isL?'L':'S'}|${candleTs}`;if(seen.has(key))continue;seen.add(key);
+      marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:isPull?(isL?'#35d98a':'#ff5c70'):isRev?(isL?'#00e5ff':'#ffd400'):'#b56cff',shape:isPull?(isL?'arrowUp':'arrowDown'):isRev?'diamond':'circle',text:''});
+    }
+  }else{
+    for(const e of (decisionEvents||[])){
+      const ev=String(e.event||'').toUpperCase();if(!['TRIGGER','INVALIDATE'].includes(ev))continue;
+      const ts=Math.floor(Number(e.ts||0)/1000);if(!ts||ts<from)continue;
+      const isL=String(e.side||'').toUpperCase()==='LONG', candleTs=Math.floor(ts/bucketSec)*bucketSec;
+      marks.push({time:candleTs,position:ev==='INVALIDATE'?(isL?'aboveBar':'belowBar'):(isL?'belowBar':'aboveBar'),color:ev==='INVALIDATE'?'#ffffff':(isL?'#35d98a':'#ff5c70'),shape:ev==='INVALIDATE'?'circle':(isL?'arrowUp':'arrowDown'),text:ev==='INVALIDATE'?'X':''});
+    }
   }
   for(const e of (myPositionEvents||[])){
     const ts=Math.floor(Number(e.ts||0)/1000),ev=String(e.event||'').toUpperCase();if(!ts||ts<from||!['OPEN','EXIT'].includes(ev))continue;
@@ -641,6 +671,7 @@ function renderMarkers(){
   }
   marks.sort((a,b)=>a.time-b.time);try{candle.setMarkers(marks)}catch(e){};requestAnimationFrame(renderSignalAnchors);
 }
+
 function updateDailyMove(){
   try{
     const sd=serverLive?.daily||null;
@@ -741,7 +772,7 @@ function renderMyTradeLedger(){
 let setupWatchBusy=false;
 async function syncSetupWatch(){
   if(setupWatchBusy)return;setupWatchBusy=true;
-  try{const sw=await fetch(SERVER_API+'/api/setup-watch',{cache:'no-store'}).then(r=>r.json());if(sw){if(!serverLive)serverLive={};serverLive.setup_watch=sw;renderSetupWatch(sw)}}catch(e){}finally{setupWatchBusy=false}
+  try{const sw=await fetch(SERVER_API+'/api/setup-watch',{cache:'no-store'}).then(r=>r.json());if(sw){if(!serverLive)serverLive={};serverLive.setup_watch=sw;if(sw.pressure)serverLive.pressure=sw.pressure;renderSetupWatch(sw);renderPressure(sw.pressure||serverLive.pressure);renderDecision(sw.decision||serverLive.decision)}}catch(e){}finally{setupWatchBusy=false}
 }
 async function syncResearchSummary(){
   const el=$('researchSummary');if(!el)return;
@@ -749,7 +780,7 @@ async function syncResearchSummary(){
     const base=(x.base||[]).map(z=>`${z.setup} ${z.n}`).join(' · ')||'0';
     const sh=(x.shadow||[]).reduce((n,z)=>n+Number(z.n||0),0), u=Number(x.user?.n||0);
     const trig=(x.setup_stage_events||[]).filter(z=>z.stage==='TRIGGER').reduce((n,z)=>n+Number(z.n||0),0);
-    el.innerHTML=`BASE ${base}<br>SETUP TRIGGER 전환 ${trig} · SHADOW ${sh} · USER 기준 ${u}<br><span class="tiny">SHADOW는 화면 신호/포지션에 영향 없음 · PRICE/FAST 비교군만 기록</span>`;
+    const de=(x.decision||[]).reduce((n,z)=>n+Number(z.n||0),0);el.innerHTML=`BASE ${base}<br>SETUP TRIGGER ${trig} · DECISION ${de} · SHADOW ${sh} · USER ${u}<br><span class="tiny">RAW/SHADOW는 연구용 · 기본 차트는 Decision Layer만 표시</span>`;
   }catch(e){el.textContent='연구 집계 연결 대기'}
 }
 let syncServerBusy=false;
@@ -757,7 +788,7 @@ async function syncServer(){
   if(syncServerBusy) return;
   syncServerBusy=true;
   try{
-    const [live,sigs,pos,events,stats,positions,mypos,myevents]=await Promise.all([
+    const [live,sigs,pos,events,stats,positions,mypos,myevents,devents]=await Promise.all([
       fetch(SERVER_API+'/api/live',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/signals?limit=1000',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/position',{cache:'no-store'}).then(r=>r.json()),
@@ -765,11 +796,12 @@ async function syncServer(){
       fetch(SERVER_API+'/api/position-performance',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/positions',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[]),
       fetch(SERVER_API+'/api/user-position',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/user-position-events',{cache:'no-store'}).then(r=>r.json())
+      fetch(SERVER_API+'/api/user-position-events',{cache:'no-store'}).then(r=>r.json()),
+      fetch(SERVER_API+'/api/decision-events?limit=1000',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[])
     ]);
     serverLive=live;
     if(Number(serverLive?.price)>0 && $('price')) $('price').textContent='$'+fmt(Number(serverLive.price));
-    renderTurnRadar(serverLive?.radar);renderSetupWatch(serverLive?.setup_watch);renderContext();updateDailyMove();
+    renderTurnRadar(serverLive?.radar);renderSetupWatch(serverLive?.setup_watch);renderPressure(serverLive?.pressure||serverLive?.setup_watch?.pressure||serverLive?.radar?.flow_reversal?.mtf);renderDecision(serverLive?.decision);renderContext();updateDailyMove();
     serverSaved=(Array.isArray(sigs)?sigs:[]).map(x=>({
       id:'srv_'+x.id,name:x.name,dir:x.side,score:x.score,entry:x.entry,sl:x.sl,tp1:x.tp1,tp2:x.tp2,
       ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000),status:x.status,closed:x.closed_ts,
@@ -789,6 +821,7 @@ async function syncServer(){
     positionEvents=(Array.isArray(events)?events:[]).map(x=>({
       ...x,ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000)
     }));
+    decisionEvents=Array.isArray(devents)?devents:[];
     const ep=$('enginePositions');
     if(ep){
       const ps=Array.isArray(positions)?positions:[];
@@ -851,15 +884,35 @@ function refreshLivePositionReturns(){
 }
 setInterval(refreshLivePositionReturns,500);
 
+function renderDecision(d){
+  if(!d)return;
+  const bias=String(d.bias||'NEUTRAL'), action=String(d.action||'WAIT'), le=Number(d.long_evidence||0), se=Number(d.short_evidence||0);
+  const col=action==='CONFLICT'?'#f1c75b':bias==='LONG'?'#35d98a':bias==='SHORT'?'#ff5c70':'#8d99ad';
+  const state=$('decisionState');if(state){state.textContent=`${action} · ${bias}`;state.style.color=col}
+  const b=$('decisionBias');if(b){b.textContent=bias;b.style.color=col}
+  if($('decisionLong')){$('decisionLong').textContent=le.toFixed(0);$('decisionLong').style.color='#35d98a'}
+  if($('decisionShort')){$('decisionShort').textContent=se.toFixed(0);$('decisionShort').style.color='#ff5c70'}
+  if($('decisionAgree'))$('decisionAgree').textContent=(d.agreement||[]).join(' + ')||'—';
+  if($('decisionWhy')){
+    let lines=[`· ${(d.reasons||[]).join(' → ')||'근거 수집 중'}`,`· LONG ${le.toFixed(0)} / SHORT ${se.toFixed(0)} · margin ${Number(d.margin||0).toFixed(0)}`];
+    if(d.pressure){const pd=Number(d.pressure.weighted_delta||0),pf=Number(d.pressure.fast_delta||0);lines.push(`· MTF PRESSURE ${d.pressure.state||'BALANCE'} · ALL ${(pd>=0?'+':'')+(pd*100).toFixed(0)}% · FAST ${(pf>=0?'+':'')+(pf*100).toFixed(0)}%${d.pressure.turn_side&&d.pressure.turn_side!=='NONE'?' · TURN '+d.pressure.turn_side:''}`);}
+    if(d.pending_side)lines.push(`· 전환 확인 중: ${d.pending_side}`);
+    lines.push('· LONG ↔ SHORT 즉시 전환 금지 · 반드시 NEUTRAL 경유');
+    $('decisionWhy').innerHTML=lines.join('<br>');
+  }
+  const top=$('topRadar'), detail=$('topRadarDetail');
+  if(top){top.textContent=`${action} · ${bias}`;top.style.color=col}
+  if(detail)detail.textContent=(d.agreement||[]).length?`${(d.agreement||[]).join('+')} · L ${le.toFixed(0)} / S ${se.toFixed(0)}`:`L ${le.toFixed(0)} / S ${se.toFixed(0)}`;
+}
+
 function renderSetupWatch(sw){
   if(!sw)return;
   const best=sw.best||null;
   const rank={TRIGGER:3,ARMED:2,PREP:1,IDLE:0};
   const items=Array.isArray(sw.items)?sw.items:[];
   const pick=best||items.sort((a,b)=>(rank[b.stage]||0)-(rank[a.stage]||0)||Number(b.score||0)-Number(a.score||0))[0];
-  const top=$('topRadar'), detail=$('topRadarDetail'), state=$('turnRadarState'), why=$('radWhy');
+  const detail=null, state=$('setupRawState'), why=$('radWhy');
   if(!pick){
-    if(top){top.textContent='SCANNING';top.style.color='#8d99ad'}
     if(detail)detail.textContent='3-SETUP 조건 탐색 중';
     if(state){state.textContent='SCANNING · 유효 셋업 없음';state.style.color='#8d99ad'}
     return;
@@ -867,7 +920,6 @@ function renderSetupWatch(sw){
   const side=String(pick.side||'LONG'), stage=String(pick.stage||'PREP'), setup=String(pick.setup||'SETUP');
   const col=stage==='TRIGGER'?'#35d98a':stage==='ARMED'?'#f1c75b':'#8fb5ff';
   const sideTag=side==='LONG'?'L':'S';
-  if(top){top.textContent=`${stage} · ${setup} ${sideTag} · ${Number(pick.score||0).toFixed(0)}`;top.style.color=col}
   if(detail){
     const lv=Number(pick.level||0); detail.textContent=(pick.reasons||[]).slice(0,3).join(' · ')+(lv>0?` · $${fmt(lv)}`:'');
   }
@@ -881,6 +933,32 @@ function renderSetupWatch(sw){
   }
 }
 
+function renderPressure(p){
+  if(!p)return;
+  const t=p.timeframes||{}, order=['1M','3M','5M','15M'];
+  const grid=$('pressureGrid'), sum=$('pressureSummary'), turnEl=$('pressureTurn');
+  const f=n=>Number(n||0), signed=n=>(n>=0?'+':'')+(n*100).toFixed(0)+'%';
+  if(grid){
+    grid.innerHTML=order.map(tf=>{
+      const z=t[tf]||{}, l=clamp(f(z.long??50),0,100), sh=clamp(f(z.short??50),0,100), cov=clamp(f(z.coverage),0,1);
+      const state=String(z.state||'WARMUP'), col=state==='BUY'?'#35d98a':state==='SELL'?'#ff5c70':'#f1c75b';
+      const ready=cov>=.99||tf==='1M'&&cov>=.8;
+      return `<div class="pressureTf"><div class="pressureTfHead"><span>${tf}</span><span style="color:${col}">${state}</span></div>`+
+        `<div class="pressureNums"><span style="color:#35d98a">L ${l.toFixed(0)}</span><span style="color:#ff5c70">S ${sh.toFixed(0)}</span></div>`+
+        `<div class="pressureTrack"><div class="pressureBuy" style="width:${l}%"></div><div class="pressureSell" style="width:${sh}%"></div></div>`+
+        `<div class="pressureMeta"><span>Δ ${signed(f(z.ratio))}</span><span>가격 ${(f(z.price_pct)>=0?'+':'')+f(z.price_pct).toFixed(2)}%</span>`+
+        `<span>강도 ${f(z.intensity).toFixed(2)}×</span><span class="${ready?'':'pressureWarm'}">${ready?'LIVE':'WARM '+Math.round(cov*100)+'%'}</span></div></div>`;
+    }).join('');
+  }
+  const wd=f(p.weighted_delta), fast=f(p.fast_delta), slow=f(p.slow_delta), td=f(p.turn_delta), side=String(p.state||'BALANCE'), turn=String(p.turn_side||'NONE');
+  if(sum){sum.innerHTML=`종합 <b style="color:${side==='LONG'?'#35d98a':side==='SHORT'?'#ff5c70':'#f1c75b'}">${side}</b> · Δ ${signed(wd)}<br>${p.ready?'압력 입력 활성':'3M 데이터 워밍업 중'}`;}
+  if(turnEl){turnEl.innerHTML=`FAST 1M+3M <b>${signed(fast)}</b> · SLOW 5M+15M <b>${signed(slow)}</b> · TURN <b style="color:${turn==='LONG'?'#35d98a':turn==='SHORT'?'#ff5c70':'#8d99ad'}">${turn}</b> (${signed(td)}) · <span class="tiny">10s/30s = MICRO 타점만</span>`;}
+  const top=$('topPressure'); if(top){top.textContent=`L ${f(p.long).toFixed(0)} / S ${f(p.short).toFixed(0)}`;top.style.color=f(p.long)>f(p.short)?'#35d98a':f(p.short)>f(p.long)?'#ff5c70':'#f1c75b';}
+  const det=$('topPressureDetail'); if(det)det.textContent=`1M ${signed(f(t['1M']?.ratio))} · 3M ${signed(f(t['3M']?.ratio))} · 5M ${signed(f(t['5M']?.ratio))} · 15M ${signed(f(t['15M']?.ratio))}`;
+  if($('flowLong'))$('flowLong').textContent=f(p.long).toFixed(0)+'/100';
+  if($('flowShort'))$('flowShort').textContent=f(p.short).toFixed(0)+'/100';
+}
+
 function renderTurnRadar(r){
   if(!r)return;
   const side=r.side||'LONG', pick=(o)=>Number(o?.[side.toLowerCase()]||0);
@@ -891,10 +969,7 @@ function renderTurnRadar(r){
   const topStructureDetail=$('topStructureDetail'); if(topStructureDetail)topStructureDetail.textContent=`5M ${r.structure?.['5M']||'—'} · 15M ${r.structure?.['15M']||'—'}`;
   const fl=Number(r.flow_reversal?.long||0), fs=Number(r.flow_reversal?.short||0);
   const topPressure=$('topPressure'); if(topPressure){topPressure.textContent=`L ${fl.toFixed(0)} / S ${fs.toFixed(0)}`;topPressure.style.color=fl>fs?'#35d98a':fs>fl?'#ff5c70':'#f1c75b';}
-  const topPressureDetail=$('topPressureDetail'); if(topPressureDetail)topPressureDetail.textContent=`10s ${(Number(r.flow_reversal?.d10||0)*100).toFixed(0)}% · 30s ${(Number(r.flow_reversal?.d30||0)*100).toFixed(0)}% · Book ${(Number(r.flow_reversal?.book||0)*100).toFixed(0)}%`;
-  const topRadar=$('topRadar'); if(topRadar){topRadar.textContent=`${r.state||'—'} · ${side==='LONG'?'L':'S'} ${Number(r.score||0).toFixed(0)}`;topRadar.style.color=col;}
-  const topRadarDetail=$('topRadarDetail'); if(topRadarDetail)topRadarDetail.textContent=`LONG ${Number(r.long_score||0).toFixed(0)} · SHORT ${Number(r.short_score||0).toFixed(0)}`;
-  const state=$('turnRadarState'); if(state){state.textContent=`${r.state} · TURN ${side==='LONG'?'L':'S'} · ${Number(r.score||0).toFixed(0)}`;state.style.color=col;}
+  const topPressureDetail=$('topPressureDetail'); if(topPressureDetail)topPressureDetail.textContent=`MTF 압력 계산 중 · MICRO 10s ${(Number(r.flow_reversal?.d10||0)*100).toFixed(0)}% / 30s ${(Number(r.flow_reversal?.d30||0)*100).toFixed(0)}%`;
   if($('turnZone'))$('turnZone').textContent=(r.location?.zone||'—')+' TURN ZONE';
   if($('distHigh'))$('distHigh').textContent=(r.location?.d_high_atr??'—')+' ATR';
   if($('distLow'))$('distLow').textContent=(r.location?.d_low_atr??'—')+' ATR';
@@ -1039,6 +1114,13 @@ setTimeout(initInd,300);
   };
 })();
 
+// v6.62: default chart is execution-only. Raw PB/RV/RT remain available for research on demand.
+(function initRawResearchToggle(){
+  const el=document.getElementById('rawResearchChk');if(!el)return;
+  try{el.checked=localStorage.getItem('btc_raw_research_visible')==='1'}catch(e){el.checked=false}
+  el.onchange=()=>{try{localStorage.setItem('btc_raw_research_visible',el.checked?'1':'0')}catch(e){};renderMarkers();renderHistory()};
+})();
+
 // v4.7: BTC weekly/monthly historical candles from OKX REST.
 async function loadBTCBigTF(tf){
  try{
@@ -1106,7 +1188,7 @@ paintEngineButtons();
    chart:document.getElementById('chart'),
    structure:byTitle('TURN LOCATION') || byTitle('MARKET REGIME'),
    flow:byTitle('REVERSAL PRESSURE'),
-   target:byTitle('TURN RADAR'),
+   target:byTitle('EXECUTION DECISION') || byTitle('RAW SETUP RADAR'),
    position:byTitle('엔진별 현재 포지션'),
    records:byTitle('포지션 / 거래 기록') || byTitle('라이브 신호 기록')
  };

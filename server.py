@@ -15,10 +15,12 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.61 RESEARCH FOUNDATION KST")
+app=FastAPI(title="BTC Trap Flow Collector v6.63 MTF PRESSURE KST")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 trades=deque(maxlen=12000)
+# v6.63: persistent 1-minute aggressor-flow buckets. These power 1M/3M/5M/15M pressure.
+flow_minutes=deque(maxlen=240)
 oi_hist=deque(maxlen=2000)
 candles={"1M":deque(maxlen=900),"3M":deque(maxlen=900),"5M":deque(maxlen=900),"15M":deque(maxlen=900),"1H":deque(maxlen=900),"4H":deque(maxlen=900),"1D":deque(maxlen=900)}
 book_imb=0.0
@@ -44,6 +46,16 @@ stage_last_bucket={"EARLY_LONG":-1,"EARLY_SHORT":-1,"5M_LONG":-1,"5M_SHORT":-1,"
 # v6.61: three-setup lead state. PREP/ARMED/TRIGGER transitions are persisted for research; only TRIGGER is a live signal.
 setup_arms={f"{setup}_{side}":None for setup in ("PULLBACK","REVERSAL","RETEST") for side in ("LONG","SHORT")}
 setup_watch={"updated_ts":0,"best":None,"items":[]}
+# v6.62: execution decision layer. Raw PB/RV/RT remain untouched and keep recording.
+# This state only resolves conflicts/duplication for the human-facing execution view.
+decision_state={
+    "updated_ts":0,"bias":"NEUTRAL","action":"WAIT","candidate":"NEUTRAL",
+    "long_evidence":0.0,"short_evidence":0.0,"agreement":[],"reasons":[],
+    "pending_side":None,"pending_since":0,"bias_since":0,"trigger_setup":None,
+    "conflict":False,"note":"decision evidence is heuristic, not probability"
+}
+decision_last_trigger_bucket={"LONG":-1,"SHORT":-1}
+decision_last_event_sig=None
 setup_flow_prev={"ts":0,"d10":0.0,"d30":0.0}
 setup_stage_last={}
 shadow_last_bucket={}
@@ -65,6 +77,11 @@ def db():
       closed_ts INTEGER)""")
     c.execute("""CREATE TABLE IF NOT EXISTS snapshots(
       ts INTEGER PRIMARY KEY, price REAL,d10 REAL,d30 REAL,oi60 REAL,flow REAL,book REAL,oi REAL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS flow_minutes(
+      minute_ts INTEGER PRIMARY KEY, buy REAL DEFAULT 0, sell REAL DEFAULT 0,
+      open REAL, high REAL, low REAL, close REAL, trades INTEGER DEFAULT 0, updated_ts INTEGER
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_flow_minutes_ts ON flow_minutes(minute_ts)")
     sigcols={r[1] for r in c.execute("PRAGMA table_info(signals)").fetchall()}
     if "engine" not in sigcols:
         c.execute("ALTER TABLE signals ADD COLUMN engine TEXT DEFAULT 'CORE'")
@@ -150,6 +167,12 @@ def db():
     c.execute("""CREATE TABLE IF NOT EXISTS setup_runtime_state(
       key TEXT PRIMARY KEY, value_int INTEGER, updated_ts INTEGER
     )""")
+    # v6.62: append-only execution-decision history. This does not replace raw signal history.
+    c.execute("""CREATE TABLE IF NOT EXISTS decision_events(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, event TEXT, side TEXT, action TEXT,
+      evidence REAL, opposite_evidence REAL, setups TEXT, reason TEXT, price REAL
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_decision_events_ts ON decision_events(ts)")
     c.commit(); return c
 
 def median(xs):
@@ -165,6 +188,120 @@ def flow(ms):
         else:s+=t["notional"]
     total=b+s
     return {"buy":b,"sell":s,"total":total,"delta":b-s,"ratio":(b-s)/total if total else 0}
+
+
+def add_minute_flow(px, ts, side, notional):
+    """Accumulate taker-aggressor flow in 1-minute buckets without SQLite writes per trade."""
+    m=int(ts//60000*60000); px=float(px); n=float(notional or 0)
+    target=None
+    if flow_minutes and int(flow_minutes[-1]['ts'])==m:
+        target=flow_minutes[-1]
+    elif not flow_minutes or m>int(flow_minutes[-1]['ts']):
+        target={'ts':m,'buy':0.0,'sell':0.0,'open':px,'high':px,'low':px,'close':px,'trades':0}
+        flow_minutes.append(target)
+    else:
+        # Rare out-of-order trade: update an existing recent minute if present.
+        for z in reversed(flow_minutes):
+            if int(z['ts'])==m:
+                target=z; break
+            if int(z['ts'])<m: break
+        if target is None:return
+    if str(side).lower()=='buy':target['buy']+=n
+    else:target['sell']+=n
+    target['high']=max(float(target.get('high') or px),px); target['low']=min(float(target.get('low') or px),px)
+    target['close']=px; target['trades']=int(target.get('trades') or 0)+1
+
+
+def load_minute_flow():
+    """Restore recent minute pressure after Railway restart."""
+    flow_minutes.clear(); c=db()
+    rows=c.execute("SELECT minute_ts,buy,sell,open,high,low,close,trades FROM flow_minutes ORDER BY minute_ts DESC LIMIT 240").fetchall(); c.close()
+    for r in reversed(rows):
+        flow_minutes.append({'ts':int(r[0]),'buy':float(r[1] or 0),'sell':float(r[2] or 0),'open':float(r[3] or 0),'high':float(r[4] or 0),'low':float(r[5] or 0),'close':float(r[6] or 0),'trades':int(r[7] or 0)})
+
+
+def persist_minute_flow():
+    if not flow_minutes:return
+    c=db(); now=int(time.time()*1000)
+    for z in list(flow_minutes)[-3:]:
+        c.execute("""INSERT INTO flow_minutes(minute_ts,buy,sell,open,high,low,close,trades,updated_ts)
+                     VALUES(?,?,?,?,?,?,?,?,?)
+                     ON CONFLICT(minute_ts) DO UPDATE SET buy=excluded.buy,sell=excluded.sell,open=excluded.open,
+                     high=excluded.high,low=excluded.low,close=excluded.close,trades=excluded.trades,updated_ts=excluded.updated_ts""",
+                  (int(z['ts']),float(z.get('buy') or 0),float(z.get('sell') or 0),float(z.get('open') or 0),float(z.get('high') or 0),float(z.get('low') or 0),float(z.get('close') or 0),int(z.get('trades') or 0),now))
+    # Keep a week. Small table, but bounded persistence avoids endless growth.
+    c.execute("DELETE FROM flow_minutes WHERE minute_ts<?",(now-7*24*60*60*1000,)); c.commit(); c.close()
+
+
+def _flow_window(minutes, now=None):
+    """Approximate exact rolling N-minute aggressor pressure from persistent 1M buckets.
+
+    The oldest boundary minute is overlap-weighted; the live current minute is already partial,
+    so its observed trades are used as-is. This avoids a "1M" window accidentally containing
+    almost two full minute buckets near a minute boundary.
+    """
+    now=int(now or time.time()*1000); minutes=max(1,int(minutes)); window_ms=minutes*60000; cutoff=now-window_ms
+    rows=[]; current_start=now//60000*60000
+    for z in flow_minutes:
+        st=int(z['ts']); en=min(st+60000,now)
+        overlap=max(0,min(en,now)-max(st,cutoff))
+        if overlap<=0:continue
+        # Current bucket only contains trades observed up to now; do not down-weight it again.
+        weight=1.0 if st==current_start else min(1.0,overlap/60000.0)
+        rows.append((z,weight))
+    buy=sum(float(z.get('buy') or 0)*w for z,w in rows); sell=sum(float(z.get('sell') or 0)*w for z,w in rows); total=buy+sell
+    ratio=(buy-sell)/total if total else 0.0
+    if flow_minutes:
+        earliest=int(flow_minutes[0]['ts'])
+        covered=max(0,now-max(cutoff,earliest)); coverage=min(1.0,covered/float(window_ms))
+    else:coverage=0.0
+    zs=[z for z,_ in rows]
+    op=float(zs[0].get('open') or 0) if zs else 0.0; cl=float(zs[-1].get('close') or 0) if zs else 0.0
+    price_pct=((cl/op)-1)*100 if op and cl else 0.0
+    full=[float(z.get('buy') or 0)+float(z.get('sell') or 0) for z in list(flow_minutes)[-61:-1] if float(z.get('buy') or 0)+float(z.get('sell') or 0)>0]
+    base=median(full) or 1.0; covered_minutes=max(.10,minutes*coverage)
+    intensity=(total/covered_minutes)/base if total else 0.0
+    long_abs=max(0.0,-ratio) if price_pct>=0 else 0.0
+    short_abs=max(0.0,ratio) if price_pct<=0 else 0.0
+    long_share=50.0*(1.0+ratio); short_share=100.0-long_share
+    state='BUY' if ratio>=.08 else 'SELL' if ratio<=-.08 else 'BALANCE'
+    return {'minutes':minutes,'buy':buy,'sell':sell,'total':total,'delta':buy-sell,'ratio':ratio,
+            'long':long_share,'short':short_share,'price_pct':price_pct,'intensity':intensity,
+            'coverage':coverage,'trades':sum(int(z.get('trades') or 0) for z in zs),
+            'absorb_long':long_abs,'absorb_short':short_abs,'state':state}
+
+
+def mtf_pressure_snapshot(now=None):
+    """1M/3M/5M/15M pressure stack used by setups + Decision Layer.
+
+    This is evidence strength, not a probability. 10s/30s are intentionally excluded here.
+    """
+    now=int(now or time.time()*1000)
+    tfs={f'{m}M':_flow_window(m,now) for m in (1,3,5,15)}
+    weights={'1M':.34,'3M':.30,'5M':.22,'15M':.14}
+    den=sum(weights[k]*max(.15,float(v.get('coverage') or 0)) for k,v in tfs.items()) or 1.0
+    weighted=sum(weights[k]*max(.15,float(v.get('coverage') or 0))*float(v.get('ratio') or 0) for k,v in tfs.items())/den
+    fast=.58*float(tfs['1M']['ratio'])+.42*float(tfs['3M']['ratio'])
+    slow=.60*float(tfs['5M']['ratio'])+.40*float(tfs['15M']['ratio'])
+    turn=fast-slow
+    state='LONG' if weighted>=.06 else 'SHORT' if weighted<=-.06 else 'BALANCE'
+    turn_side='LONG' if turn>=.07 and fast>=-.02 else 'SHORT' if turn<=-.07 and fast<=.02 else 'NONE'
+    ready=float(tfs['3M']['coverage'])>=.67
+    return {'updated_ts':now,'timeframes':tfs,'weighted_delta':weighted,'fast_delta':fast,'slow_delta':slow,
+            'turn_delta':turn,'long':50*(1+weighted),'short':50*(1-weighted),'state':state,
+            'turn_side':turn_side,'ready':ready,'note':'1M/3M/5M/15M aggressor pressure; evidence, not probability'}
+
+
+def minute_pressure_gate(side, reversal=False, loose=False, snap=None):
+    """Primary flow gate. Minute pressure decides context; micro 10s/30s never decides direction by itself."""
+    snap=snap or mtf_pressure_snapshot(); t=snap['timeframes']
+    if not snap.get('ready'):return False
+    d1=float(t['1M']['ratio']); d3=float(t['3M']['ratio']); fast=float(snap['fast_delta']); slow=float(snap['slow_delta'])
+    if side=='LONG':
+        if reversal:return fast>=(-.035 if loose else -.01) and (d1-d3>=.035 or fast-slow>=.055 or fast>=.055)
+        return fast>=(-.035 if loose else .005) and d1>=-.08 and (d3>=-.06 or d1>d3+.05)
+    if reversal:return fast<=(.035 if loose else .01) and (d1-d3<=-.035 or fast-slow<=-.055 or fast<=-.055)
+    return fast<=(.035 if loose else -.005) and d1<=.08 and (d3<=.06 or d1<d3-.05)
 
 def flow_intensity():
     now=int(time.time()*1000); vals=[]
@@ -755,6 +892,7 @@ def evaluate_tf_engine(engine):
     A=atr_tf(engine,24); c=list(candles[engine])[-1] if candles[engine] else None
     if not c:return
     w10,w30=flow(10000),flow(30000); oi60=oi_delta(); inten=flow_intensity(); now=int(time.time()*1000)
+    pressure=mtf_pressure_snapshot(now); p5=float(pressure['timeframes']['5M']['ratio']); p15=float(pressure['timeframes']['15M']['ratio']); pslow=float(pressure['slow_delta'])
     arm=tf_arms.get(engine); prev=tf_prev_d10.get(engine,0.0)
     slow=engine in ("1H","4H")
     sweep=.035 if slow else .04; closebuf=.10 if slow else .08
@@ -769,12 +907,11 @@ def evaluate_tf_engine(engine):
     tf_arms[engine]=arm
     if arm and now-tf_last_signal_ts.get(engine,0)>cooldown:
         reclaim_buf=.025 if slow else .03
-        hot_thr=.08 if slow else .12; d30thr=.10 if slow else .16; prevthr=.12 if slow else .18
-        flipthr=.05 if slow else .08; flipdelta=.09 if slow else .14
         if arm["dir"]=="L":
             reclaim=last_price>arm["level"]+reclaim_buf*A
-            hot=arm["peak"]<-hot_thr or w30["ratio"]<-d30thr or prev<-prevthr
-            flip=w10["ratio"]>flipthr and w10["ratio"]-prev>flipdelta
+            hot=(pslow<-.055 or p5<-.07 or p15<-.05)
+            micro=(w10["ratio"]>=(-.015 if slow else .0) and (w10["ratio"]-prev>(.045 if slow else .06) or w10["ratio"]>(.045 if slow else .065)))
+            flip=minute_pressure_gate('LONG',reversal=True,loose=slow,snap=pressure) and micro
             score=35+(20 if hot else 0)+(25 if flip else 0)+(10 if oi60<-.010 else 0)+(5 if inten>1.0 else 0)+(5 if book_imb>-.20 else 0)
             if reclaim and hot and flip and score>=80:
                 ok,_why=precision_signal_gate(engine,"LONG",score,A)
@@ -783,8 +920,9 @@ def evaluate_tf_engine(engine):
                     save_signal(nm,"LONG",score,arm["level"],arm["ext"],{"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},engine,A)
         else:
             reclaim=last_price<arm["level"]-reclaim_buf*A
-            hot=arm["peak"]>hot_thr or w30["ratio"]>d30thr or prev>prevthr
-            flip=w10["ratio"]<-flipthr and prev-w10["ratio"]>flipdelta
+            hot=(pslow>.055 or p5>.07 or p15>.05)
+            micro=(w10["ratio"]<=(.015 if slow else .0) and (prev-w10["ratio"]>(.045 if slow else .06) or w10["ratio"]<(-.045 if slow else -.065)))
+            flip=minute_pressure_gate('SHORT',reversal=True,loose=slow,snap=pressure) and micro
             score=35+(20 if hot else 0)+(25 if flip else 0)+(10 if oi60<-.010 else 0)+(5 if inten>1.0 else 0)+(5 if book_imb<.20 else 0)
             if reclaim and hot and flip and score>=80:
                 ok,_why=precision_signal_gate(engine,"SHORT",score,A)
@@ -939,6 +1077,7 @@ def evaluate_setup_signals():
     a15=list(candles['15M']); c15=a15[-1]; sh15=_bar_shape(c15)
     w10,w30=flow(10000),flow(30000); inten=flow_intensity(); oi60=oi_delta()
     d10=float(w10['ratio']); d30=float(w30['ratio'])
+    pressure=mtf_pressure_snapshot(now)
     prev10=float(setup_flow_prev.get('d10') or 0.0)
     flow_accel=d10-prev10
     bias=market_bias_snapshot(); overall=str(bias.get('overall') or 'MIXED')
@@ -956,14 +1095,24 @@ def evaluate_setup_signals():
         z=a[-4:-1]
         return p>max(float(x['high']) for x in z) if side=='LONG' else p<min(float(x['low']) for x in z)
 
-    def flow_timing(side, loose=False):
+    def micro_timing(side, loose=False):
+        # 10s/30s only answer 'now?', never the directional thesis.
         if side=='LONG':
-            base=(d10>=(-.005 if loose else .02) and d10>=d30-.04)
-            turn=(flow_accel>=.035 or d10>=.09 or (d30<-.06 and d10>d30+.08))
+            base=(d10>=(-.018 if loose else .005) and d10>=d30-.055)
+            turn=(flow_accel>=.025 or d10>=.07 or (d30<-.06 and d10>d30+.065))
         else:
-            base=(d10<=(.005 if loose else -.02) and d10<=d30+.04)
-            turn=(flow_accel<=-.035 or d10<=-.09 or (d30>.06 and d10<d30-.08))
+            base=(d10<=(.018 if loose else -.005) and d10<=d30+.055)
+            turn=(flow_accel<=-.025 or d10<=-.07 or (d30>.06 and d10<d30-.065))
         return base and turn
+
+    def flow_timing(side, loose=False, reversal=False):
+        return minute_pressure_gate(side,reversal=reversal,loose=loose,snap=pressure) and micro_timing(side,loose=loose)
+
+    def fast_flow_timing(side, reversal=False):
+        # Research comparator: minute pressure is mandatory, micro confirmation is deliberately faster.
+        if not minute_pressure_gate(side,reversal=reversal,loose=True,snap=pressure):return False
+        if side=='LONG':return d10>=-.035 and (flow_accel>=.012 or d10>=d30+.028)
+        return d10<=.035 and (flow_accel<=-.012 or d10<=d30-.028)
 
     def put(setup,side,stage,score,reasons,level=None,expires=None,meta=None):
         item={'setup':setup,'side':side,'stage':stage,'score':round(max(0,min(100,float(score))),1),
@@ -1052,18 +1201,20 @@ def evaluate_setup_signals():
         micro=micro_break(side); ft=flow_timing(side,loose=True)
         not_chasing=(p-ref<=.52*A5) if side=='LONG' else (ref-p<=.52*A5)
         score=context_score+18+ (14 if response else 0)+(10 if micro else 0)+(11 if ft else 0)+(5 if candle_ok else 0)+(4 if inten>=.9 else 0)
-        put('PULLBACK',side,'ARMED',score,[f'{arm.get("meta",{}).get("ref",near_name)}_TOUCH','WAIT_RECLAIM','WAIT_MICRO_FLOW'],ref,arm['expires_ts'],arm.get('meta'))
+        put('PULLBACK',side,'ARMED',score,[f'{arm.get("meta",{}).get("ref",near_name)}_TOUCH','WAIT_RECLAIM','WAIT_MTF_PRESSURE+MICRO'],ref,arm['expires_ts'],arm.get('meta'))
         price_ready=response and candle_ok and micro and not_chasing
-        fast_flow=((d10>=-.03 and (flow_accel>=.015 or d10>=d30+.04)) if side=='LONG' else (d10<=.03 and (flow_accel<=-.015 or d10<=d30-.04)))
+        fast_flow=fast_flow_timing(side,reversal=False)
         shadow_ctx=_research_context(setup='PULLBACK',ref=arm.get('meta',{}).get('ref',near_name),level=ref,price_ready=price_ready,base_flow=ft,fast_flow=fast_flow,score=score)
         if price_ready: record_shadow('PULLBACK','PRICE',side,score,['PRICE_RESPONSE','1M_STRUCTURE','NO_FLOW_REQUIREMENT'],b5,shadow_ctx)
         if price_ready and fast_flow: record_shadow('PULLBACK','FAST',side,score,['PRICE_RESPONSE','1M_STRUCTURE','FAST_FLOW'],b5,shadow_ctx)
         if response and candle_ok and micro and ft and not_chasing and score>=80 and not arm.get('fired'):
-            emit('PULLBACK',side,score,[f'HTF_ALIGN={slow_votes}',f'{arm.get("meta",{}).get("ref",near_name)}_RECLAIM','1M_STRUCTURE','FLOW_TURN'],b5,ref)
+            emit('PULLBACK',side,score,[f'HTF_ALIGN={slow_votes}',f'{arm.get("meta",{}).get("ref",near_name)}_RECLAIM','1M_STRUCTURE','MTF_PRESSURE+MICRO'],b5,ref)
 
     # ------------------------------------------------------------------
     # 2) REVERSAL: approach 15M liquidity -> sweep/absorption -> failed auction -> 5M/1M turn.
     H15,L15=liquidity_tf('15M',100,30)
+    p5r=float(pressure['timeframes']['5M']['ratio']); p15r=float(pressure['timeframes']['15M']['ratio'])
+    pfast=float(pressure['fast_delta']); pslow=float(pressure['slow_delta'])
     if H15 is not None and L15 is not None:
         for side in ('LONG','SHORT'):
             wanted=1 if side=='LONG' else -1; level=float(L15 if side=='LONG' else H15)
@@ -1074,13 +1225,13 @@ def evaluate_setup_signals():
             if side=='SHORT':
                 swept=float(c15['high'])>level+.015*A15
                 wick=sh15['upper']>=max(sh15['body'],.18*sh15['rng'])
-                aggression=d30>.06
+                aggression=(p5r>.055 or p15r>.045)
                 failed=p<level-.015*A15
                 reject5=sh5['close_pos']<.48 and float(c5['close'])<=float(c5['open'])
             else:
                 swept=float(c15['low'])<level-.015*A15
                 wick=sh15['lower']>=max(sh15['body'],.18*sh15['rng'])
-                aggression=d30<-.06
+                aggression=(p5r<-.055 or p15r<-.045)
                 failed=p>level+.015*A15
                 reject5=sh5['close_pos']>.52 and float(c5['close'])>=float(c5['open'])
             absorption=near and wick and aggression
@@ -1097,19 +1248,19 @@ def evaluate_setup_signals():
             # A true reversal must get back inside liquidity; if auction accepts far beyond, invalidate.
             accepted=(p<level-.55*A15) if side=='LONG' else (p>level+.55*A15)
             if accepted: clear_arm('REVERSAL',side); continue
-            micro=micro_break(side); ft=flow_timing(side,loose=True)
-            fade=(d10>d30+.06) if side=='LONG' else (d10<d30-.06)
+            micro=micro_break(side); ft=flow_timing(side,loose=True,reversal=True)
+            fade=((pfast-pslow)>=.055) if side=='LONG' else ((pfast-pslow)<=-.055)
             ctx_align=sum(x==wanted for x in (t1,t4))
             score=46+(16 if arm.get('meta',{}).get('swept') else 0)+(12 if arm.get('meta',{}).get('absorption') else 0)+(12 if failed else 0)+(8 if reject5 else 0)+(8 if micro else 0)+(8 if (ft or fade) else 0)+(4 if oi60>.003 else 0)+(4*ctx_align)
-            put('REVERSAL',side,'ARMED',score,['LIQ_TOUCHED','WAIT_FAILED_AUCTION','WAIT_PRICE_FLOW_TURN'],level,arm['expires_ts'],arm.get('meta'))
+            put('REVERSAL',side,'ARMED',score,['LIQ_TOUCHED','WAIT_FAILED_AUCTION','WAIT_PRICE_MTF_TURN+MICRO'],level,arm['expires_ts'],arm.get('meta'))
             strong_price=failed and reject5 and micro
-            timing=(ft or (fade and ((d10>=-.01) if side=='LONG' else (d10<=.01))))
-            fast_timing=((d10>=-.03 and (flow_accel>=.015 or d10>=d30+.03)) if side=='LONG' else (d10<=.03 and (flow_accel<=-.015 or d10<=d30-.03)))
+            timing=(ft or (fade and minute_pressure_gate(side,reversal=True,loose=True,snap=pressure) and micro_timing(side,loose=True)))
+            fast_timing=fast_flow_timing(side,reversal=True)
             shadow_ctx=_research_context(setup='REVERSAL',level=level,strong_price=strong_price,base_flow=timing,fast_flow=fast_timing,swept=bool(arm.get('meta',{}).get('swept')),absorption=bool(arm.get('meta',{}).get('absorption')),score=score)
             if strong_price: record_shadow('REVERSAL','PRICE',side,score,['FAILED_AUCTION','5M_REJECT','1M_STRUCTURE','NO_FLOW_REQUIREMENT'],b15,shadow_ctx)
             if strong_price and fast_timing: record_shadow('REVERSAL','FAST',side,score,['FAILED_AUCTION','5M_REJECT','1M_STRUCTURE','FAST_FLOW'],b15,shadow_ctx)
             if strong_price and timing and score>=82 and not arm.get('fired'):
-                reasons=['15M_LIQ','SWEEP' if arm.get('meta',{}).get('swept') else 'ABSORB','FAILED_AUCTION','5M_REJECT','1M_STRUCTURE','FLOW_FADE']
+                reasons=['15M_LIQ','SWEEP' if arm.get('meta',{}).get('swept') else 'ABSORB','FAILED_AUCTION','5M_REJECT','1M_STRUCTURE','MTF_PRESSURE_TURN+MICRO']
                 emit('REVERSAL',side,score,reasons,b15,level)
 
     # ------------------------------------------------------------------
@@ -1157,14 +1308,14 @@ def evaluate_setup_signals():
             micro=micro_break(side); ft=flow_timing(side,loose=True)
             slow_ok=(t15==wanted or t1==wanted) and not (t15==-wanted and t1==-wanted)
             score=48+(12 if slow_ok else 0)+(16 if in_zone and touch else 0)+(12 if hold else 0)+(8 if micro else 0)+(8 if ft else 0)+(4 if inten>=.9 else 0)
-            put('RETEST',side,'ARMED',score,['BREAK_CONFIRMED','WAIT_LEVEL_RETEST','WAIT_HOLD_FLOW'],level,arm['expires_ts'],arm.get('meta'))
+            put('RETEST',side,'ARMED',score,['BREAK_CONFIRMED','WAIT_LEVEL_RETEST','WAIT_HOLD_MTF+MICRO'],level,arm['expires_ts'],arm.get('meta'))
             price_ready=slow_ok and in_zone and touch and hold and micro
-            fast_flow=((d10>=-.03 and (flow_accel>=.015 or d10>=d30+.035)) if side=='LONG' else (d10<=.03 and (flow_accel<=-.015 or d10<=d30-.035)))
+            fast_flow=fast_flow_timing(side,reversal=False)
             shadow_ctx=_research_context(setup='RETEST',level=level,break_ts=arm.get('meta',{}).get('break_ts'),price_ready=price_ready,base_flow=ft,fast_flow=fast_flow,score=score)
             if price_ready: record_shadow('RETEST','PRICE',side,score,['FIRST_RETEST','LEVEL_HOLD','1M_STRUCTURE','NO_FLOW_REQUIREMENT'],b5,shadow_ctx)
             if price_ready and fast_flow: record_shadow('RETEST','FAST',side,score,['FIRST_RETEST','LEVEL_HOLD','1M_STRUCTURE','FAST_FLOW'],b5,shadow_ctx)
             if slow_ok and in_zone and touch and hold and micro and ft and score>=82:
-                emit('RETEST',side,score,['STRUCT_BREAK','FIRST_RETEST','LEVEL_HOLD','1M_STRUCTURE','FLOW_RESUME'],b5,level)
+                emit('RETEST',side,score,['STRUCT_BREAK','FIRST_RETEST','LEVEL_HOLD','1M_STRUCTURE','MTF_PRESSURE_RESUME+MICRO'],b5,level)
 
     # Keep one record per setup/side, preferring the most advanced state.
     rank={'IDLE':0,'PREP':1,'ARMED':2,'TRIGGER':3}
@@ -1175,8 +1326,173 @@ def evaluate_setup_signals():
     out=list(dedup.values())
     out.sort(key=lambda x:(rank.get(x['stage'],0),x['score']),reverse=True)
     setup_watch={'updated_ts':now,'best':out[0] if out else None,'items':out,
-                 'flow':{'d10':round(d10,4),'d30':round(d30,4),'accel':round(flow_accel,4),'intensity':round(float(inten),2)}}
-    sync_setup_stage_events(items,_research_context(flow_accel=round(flow_accel,6),overall=overall,A5=A5,A15=A15))
+                 'pressure':pressure,
+                 'flow':{'d10':round(d10,4),'d30':round(d30,4),'accel':round(flow_accel,4),'intensity':round(float(inten),2),
+                         'role':'MICRO_TIMING_ONLY'}}
+    sync_setup_stage_events(items,_research_context(flow_accel=round(flow_accel,6),overall=overall,A5=A5,A15=A15,mtf_pressure={k:round(float(v.get('ratio') or 0),4) for k,v in pressure['timeframes'].items()},pressure_turn=pressure.get('turn_side'),pressure_ready=pressure.get('ready')))
+    update_decision_layer(out, now)
+
+def _save_decision_event(event, side, action, evidence, opposite, setups, reasons, now=None):
+    """Append a human-facing decision transition without mutating raw signal history."""
+    global decision_last_event_sig
+    now=int(now or time.time()*1000)
+    sig=(str(event),str(side),str(action),str(setups),int(now//300000))
+    # BIAS/INVALIDATE transitions are unique by state; TRIGGER is unique per 5M decision bucket.
+    if decision_last_event_sig==sig:return False
+    c=db();
+    lo=(now//300000)*300000; hi=lo+300000
+    exists=c.execute("SELECT id FROM decision_events WHERE event=? AND side=? AND ts>=? AND ts<? LIMIT 1",(event,side,lo,hi)).fetchone()
+    if exists:
+        c.close(); decision_last_event_sig=sig; return False
+    c.execute("""INSERT INTO decision_events(ts,event,side,action,evidence,opposite_evidence,setups,reason,price)
+      VALUES(?,?,?,?,?,?,?,?,?)""",(now,event,side,action,float(evidence),float(opposite),str(setups or ''),' | '.join(reasons or []),float(last_price or 0)))
+    c.commit(); c.close(); decision_last_event_sig=sig; return True
+
+
+def update_decision_layer(items, now=None):
+    """Resolve raw 3-SETUP observations into one stable human-facing state.
+
+    Design goals:
+      * raw PULLBACK / REVERSAL / RETEST continue to record unchanged;
+      * repeated same-side setups become one decision, not many chart labels;
+      * opposite evidence produces WAIT/CONFLICT instead of instant LONG<->SHORT flipping;
+      * LONG -> NEUTRAL -> SHORT (and reverse) is mandatory unless the state starts neutral;
+      * raw setup score is only a small input because it is not calibrated probability.
+    """
+    global decision_state, decision_last_trigger_bucket
+    now=int(now or time.time()*1000)
+    items=list(items or [])
+    bias=market_bias_snapshot(); bscore=float(bias.get('score') or 0)
+    pressure=mtf_pressure_snapshot(now); pdelta=float(pressure.get('weighted_delta') or 0); pfast=float(pressure.get('fast_delta') or 0)
+    stage_rank={'PREP':1,'ARMED':2,'TRIGGER':3}
+    # Keep the most advanced observation for each setup/side.
+    best={}
+    for x in items:
+        setup=str(x.get('setup') or '').upper(); side=str(x.get('side') or '').upper(); stage=str(x.get('stage') or '').upper()
+        if setup not in ('PULLBACK','REVERSAL','RETEST') or side not in ('LONG','SHORT') or stage not in stage_rank:continue
+        k=(setup,side); old=best.get(k)
+        if old is None or (stage_rank[stage],float(x.get('score') or 0))>(stage_rank.get(str(old.get('stage') or ''),0),float(old.get('score') or 0)):best[k]=x
+
+    def side_info(side):
+        xs=[x for (setup,s),x in best.items() if s==side]
+        stages=[str(x.get('stage') or '').upper() for x in xs]
+        active=[x for x in xs if str(x.get('stage') or '').upper() in ('ARMED','TRIGGER')]
+        triggers=[x for x in xs if str(x.get('stage') or '').upper()=='TRIGGER']
+        # Stage/consensus dominate. The old 80-100 raw score contributes <= 8 points only.
+        ev=0.0
+        for x in xs:
+            st=str(x.get('stage') or '').upper(); raw=max(0.0,min(100.0,float(x.get('score') or 0)))
+            ev += {'PREP':11.0,'ARMED':25.0,'TRIGGER':39.0}[st] + max(0.0,min(8.0,(raw-55.0)*0.18))
+        if len(active)>=2: ev+=13.0
+        if len(active)>=3: ev+=7.0
+        wanted=1 if side=='LONG' else -1
+        if bscore*wanted>0: ev+=min(18.0,abs(bscore)*2.2)
+        elif bscore*wanted<0: ev-=min(13.0,abs(bscore)*1.7)
+        # v6.63: multi-minute pressure participates in direction; micro 10s/30s does not.
+        if pressure.get('ready'):
+            align=pdelta*wanted; fast_align=pfast*wanted
+            ev += max(-12.0,min(14.0,align*52.0))
+            ev += max(-6.0,min(7.0,fast_align*24.0))
+            if pressure.get('turn_side')==side:ev+=6.0
+            elif pressure.get('turn_side') in ('LONG','SHORT'):ev-=4.0
+        ev=max(0.0,min(100.0,ev))
+        return {'evidence':ev,'xs':xs,'active':active,'triggers':triggers,'stages':stages,
+                'setups':[str(x.get('setup')) for x in active or xs]}
+
+    L,S=side_info('LONG'),side_info('SHORT')
+    le,se=L['evidence'],S['evidence']; margin=abs(le-se)
+    preferred='LONG' if le>se else 'SHORT' if se>le else 'NEUTRAL'
+    top=max(le,se)
+    candidate=preferred if top>=56 and margin>=12 else 'NEUTRAL'
+    conflict=(le>=46 and se>=46 and margin<18) or (bool(L['triggers']) and bool(S['triggers']))
+    if conflict:candidate='NEUTRAL'
+
+    cur=str(decision_state.get('bias') or 'NEUTRAL')
+    pending=decision_state.get('pending_side'); psince=int(decision_state.get('pending_since') or 0)
+    changed=False; invalidated=False
+
+    def begin_pending(side):
+        nonlocal pending,psince
+        if pending!=side: pending=side; psince=now
+
+    if cur=='NEUTRAL':
+        if candidate in ('LONG','SHORT') and not conflict:
+            begin_pending(candidate)
+            if now-psince>=12000:
+                cur=candidate; changed=True; pending=None; psince=0
+        else:
+            pending=None; psince=0
+    else:
+        opp='SHORT' if cur=='LONG' else 'LONG'
+        cur_ev=le if cur=='LONG' else se; opp_ev=se if cur=='LONG' else le
+        opp_trig=bool((S if opp=='SHORT' else L)['triggers'])
+        structure_invalid=(bscore<=-2 if cur=='LONG' else bscore>=2)
+        hard_opp=(opp_ev>=74 and opp_ev-cur_ev>=16) or (opp_trig and opp_ev>=66 and opp_ev-cur_ev>=12)
+        if candidate==cur and not conflict:
+            pending=None; psince=0
+        elif structure_invalid or hard_opp or conflict:
+            begin_pending('NEUTRAL')
+            # Conflict neutralizes faster; a full opposite reversal still cannot skip NEUTRAL.
+            wait_ms=8000 if conflict else 12000
+            if now-psince>=wait_ms:
+                old=cur; cur='NEUTRAL'; changed=True; invalidated=True; pending=None; psince=0
+                _save_decision_event('INVALIDATE',old,'WAIT',cur_ev,opp_ev,'',
+                    ['STRUCTURE_INVALID' if structure_invalid else 'OPPOSITE_PRESSURE','NEUTRAL_BEFORE_SWITCH'],now)
+        else:
+            pending=None; psince=0
+
+    # Human-facing action is only executable when it agrees with the stable bias.
+    chosen=L if cur=='LONG' else S if cur=='SHORT' else None
+    other=S if cur=='LONG' else L if cur=='SHORT' else None
+    action='WAIT'; trigger_setup=None; agreement=[]; reasons=[]
+    if conflict:
+        action='CONFLICT'; reasons=['BOTH_SIDES_ACTIVE','WAIT_FOR_RESOLUTION']
+    elif chosen:
+        agreement=list(dict.fromkeys(chosen['setups']))
+        trig=chosen['triggers']; armed=[x for x in chosen['xs'] if str(x.get('stage') or '').upper()=='ARMED']; prep=[x for x in chosen['xs'] if str(x.get('stage') or '').upper()=='PREP']
+        ce=float(chosen['evidence']); oe=float(other['evidence'] if other else 0)
+        pressure_exec_ok=(not pressure.get('ready')) or ((pdelta*(1 if cur=='LONG' else -1))>=-.08 and (pfast*(1 if cur=='LONG' else -1))>=-.07)
+        if trig and ce>=62 and ce-oe>=12 and pressure_exec_ok:
+            action='TRIGGER'; trigger_setup='+'.join(dict.fromkeys(str(x.get('setup')) for x in trig))
+            reasons=['STABLE_'+cur,'MTF_PRESSURE_OK','TRIGGER_'+trigger_setup]
+            if len(chosen['active'])>=2:reasons.append('SETUP_AGREEMENT')
+        elif trig and not pressure_exec_ok:
+            action='READY'; reasons=['STABLE_'+cur,'RAW_TRIGGER','WAIT_MTF_PRESSURE']
+        elif armed and ce>=54 and ce-oe>=8:
+            action='READY'; reasons=['STABLE_'+cur,'ARMED_'+('+'.join(dict.fromkeys(str(x.get('setup')) for x in armed)))]
+            if len(chosen['active'])>=2:reasons.append('SETUP_AGREEMENT')
+        elif prep:
+            action='WATCH'; reasons=['STABLE_'+cur,'PREP_'+('+'.join(dict.fromkeys(str(x.get('setup')) for x in prep)))]
+        else:
+            action='WAIT'; reasons=['STABLE_'+cur,'NO_ACTIVE_SETUP']
+    else:
+        if candidate in ('LONG','SHORT'):
+            action='WATCH'; reasons=['CANDIDATE_'+candidate,'HYSTERESIS_WAIT']
+        else: reasons=['NO_STABLE_DIRECTION']
+
+    if changed and not invalidated and cur in ('LONG','SHORT'):
+        ce=le if cur=='LONG' else se; oe=se if cur=='LONG' else le
+        _save_decision_event('BIAS',cur,'WATCH',ce,oe,'+'.join((L if cur=='LONG' else S)['setups']),['BIAS_ESTABLISHED'],now)
+
+    # One execution marker per side per native 5M bucket. Raw signals can fire freely underneath.
+    if action=='TRIGGER' and cur in ('LONG','SHORT'):
+        b=int(now//300000)
+        if decision_last_trigger_bucket.get(cur)!=b:
+            decision_last_trigger_bucket[cur]=b
+            ce=le if cur=='LONG' else se; oe=se if cur=='LONG' else le
+            _save_decision_event('TRIGGER',cur,action,ce,oe,trigger_setup or '+'.join(agreement),reasons,now)
+
+    decision_state={
+      'updated_ts':now,'bias':cur,'action':action,'candidate':candidate,
+      'long_evidence':round(le,1),'short_evidence':round(se,1),'margin':round(margin,1),
+      'agreement':agreement,'reasons':reasons,'pending_side':pending,'pending_since':psince,
+      'bias_since':(now if changed and cur!='NEUTRAL' else int(decision_state.get('bias_since') or 0)),
+      'trigger_setup':trigger_setup,'conflict':bool(conflict),
+      'market_bias':bias,'pressure':{'state':pressure.get('state'),'turn_side':pressure.get('turn_side'),'weighted_delta':round(pdelta,4),'fast_delta':round(pfast,4),'slow_delta':round(float(pressure.get('slow_delta') or 0),4),'ready':bool(pressure.get('ready'))},
+      'note':'evidence strength / MTF pressure conflict resolver; not win probability'
+    }
+    return decision_state
+
 
 def evaluate():
     # v6.57: old WATCH/EARLY/TURN pipeline is retained in source for audit/history,
@@ -1279,13 +1595,14 @@ def manage_position_reversal():
     """Research position state machine:
     OPEN/HOLD <-> PRESSURE -> EXIT or SWITCH.
     Price moving against entry alone never closes a position.
-    Decisions combine 10s/30s aggressive flow, intensity, OI/book context,
-    and price acceptance/retrace. Engines remain independent.
+    Decisions combine 1M/3M/5M/15M pressure, price acceptance/retrace and context.
+    10s/30s are a small final timing input only. Engines remain independent.
     """
     if not last_price:return
     d10=flow(10000)["ratio"]; d30=flow(30000)["ratio"]
     intensity=flow_intensity(); oi=oi_delta(60000); book=book_imb
-    now=int(time.time()*1000)
+    now=int(time.time()*1000); pressure=mtf_pressure_snapshot(now)
+    pd=float(pressure.get('weighted_delta') or 0); pf=float(pressure.get('fast_delta') or 0); ps=float(pressure.get('slow_delta') or 0)
     # Ensure reversal logic uses restart-safe, reconstructed MFE/MAE.
     update_position_excursions()
 
@@ -1300,13 +1617,17 @@ def manage_position_reversal():
             mfe=max(0,best-entry); mae=max(0,entry-worst)
             adverse=(entry-last_price)/A
             retrace=(best-last_price)/A
-            # Opposite (sell) pressure. Price alone is insufficient.
+            # Opposite (sell) pressure: MTF flow dominates; micro flow cannot flip the position by itself.
             pscore=0
-            if d10<=-0.12: pscore+=30
-            if d30<=-0.05: pscore+=25
-            if intensity>=0.80: pscore+=15
-            if book<=-0.20: pscore+=10
-            if oi>0 and d30<0: pscore+=10
+            if pressure.get('ready') and pd<=-.08: pscore+=30
+            if pressure.get('ready') and pf<=-.10: pscore+=22
+            if pressure.get('ready') and ps<=-.06: pscore+=15
+            if pressure.get('turn_side')=='SHORT': pscore+=8
+            if d10<=-.08: pscore+=5
+            if d30<=-.05: pscore+=5
+            if intensity>=0.80: pscore+=7
+            if book<=-.20: pscore+=4
+            if oi>0 and pd<0: pscore+=4
             if adverse>=0.25 or retrace>=0.32: pscore+=10
             opposite_side="SHORT"
         else:
@@ -1314,13 +1635,17 @@ def manage_position_reversal():
             mfe=max(0,entry-best); mae=max(0,worst-entry)
             adverse=(last_price-entry)/A
             retrace=(last_price-best)/A
-            # Opposite (buy) pressure.
+            # Opposite (buy) pressure: MTF flow dominates; micro flow cannot flip the position by itself.
             pscore=0
-            if d10>=0.12: pscore+=30
-            if d30>=0.05: pscore+=25
-            if intensity>=0.80: pscore+=15
-            if book>=0.20: pscore+=10
-            if oi>0 and d30>0: pscore+=10
+            if pressure.get('ready') and pd>=.08: pscore+=30
+            if pressure.get('ready') and pf>=.10: pscore+=22
+            if pressure.get('ready') and ps>=.06: pscore+=15
+            if pressure.get('turn_side')=='LONG': pscore+=8
+            if d10>=.08: pscore+=5
+            if d30>=.05: pscore+=5
+            if intensity>=0.80: pscore+=7
+            if book>=.20: pscore+=4
+            if oi>0 and pd>0: pscore+=4
             if adverse>=0.25 or retrace>=0.32: pscore+=10
             opposite_side="LONG"
 
@@ -1363,7 +1688,7 @@ def manage_position_reversal():
         if adverse >= structure_exit_atr and not structure_blocked:
             old_signal=pos["signal_id"]
             note=(f"STRUCTURE INVALIDATION adverse={adverse:.2f}ATR score={pscore} "
-                  f"d10={d10:.3f} d30={d30:.3f} flow={intensity:.2f} "
+                  f"mtf={pd:.3f} fast={pf:.3f} slow={ps:.3f} d10={d10:.3f} d30={d30:.3f} flow={intensity:.2f} "
                   f"oi60={oi:.4f} book={book:.3f} mfe={mfe:.1f} mae={mae:.1f}")
             position_event("EXIT",side,last_price,old_signal,note,engine)
             set_reentry_guard(engine,side,last_price,A,"STRUCTURE_INVALIDATION")
@@ -1376,7 +1701,7 @@ def manage_position_reversal():
         switch_accept = adverse>=0.38 if engine=="SCALP" else adverse>=0.45 if engine in ("5M","15M") else adverse>=0.55
         if persisted and pscore>=switch_threshold and switch_accept and not flow_guard:
             old_signal=pos["signal_id"]
-            note=(f"FLOW SWITCH score={pscore} d10={d10:.3f} d30={d30:.3f} "
+            note=(f"FLOW SWITCH score={pscore} mtf={pd:.3f} fast={pf:.3f} slow={ps:.3f} d10={d10:.3f} d30={d30:.3f} "
                   f"flow={intensity:.2f} oi60={oi:.4f} book={book:.3f} mfe={mfe:.1f} mae={mae:.1f}")
             position_event("EXIT",side,last_price,old_signal,note,engine)
             set_reentry_guard(engine,side,last_price,A,"FLOW_SWITCH")
@@ -1393,7 +1718,7 @@ def manage_position_reversal():
         exit_persisted = new_state=="PRESSURE" and new_psince and now-int(new_psince)>=exit_ms
         if exit_persisted and pscore>=exit_threshold and exit_accept and not flow_guard:
             old_signal=pos["signal_id"]
-            note=(f"FLOW EXIT score={pscore} d10={d10:.3f} d30={d30:.3f} "
+            note=(f"FLOW EXIT score={pscore} mtf={pd:.3f} fast={pf:.3f} slow={ps:.3f} d10={d10:.3f} d30={d30:.3f} "
                   f"flow={intensity:.2f} oi60={oi:.4f} book={book:.3f} mfe={mfe:.1f} mae={mae:.1f}")
             position_event("EXIT",side,last_price,old_signal,note,engine)
             set_reentry_guard(engine,side,last_price,A,"FLOW_EXIT")
@@ -1485,7 +1810,7 @@ async def public_loop():
                     for d in m.get("data",[]):
                         if ch=="trades":
                             px=float(d["px"]); sz=float(d["sz"]); ts=int(d["ts"]);last_price=px
-                            trades.append({"px":px,"ts":ts,"side":d["side"],"notional":px*sz})
+                            trades.append({"px":px,"ts":ts,"side":d["side"],"notional":px*sz}); add_minute_flow(px,ts,d["side"],px*sz)
                         elif ch=="open-interest":
                             current_oi=float(d["oi"]);oi_hist.append({"ts":int(d["ts"]),"oi":current_oi})
                         elif ch=="books5":
@@ -1537,17 +1862,17 @@ async def snapshot_loop():
             a,b=flow(10000),flow(30000)
             c=db();c.execute("INSERT OR REPLACE INTO snapshots VALUES(?,?,?,?,?,?,?,?)",
                 (int(time.time()*1000)//10000*10000,last_price,a["ratio"],b["ratio"],oi_delta(),flow_intensity(),book_imb,current_oi))
-            c.commit();c.close()
+            c.commit();c.close(); persist_minute_flow()
 
 @app.on_event("startup")
 async def startup():
-    c=db();c.close()
+    c=db();c.close(); load_minute_flow()
     await seed()
     asyncio.create_task(public_loop());asyncio.create_task(business_loop());asyncio.create_task(snapshot_loop())
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.61 RESEARCH FOUNDATION KST","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.63 MTF PRESSURE KST","ok":True,"status":status}
 
 def market_bias_snapshot():
     vals={tf:trend_bias_tf(tf) for tf in ("5M","15M","1H","4H")}
@@ -1577,7 +1902,7 @@ def _sma_slope(tf,n,back=3):
 def turn_radar_snapshot():
     """Live diagnostic radar. Scores are heuristic evidence-strength scores, not probabilities."""
     p=float(last_price or 0); A=max(atr_tf("5M"),1.0)
-    H,L=liquidity15(); b10=flow(10000); b30=flow(30000); inten=flow_intensity(); oi=oi_delta()
+    H,L=liquidity15(); b10=flow(10000); b30=flow(30000); inten=flow_intensity(); oi=oi_delta(); mtfp=mtf_pressure_snapshot()
     bias=market_bias_snapshot(); bscore=float(bias.get("score",0))
     # Regime: higher-TF structure, deliberately slow.
     regime_side="LONG" if bscore>=2 else "SHORT" if bscore<=-2 else "MIXED"
@@ -1595,10 +1920,12 @@ def turn_radar_snapshot():
     t5=trend_bias_tf("5M"); t15=trend_bias_tf("15M")
     structL=_clamp100(35+25*(t5==1)+25*(t15==1)+15*(slope20>0))
     structS=_clamp100(35+25*(t5==-1)+25*(t15==-1)+15*(slope20<0))
-    # Flow reversal/absorption proxy: extreme aggression + opposing book/30s loss of follow-through.
+    # v6.63: direction/pressure comes from 1M/3M/5M/15M. 10s/30s + book are shown as micro timing only.
     r10=float(b10["ratio"]); r30=float(b30["ratio"]); bk=float(book_imb or 0)
-    flowS=_clamp100(20 + 35*max(0,r30) + 30*max(0,-r10+r30) + 20*max(0,-bk) + 10*max(0,inten-1))
-    flowL=_clamp100(20 + 35*max(0,-r30) + 30*max(0,r10-r30) + 20*max(0,bk) + 10*max(0,inten-1))
+    pL=float(mtfp.get('long') or 50); pS=float(mtfp.get('short') or 50)
+    turn=str(mtfp.get('turn_side') or 'NONE')
+    flowL=_clamp100(pL + (8 if turn=='LONG' else 0) + 5*float(mtfp['timeframes']['1M'].get('absorb_long') or 0))
+    flowS=_clamp100(pS + (8 if turn=='SHORT' else 0) + 5*float(mtfp['timeframes']['1M'].get('absorb_short') or 0))
     # MA/VWAP context: proximity + side/reclaim context, never a standalone trigger.
     ctxL=ma_prox; ctxS=ma_prox
     if vw:
@@ -1622,7 +1949,7 @@ def turn_radar_snapshot():
       "location":{"long":round(locL,1),"short":round(locS,1),"d_high_atr":round(dH,2),"d_low_atr":round(dL,2),"zone":"UPPER" if locS>=70 else "LOWER" if locL>=70 else "MID"},
       "structure":{"long":round(structL,1),"short":round(structS,1),"5M":("BULL" if t5>0 else "BEAR" if t5<0 else "MIXED"),"15M":("BULL" if t15>0 else "BEAR" if t15<0 else "MIXED")},
       "ma_vwap":{"long":round(ctxL,1),"short":round(ctxS,1),"proximity":round(ma_prox,1),"sma20":ma20,"sma60":ma60,"sma120":ma120,"vwap":vw,"slope20":round(slope20,3),"slope60":round(slope60,3)},
-      "flow_reversal":{"long":round(flowL,1),"short":round(flowS,1),"d10":r10,"d30":r30,"book":bk,"intensity":round(inten,2),"oi60":round(oi,4)},
+      "flow_reversal":{"long":round(flowL,1),"short":round(flowS,1),"d10":r10,"d30":r30,"book":bk,"intensity":round(inten,2),"oi60":round(oi,4),"mtf":mtfp},
       "note":"scores are heuristic evidence strength, not probability"}
 
 def daily_move_snapshot():
@@ -1640,12 +1967,26 @@ def live():
     a,b=flow(10000),flow(30000);H,L=liquidity15()
     return {"price":last_price,"d10":a["ratio"],"d30":b["ratio"],"oi":current_oi,"oi60":oi_delta(),
             "flow":flow_intensity(),"book":book_imb,"liqH":H,"liqL":L,"armed":trap_arm,"status":status,
-            "bias":market_bias_snapshot(),"radar":turn_radar_snapshot(),"setup_watch":setup_watch,"daily":daily_move_snapshot()}
+            "bias":market_bias_snapshot(),"radar":turn_radar_snapshot(),"pressure":mtf_pressure_snapshot(),"setup_watch":setup_watch,"decision":decision_state,"daily":daily_move_snapshot()}
 
 @app.get("/api/setup-watch")
 def api_setup_watch():
-    """Lightweight 3-SETUP state endpoint for ~2s UI polling."""
-    return setup_watch
+    """Lightweight 3-SETUP + fresh MTF pressure endpoint for ~2s UI polling."""
+    return {**setup_watch,"pressure":mtf_pressure_snapshot(),"decision":decision_state}
+
+@app.get("/api/pressure")
+def api_pressure():
+    return mtf_pressure_snapshot()
+
+@app.get("/api/decision")
+def api_decision():
+    return decision_state
+
+@app.get("/api/decision-events")
+def api_decision_events(limit:int=500):
+    c=db(); c.row_factory=sqlite3.Row
+    rows=[dict(x) for x in c.execute("SELECT * FROM decision_events ORDER BY ts DESC LIMIT ?",(min(max(int(limit),1),2000),)).fetchall()]
+    c.close(); return rows
 
 @app.get("/api/research/summary")
 def api_research_summary():
@@ -1657,7 +1998,8 @@ def api_research_summary():
       COUNT(*) n,AVG(r.mfe_pct) avg_mfe,AVG(r.mae_pct) avg_mae FROM signals s LEFT JOIN signal_research r ON r.signal_id=s.id
       WHERE name LIKE 'PULLBACK%' OR name LIKE 'REVERSAL%' OR name LIKE 'RETEST%' GROUP BY setup""").fetchall()]
     user=c.execute("""SELECT COUNT(*) n,AVG(mfe_pct) avg_mfe,AVG(mae_pct) avg_mae FROM user_trade_research""").fetchone()
-    c.close(); return {"setup_stage_events":stages,"shadow":shadows,"base":base,"user":dict(user) if user else {}}
+    decisions=[dict(x) for x in c.execute("SELECT event,side,COUNT(*) n FROM decision_events GROUP BY event,side ORDER BY event,side").fetchall()]
+    c.close(); return {"setup_stage_events":stages,"shadow":shadows,"base":base,"user":dict(user) if user else {},"decision":decisions}
 
 @app.get("/api/research/export")
 def api_research_export(limit:int=5000):
@@ -1667,7 +2009,8 @@ def api_research_export(limit:int=5000):
       "signals":[dict(x) for x in c.execute("""SELECT s.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM signals s LEFT JOIN signal_research r ON r.signal_id=s.id ORDER BY s.ts DESC LIMIT ?""",(lim,)).fetchall()],
       "setup_events":[dict(x) for x in c.execute("SELECT * FROM setup_stage_events ORDER BY ts DESC LIMIT ?",(lim,)).fetchall()],
       "shadow":[dict(x) for x in c.execute("""SELECT s.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM shadow_signals s LEFT JOIN shadow_research r ON r.shadow_id=s.id ORDER BY s.ts DESC LIMIT ?""",(lim,)).fetchall()],
-      "user":[dict(x) for x in c.execute("SELECT * FROM user_trade_research ORDER BY started_ts DESC LIMIT ?",(lim,)).fetchall()]
+      "user":[dict(x) for x in c.execute("SELECT * FROM user_trade_research ORDER BY started_ts DESC LIMIT ?",(lim,)).fetchall()],
+      "decision":[dict(x) for x in c.execute("SELECT * FROM decision_events ORDER BY ts DESC LIMIT ?",(lim,)).fetchall()]
     }
     c.close(); return out
 
@@ -1679,9 +2022,10 @@ def api_research_export_csv(kind:str="signals", limit:int=10000):
       "signals":"SELECT s.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM signals s LEFT JOIN signal_research r ON r.signal_id=s.id ORDER BY s.ts DESC LIMIT ?",
       "setup":"SELECT * FROM setup_stage_events ORDER BY ts DESC LIMIT ?",
       "shadow":"SELECT s.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM shadow_signals s LEFT JOIN shadow_research r ON r.shadow_id=s.id ORDER BY s.ts DESC LIMIT ?",
-      "user":"SELECT * FROM user_trade_research ORDER BY started_ts DESC LIMIT ?"
+      "user":"SELECT * FROM user_trade_research ORDER BY started_ts DESC LIMIT ?",
+      "decision":"SELECT * FROM decision_events ORDER BY ts DESC LIMIT ?"
     }
-    if k not in qs: c.close(); return Response("kind must be signals, setup, shadow, or user",status_code=400,media_type="text/plain")
+    if k not in qs: c.close(); return Response("kind must be signals, setup, shadow, user, or decision",status_code=400,media_type="text/plain")
     rows=[dict(x) for x in c.execute(qs[k],(lim,)).fetchall()]; c.close(); buf=io.StringIO()
     if rows:
         w=csv.DictWriter(buf,fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
