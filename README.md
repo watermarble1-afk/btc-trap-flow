@@ -1,7 +1,7 @@
-# BTC OKX RADAR v6.63 MTF PRESSURE KST
+# BTC OKX RADAR v6.64 MTF PRESSURE KST
 
 ## Purpose
-v6.63 changes the flow architecture instead of adding another signal condition.
+v6.64 changes the flow architecture instead of adding another signal condition.
 
 The directional pressure input is now built from **1M / 3M / 5M / 15M aggressor-flow windows**. The old 10s / 30s flow is retained only as a final MICRO timing check.
 
@@ -54,3 +54,12 @@ Setup lifecycle context now also records the 1M / 3M / 5M / 15M pressure state a
 
 ## Important
 This is still a research trading system. MTF pressure is intended to reduce micro-flow noise and improve timing context; it is not evidence by itself that a trade is profitable.
+
+
+## v6.64 — MTF PANEL FIX / CACHE BUST
+- 1M / 3M / 5M / 15M pressure cards are physically rendered immediately below the BTC chart on PC and mobile.
+- Static WARMUP placeholders are present before API data arrives, so a missing/late API cannot make the panel disappear.
+- Existing MTF pressure calculation and Decision Layer signal logic are unchanged from v6.63.
+- index iframe cache key bumped to v=664.
+- HTML/static terminal responses use no-store/no-cache headers; mobile service-worker cache bumped and old caches are removed on activation.
+- The panel displays an explicit UI v6.64 stamp so deployment freshness is obvious.

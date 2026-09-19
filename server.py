@@ -15,8 +15,18 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.63 MTF PRESSURE KST")
+app=FastAPI(title="BTC Trap Flow Collector v6.64 MTF PANEL FIX KST")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
+
+@app.middleware("http")
+async def no_stale_terminal_html(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path.lower()
+    if path in ("/", "/mobile") or path.endswith((".html", ".js", ".webmanifest")):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 trades=deque(maxlen=12000)
 # v6.63: persistent 1-minute aggressor-flow buckets. These power 1M/3M/5M/15M pressure.
@@ -1872,7 +1882,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.63 MTF PRESSURE KST","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.64 MTF PANEL FIX KST","ok":True,"status":status}
 
 def market_bias_snapshot():
     vals={tf:trend_bias_tf(tf) for tf in ("5M","15M","1H","4H")}
@@ -2359,7 +2369,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 if STATIC_DIR.exists():
     @app.get("/mobile", include_in_schema=False)
     async def mobile_app():
-        return FileResponse(STATIC_DIR / "mobile.html")
+        return FileResponse(STATIC_DIR / "mobile.html", headers={"Cache-Control":"no-store, no-cache, must-revalidate, max-age=0"})
 
     app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="terminal")
 
