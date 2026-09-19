@@ -6,7 +6,7 @@ import httpx, websockets
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 INST="BTC-USDT-SWAP"
 PUB="wss://ws.okx.com:8443/ws/v5/public"
@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.59 THREE SETUP VWAP HOTFIX KST")
+app=FastAPI(title="BTC Trap Flow Collector v6.61 RESEARCH FOUNDATION KST")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 trades=deque(maxlen=12000)
@@ -41,10 +41,14 @@ tf_last_signal_ts={e:0 for e in ("5M","15M","1H","4H")}
 stage_15m_context={"LONG":None,"SHORT":None}
 stage_last_bucket={"EARLY_LONG":-1,"EARLY_SHORT":-1,"5M_LONG":-1,"5M_SHORT":-1,"CONF_LONG":-1,"CONF_SHORT":-1,
                    "ENTRY_LONG":-1,"ENTRY_SHORT":-1}
-# v6.57: three-setup lead state. PREP/ARMED are live-only early warnings; only TRIGGER is persisted.
+# v6.61: three-setup lead state. PREP/ARMED/TRIGGER transitions are persisted for research; only TRIGGER is a live signal.
 setup_arms={f"{setup}_{side}":None for setup in ("PULLBACK","REVERSAL","RETEST") for side in ("LONG","SHORT")}
 setup_watch={"updated_ts":0,"best":None,"items":[]}
 setup_flow_prev={"ts":0,"d10":0.0,"d30":0.0}
+setup_stage_last={}
+shadow_last_bucket={}
+retest_consumed_break={"LONG":0,"SHORT":0}
+retest_consumed_loaded=False
 scalp_prev_d10=0.0
 status={"public":"starting","business":"starting","started":int(time.time()*1000)}
 # v6.27: throttle CPU/SQLite-heavy research work so high-rate trade WS cannot starve HTTP.
@@ -119,6 +123,33 @@ def db():
     rcols={r[1] for r in c.execute("PRAGMA table_info(signal_research)").fetchall()}
     for col in ("b5","b10","b20","b30"):
         if col not in rcols:c.execute(f"ALTER TABLE signal_research ADD COLUMN {col} REAL")
+    # v6.61 research foundation: persist setup lifecycle and shadow comparisons without
+    # changing the live signal thresholds. This lets us prove whether PREP/ARMED and
+    # flow confirmation actually add edge instead of guessing from screenshots.
+    c.execute("""CREATE TABLE IF NOT EXISTS setup_stage_events(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, setup TEXT, side TEXT, stage TEXT,
+      score REAL, price REAL, level REAL, ref TEXT, reason TEXT, context_json TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_setup_stage_ts ON setup_stage_events(ts)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_setup_stage_key ON setup_stage_events(setup,side,stage,ts)")
+    c.execute("""CREATE TABLE IF NOT EXISTS shadow_signals(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, bucket INTEGER, setup TEXT, variant TEXT, side TEXT,
+      entry REAL, score REAL, reason TEXT, context_json TEXT,
+      UNIQUE(bucket,setup,variant,side)
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS shadow_research(
+      shadow_id INTEGER PRIMARY KEY, started_ts INTEGER, last_ts INTEGER,
+      mfe_pct REAL DEFAULT 0, mae_pct REAL DEFAULT 0, p5 REAL, p15 REAL, p30 REAL, p60 REAL,
+      FOREIGN KEY(shadow_id) REFERENCES shadow_signals(id)
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS user_trade_research(
+      open_event_id INTEGER PRIMARY KEY, started_ts INTEGER, last_ts INTEGER, side TEXT, entry REAL,
+      mfe_pct REAL DEFAULT 0, mae_pct REAL DEFAULT 0, p5 REAL, p15 REAL, p30 REAL, p60 REAL,
+      FOREIGN KEY(open_event_id) REFERENCES user_position_events(id)
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS setup_runtime_state(
+      key TEXT PRIMARY KEY, value_int INTEGER, updated_ts INTEGER
+    )""")
     c.commit(); return c
 
 def median(xs):
@@ -762,6 +793,133 @@ def evaluate_tf_engine(engine):
                     save_signal(nm,"SHORT",score,arm["level"],arm["ext"],{"d10":w10["ratio"],"d30":w30["ratio"],"oi60":oi60,"flow":inten,"book":book_imb},engine,A)
     tf_prev_d10[engine]=w10["ratio"]
 
+def ensure_retest_consumed_loaded():
+    global retest_consumed_loaded, retest_consumed_break
+    if retest_consumed_loaded:return
+    c=db(); rows=c.execute("SELECT key,value_int FROM setup_runtime_state WHERE key IN ('RETEST_CONSUMED_LONG','RETEST_CONSUMED_SHORT')").fetchall(); c.close()
+    for k,v in rows:
+        side='LONG' if str(k).endswith('LONG') else 'SHORT'; retest_consumed_break[side]=max(int(retest_consumed_break.get(side,0)),int(v or 0))
+    retest_consumed_loaded=True
+
+def mark_retest_consumed(side, break_ts):
+    ts=int(break_ts or 0)
+    if ts<=int(retest_consumed_break.get(side,0)):return
+    retest_consumed_break[side]=ts; now=int(time.time()*1000); c=db()
+    c.execute("""INSERT INTO setup_runtime_state(key,value_int,updated_ts) VALUES(?,?,?)
+      ON CONFLICT(key) DO UPDATE SET value_int=MAX(setup_runtime_state.value_int,excluded.value_int),updated_ts=excluded.updated_ts""",(f'RETEST_CONSUMED_{side}',ts,now))
+    c.commit(); c.close()
+
+def _research_context(**extra):
+    """Compact snapshot used by setup-stage and shadow research rows."""
+    ctx={
+      "price":float(last_price or 0),"d10":float(flow(10000)["ratio"]),"d30":float(flow(30000)["ratio"]),
+      "oi60":float(oi_delta()),"flow":float(flow_intensity()),"book":float(book_imb),
+      "bias":market_bias_snapshot().get("overall"),
+      "t5":trend_bias_tf("5M"),"t15":trend_bias_tf("15M"),"t1":trend_bias_tf("1H"),"t4":trend_bias_tf("4H"),
+      "vwap5":vwap_tf("5M"),"sma20":sma_tf("5M",20),"sma60":sma_tf("5M",60),
+      "atr5":atr_tf("5M",24),"atr15":atr_tf("15M",24)
+    }
+    ctx.update(extra)
+    return ctx
+
+def sync_setup_stage_events(items, context):
+    """Persist meaningful lifecycle transitions without 350 ms stage flapping.
+
+    If a setup jumps from IDLE straight to ARMED/TRIGGER in one evaluation, PREP
+    (and ARMED before TRIGGER) are still written once so lead-time research remains possible.
+    """
+    global setup_stage_last
+    now=int(time.time()*1000); rank={"IDLE":0,"PREP":1,"ARMED":2,"TRIGGER":3}
+    grouped={}
+    for x in items:
+        grouped.setdefault((x.get("setup"),x.get("side")),[]).append(x)
+    rows=[]
+    for setup in ("PULLBACK","REVERSAL","RETEST"):
+        for side in ("LONG","SHORT"):
+            key=(setup,side); seq=grouped.get(key,[])
+            # Final displayed state is the most advanced state in this evaluation.
+            final=max(seq,key=lambda x:(rank.get(str(x.get("stage")),0),float(x.get("score") or 0))) if seq else None
+            final_stage=str(final.get("stage") if final else "IDLE")
+            old=str(setup_stage_last.get(key,"IDLE"))
+            to_write=[]
+            if final_stage=="IDLE":
+                if old!="IDLE": to_write=[None]
+            elif rank.get(final_stage,0)>rank.get(old,0):
+                # Preserve skipped intermediate stages only when advancing from a lower state.
+                available={str(x.get("stage")):x for x in seq}
+                for st in ("PREP","ARMED","TRIGGER"):
+                    if rank[st]>rank.get(old,0) and rank[st]<=rank[final_stage] and st in available:
+                        to_write.append(available[st])
+            elif final_stage!=old:
+                # A real de-escalation (e.g. TRIGGER display expired -> PREP/ARMED) is one transition.
+                to_write=[final]
+            # Same final stage => no write, even if PREP is also emitted internally this cycle.
+            for item in to_write:
+                stage=str(item.get("stage") if item else "IDLE")
+                score=float(item.get("score") or 0) if item else 0.0
+                level=float(item.get("level") or 0) if item and item.get("level") is not None else None
+                meta=(item.get("meta") or {}) if item else {}
+                ref=str(meta.get("ref") or "")
+                reason=" | ".join(item.get("reasons") or []) if item else "NO_ACTIVE_SETUP"
+                ctx=dict(context); ctx.update({"setup_meta":meta,"expires_ts":item.get("expires_ts") if item else None})
+                rows.append((now,setup,side,stage,score,float(last_price or 0),level,ref,reason,json.dumps(ctx,separators=(",",":"),ensure_ascii=False)))
+                old=stage
+            setup_stage_last[key]=final_stage
+    if rows:
+        c=db(); c.executemany("""INSERT INTO setup_stage_events(ts,setup,side,stage,score,price,level,ref,reason,context_json)
+          VALUES(?,?,?,?,?,?,?,?,?,?)""",rows); c.commit(); c.close()
+
+def record_shadow(setup, variant, side, score, reasons, bucket, context):
+    """Research-only candidate. Never appears as a live signal and never opens a position."""
+    global shadow_last_bucket
+    key=(setup,variant,side)
+    if shadow_last_bucket.get(key)==bucket:return False
+    now=int(time.time()*1000); px=float(last_price or 0)
+    ctx=json.dumps(context,separators=(",",":"),ensure_ascii=False)
+    c=db()
+    try:
+        c.execute("""INSERT OR IGNORE INTO shadow_signals(ts,bucket,setup,variant,side,entry,score,reason,context_json)
+          VALUES(?,?,?,?,?,?,?,?,?)""",(now,int(bucket),setup,variant,side,px,float(score)," | ".join(reasons),ctx))
+        c.commit(); shadow_last_bucket[key]=bucket; return True
+    finally:c.close()
+
+def update_shadow_research():
+    if not last_price:return
+    now=int(time.time()*1000); px=float(last_price); c=db()
+    rows=c.execute("""SELECT s.id,s.ts,s.side,s.entry,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60
+      FROM shadow_signals s LEFT JOIN shadow_research r ON r.shadow_id=s.id
+      WHERE s.ts>=? ORDER BY s.ts DESC LIMIT 3000""",(now-3*60*60*1000,)).fetchall()
+    for sid,ts,side,entry,mfe,mae,p5,p15,p30,p60 in rows:
+        if not entry:continue
+        entry=float(entry); move=(px-entry)/entry*100.0; fav=move if side=="LONG" else -move; adv=-move if side=="LONG" else move
+        mfe=max(float(mfe or 0),fav,0.0); mae=max(float(mae or 0),adv,0.0); vals=[p5,p15,p30,p60]
+        for i,m in enumerate((5,15,30,60)):
+            if vals[i] is None and now-int(ts)>=m*60000: vals[i]=px
+        c.execute("""INSERT INTO shadow_research(shadow_id,started_ts,last_ts,mfe_pct,mae_pct,p5,p15,p30,p60)
+          VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(shadow_id) DO UPDATE SET last_ts=excluded.last_ts,mfe_pct=excluded.mfe_pct,mae_pct=excluded.mae_pct,
+          p5=COALESCE(shadow_research.p5,excluded.p5),p15=COALESCE(shadow_research.p15,excluded.p15),p30=COALESCE(shadow_research.p30,excluded.p30),p60=COALESCE(shadow_research.p60,excluded.p60)""",
+          (sid,ts,now,mfe,mae,*vals))
+    c.commit(); c.close()
+
+def update_user_trade_research():
+    """Fixed-horizon benchmark for the user's own B/S entries, independent of when they exit."""
+    if not last_price:return
+    now=int(time.time()*1000); px=float(last_price); c=db()
+    rows=c.execute("""SELECT e.id,e.ts,e.side,e.price,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60
+      FROM user_position_events e LEFT JOIN user_trade_research r ON r.open_event_id=e.id
+      WHERE e.event='OPEN' AND e.ts>=? ORDER BY e.ts DESC LIMIT 2000""",(now-3*60*60*1000,)).fetchall()
+    for eid,ts,side,entry,mfe,mae,p5,p15,p30,p60 in rows:
+        if not entry:continue
+        entry=float(entry); move=(px-entry)/entry*100.0; fav=move if side=="LONG" else -move; adv=-move if side=="LONG" else move
+        mfe=max(float(mfe or 0),fav,0.0); mae=max(float(mae or 0),adv,0.0); vals=[p5,p15,p30,p60]
+        for i,m in enumerate((5,15,30,60)):
+            if vals[i] is None and now-int(ts)>=m*60000: vals[i]=px
+        c.execute("""INSERT INTO user_trade_research(open_event_id,started_ts,last_ts,side,entry,mfe_pct,mae_pct,p5,p15,p30,p60)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(open_event_id) DO UPDATE SET last_ts=excluded.last_ts,mfe_pct=excluded.mfe_pct,mae_pct=excluded.mae_pct,
+          p5=COALESCE(user_trade_research.p5,excluded.p5),p15=COALESCE(user_trade_research.p15,excluded.p15),p30=COALESCE(user_trade_research.p30,excluded.p30),p60=COALESCE(user_trade_research.p60,excluded.p60)""",
+          (eid,ts,now,side,entry,mfe,mae,*vals))
+    c.commit(); c.close()
+
 def evaluate_setup_signals():
     """v6.57 THREE SETUP LEAD research engine.
 
@@ -772,7 +930,8 @@ def evaluate_setup_signals():
 
     Direction is never decided by 10s/30s flow alone. Flow is the final timing layer.
     """
-    global stage_last_bucket, setup_watch, setup_flow_prev
+    global stage_last_bucket, setup_watch, setup_flow_prev, retest_consumed_break
+    ensure_retest_consumed_loaded()
     if not last_price or len(trades)<20 or len(candles['5M'])<25 or len(candles['15M'])<12:return
     now=int(time.time()*1000); p=float(last_price)
     A5=max(atr_tf('5M',24),1.0); A15=max(atr_tf('15M',24),1.0)
@@ -806,9 +965,9 @@ def evaluate_setup_signals():
             turn=(flow_accel<=-.035 or d10<=-.09 or (d30>.06 and d10<d30-.08))
         return base and turn
 
-    def put(setup,side,stage,score,reasons,level=None,expires=None):
+    def put(setup,side,stage,score,reasons,level=None,expires=None,meta=None):
         item={'setup':setup,'side':side,'stage':stage,'score':round(max(0,min(100,float(score))),1),
-              'reasons':list(reasons),'level':level,'expires_ts':expires}
+              'reasons':list(reasons),'level':level,'expires_ts':expires,'meta':meta or {}}
         items.append(item)
         return item
 
@@ -816,6 +975,10 @@ def evaluate_setup_signals():
 
     def set_arm(setup,side,level,extreme,ttl_ms,meta=None):
         k=arm_key(setup,side); old=setup_arms.get(k)
+        # A fired setup is displayed for ~2 minutes, then it must be allowed to form a fresh arm.
+        if old and old.get('fired') and now-int(old.get('fired_ts') or now)>120000:
+            if setup=='RETEST': mark_retest_consumed(side,int((old.get('meta') or {}).get('break_ts') or 0))
+            setup_arms[k]=None; old=None
         # Keep an existing arm unless the level materially changed or it expired.
         if old and now<int(old.get('expires_ts') or 0) and abs(float(old.get('level') or level)-level)<=.18*A5:
             if side=='LONG': old['extreme']=min(float(old.get('extreme') or extreme),float(extreme))
@@ -828,11 +991,18 @@ def evaluate_setup_signals():
 
     def valid_arm(setup,side):
         a=setup_arms.get(arm_key(setup,side))
+        if a and a.get('fired') and now-int(a.get('fired_ts') or now)>120000:
+            if setup=='RETEST': mark_retest_consumed(side,int((a.get('meta') or {}).get('break_ts') or 0))
+            setup_arms[arm_key(setup,side)]=None; return None
         if a and now>=int(a.get('expires_ts') or 0):
+            if setup=='RETEST': mark_retest_consumed(side,int((a.get('meta') or {}).get('break_ts') or 0))
             setup_arms[arm_key(setup,side)]=None; return None
         return a
 
-    def clear_arm(setup,side): setup_arms[arm_key(setup,side)]=None
+    def clear_arm(setup,side):
+        a=setup_arms.get(arm_key(setup,side))
+        if setup=='RETEST' and a: mark_retest_consumed(side,int((a.get('meta') or {}).get('break_ts') or 0))
+        setup_arms[arm_key(setup,side)]=None
 
     def emit(setup,side,score,reasons,bucket,level=None):
         key=f'SETUP_{setup}_{side}'
@@ -842,7 +1012,8 @@ def evaluate_setup_signals():
         a=setup_arms.get(arm_key(setup,side))
         if a:
             a['fired']=True; a['fired_ts']=now; a['trigger_score']=float(score); a['trigger_reasons']=list(reasons)
-        put(setup,side,'TRIGGER',score,reasons,level,a.get('expires_ts') if a else None)
+        if setup=='RETEST' and a: mark_retest_consumed(side,int((a.get('meta') or {}).get('break_ts') or 0))
+        put(setup,side,'TRIGGER',score,reasons,level,a.get('expires_ts') if a else None,(a.get('meta') if a else {}))
         return True
 
     # ------------------------------------------------------------------
@@ -862,7 +1033,7 @@ def evaluate_setup_signals():
         touched=(float(c5['low'])<=ref+.16*A5 and p>=ref-.20*A5) if side=='LONG' else (float(c5['high'])>=ref-.16*A5 and p<=ref+.20*A5)
         context_score=28+slow_votes*11+(6 if overall.endswith('LONG' if side=='LONG' else 'SHORT') else 0)+(4*max(0,confluence-1))
         if approaching and dist<=.72:
-            put('PULLBACK',side,'PREP',context_score+max(0,16-dist*20),[f'HTF_ALIGN={slow_votes}',f'APPROACH_{near_name}',f'CONFLUENCE={confluence}'],ref)
+            put('PULLBACK',side,'PREP',context_score+max(0,16-dist*20),[f'HTF_ALIGN={slow_votes}',f'APPROACH_{near_name}',f'CONFLUENCE={confluence}'],ref,meta={'ref':near_name,'dist_atr':round(dist,4),'confluence':confluence,'slow_votes':slow_votes})
         if touched:
             arm=set_arm('PULLBACK',side,ref,float(c5['low'] if side=='LONG' else c5['high']),22*60*1000,
                         {'ref':near_name,'slow_votes':slow_votes,'confluence':confluence})
@@ -881,7 +1052,12 @@ def evaluate_setup_signals():
         micro=micro_break(side); ft=flow_timing(side,loose=True)
         not_chasing=(p-ref<=.52*A5) if side=='LONG' else (ref-p<=.52*A5)
         score=context_score+18+ (14 if response else 0)+(10 if micro else 0)+(11 if ft else 0)+(5 if candle_ok else 0)+(4 if inten>=.9 else 0)
-        put('PULLBACK',side,'ARMED',score,[f'{arm.get("meta",{}).get("ref",near_name)}_TOUCH','WAIT_RECLAIM','WAIT_MICRO_FLOW'],ref,arm['expires_ts'])
+        put('PULLBACK',side,'ARMED',score,[f'{arm.get("meta",{}).get("ref",near_name)}_TOUCH','WAIT_RECLAIM','WAIT_MICRO_FLOW'],ref,arm['expires_ts'],arm.get('meta'))
+        price_ready=response and candle_ok and micro and not_chasing
+        fast_flow=((d10>=-.03 and (flow_accel>=.015 or d10>=d30+.04)) if side=='LONG' else (d10<=.03 and (flow_accel<=-.015 or d10<=d30-.04)))
+        shadow_ctx=_research_context(setup='PULLBACK',ref=arm.get('meta',{}).get('ref',near_name),level=ref,price_ready=price_ready,base_flow=ft,fast_flow=fast_flow,score=score)
+        if price_ready: record_shadow('PULLBACK','PRICE',side,score,['PRICE_RESPONSE','1M_STRUCTURE','NO_FLOW_REQUIREMENT'],b5,shadow_ctx)
+        if price_ready and fast_flow: record_shadow('PULLBACK','FAST',side,score,['PRICE_RESPONSE','1M_STRUCTURE','FAST_FLOW'],b5,shadow_ctx)
         if response and candle_ok and micro and ft and not_chasing and score>=80 and not arm.get('fired'):
             emit('PULLBACK',side,score,[f'HTF_ALIGN={slow_votes}',f'{arm.get("meta",{}).get("ref",near_name)}_RECLAIM','1M_STRUCTURE','FLOW_TURN'],b5,ref)
 
@@ -894,7 +1070,7 @@ def evaluate_setup_signals():
             loc_dist=((p-level)/A15) if side=='LONG' else ((level-p)/A15)
             near=(-.20<=loc_dist<=.42)
             if near:
-                put('REVERSAL',side,'PREP',52+max(0,18-abs(loc_dist)*28),['15M_LIQ_APPROACH',f'DIST={loc_dist:.2f}ATR'],level)
+                put('REVERSAL',side,'PREP',52+max(0,18-abs(loc_dist)*28),['15M_LIQ_APPROACH',f'DIST={loc_dist:.2f}ATR'],level,meta={'dist_atr':round(loc_dist,4)})
             if side=='SHORT':
                 swept=float(c15['high'])>level+.015*A15
                 wick=sh15['upper']>=max(sh15['body'],.18*sh15['rng'])
@@ -925,9 +1101,13 @@ def evaluate_setup_signals():
             fade=(d10>d30+.06) if side=='LONG' else (d10<d30-.06)
             ctx_align=sum(x==wanted for x in (t1,t4))
             score=46+(16 if arm.get('meta',{}).get('swept') else 0)+(12 if arm.get('meta',{}).get('absorption') else 0)+(12 if failed else 0)+(8 if reject5 else 0)+(8 if micro else 0)+(8 if (ft or fade) else 0)+(4 if oi60>.003 else 0)+(4*ctx_align)
-            put('REVERSAL',side,'ARMED',score,['LIQ_TOUCHED','WAIT_FAILED_AUCTION','WAIT_PRICE_FLOW_TURN'],level,arm['expires_ts'])
+            put('REVERSAL',side,'ARMED',score,['LIQ_TOUCHED','WAIT_FAILED_AUCTION','WAIT_PRICE_FLOW_TURN'],level,arm['expires_ts'],arm.get('meta'))
             strong_price=failed and reject5 and micro
             timing=(ft or (fade and ((d10>=-.01) if side=='LONG' else (d10<=.01))))
+            fast_timing=((d10>=-.03 and (flow_accel>=.015 or d10>=d30+.03)) if side=='LONG' else (d10<=.03 and (flow_accel<=-.015 or d10<=d30-.03)))
+            shadow_ctx=_research_context(setup='REVERSAL',level=level,strong_price=strong_price,base_flow=timing,fast_flow=fast_timing,swept=bool(arm.get('meta',{}).get('swept')),absorption=bool(arm.get('meta',{}).get('absorption')),score=score)
+            if strong_price: record_shadow('REVERSAL','PRICE',side,score,['FAILED_AUCTION','5M_REJECT','1M_STRUCTURE','NO_FLOW_REQUIREMENT'],b15,shadow_ctx)
+            if strong_price and fast_timing: record_shadow('REVERSAL','FAST',side,score,['FAILED_AUCTION','5M_REJECT','1M_STRUCTURE','FAST_FLOW'],b15,shadow_ctx)
             if strong_price and timing and score>=82 and not arm.get('fired'):
                 reasons=['15M_LIQ','SWEEP' if arm.get('meta',{}).get('swept') else 'ABSORB','FAILED_AUCTION','5M_REJECT','1M_STRUCTURE','FLOW_FADE']
                 emit('REVERSAL',side,score,reasons,b15,level)
@@ -945,7 +1125,7 @@ def evaluate_setup_signals():
             dist=((level-p)/A5) if side=='LONG' else ((p-level)/A5)
             compression=width<=4.2
             if slow_ok and compression and -.12<=dist<=.38:
-                put('RETEST',side,'PREP',54+(10 if t15==wanted else 0)+(8 if t1==wanted else 0)+(6 if width<=3.0 else 0),['RANGE_EDGE','COMPRESSION','WAIT_BREAK'],level)
+                put('RETEST',side,'PREP',54+(10 if t15==wanted else 0)+(8 if t1==wanted else 0)+(6 if width<=3.0 else 0),['RANGE_EDGE','COMPRESSION','WAIT_BREAK'],level,meta={'range_width_atr':round(width,4)})
 
         # Scan the last 4 confirmed bars so a restart shortly after the break can still recover the arm.
         for idx in range(max(20,len(confirmed5)-4),len(confirmed5)):
@@ -953,9 +1133,9 @@ def evaluate_setup_signals():
             if len(prior)<12: continue
             hi0=max(float(x['high']) for x in prior); lo0=min(float(x['low']) for x in prior)
             sh=_bar_shape(br); body_ratio=sh['body']/max(sh['rng'],1e-9)
-            if float(br['close'])>hi0+.055*A5 and body_ratio>=.48 and sh['close_pos']>=.66:
+            if float(br['close'])>hi0+.055*A5 and body_ratio>=.48 and sh['close_pos']>=.66 and int(br['ts'])>int(retest_consumed_break.get('LONG',0)):
                 set_arm('RETEST','LONG',hi0,float(br['low']),32*60*1000,{'break_ts':br['ts'],'break_px':br['close']})
-            if float(br['close'])<lo0-.055*A5 and body_ratio>=.48 and sh['close_pos']<=.34:
+            if float(br['close'])<lo0-.055*A5 and body_ratio>=.48 and sh['close_pos']<=.34 and int(br['ts'])>int(retest_consumed_break.get('SHORT',0)):
                 set_arm('RETEST','SHORT',lo0,float(br['high']),32*60*1000,{'break_ts':br['ts'],'break_px':br['close']})
 
         for side in ('LONG','SHORT'):
@@ -977,7 +1157,12 @@ def evaluate_setup_signals():
             micro=micro_break(side); ft=flow_timing(side,loose=True)
             slow_ok=(t15==wanted or t1==wanted) and not (t15==-wanted and t1==-wanted)
             score=48+(12 if slow_ok else 0)+(16 if in_zone and touch else 0)+(12 if hold else 0)+(8 if micro else 0)+(8 if ft else 0)+(4 if inten>=.9 else 0)
-            put('RETEST',side,'ARMED',score,['BREAK_CONFIRMED','WAIT_LEVEL_RETEST','WAIT_HOLD_FLOW'],level,arm['expires_ts'])
+            put('RETEST',side,'ARMED',score,['BREAK_CONFIRMED','WAIT_LEVEL_RETEST','WAIT_HOLD_FLOW'],level,arm['expires_ts'],arm.get('meta'))
+            price_ready=slow_ok and in_zone and touch and hold and micro
+            fast_flow=((d10>=-.03 and (flow_accel>=.015 or d10>=d30+.035)) if side=='LONG' else (d10<=.03 and (flow_accel<=-.015 or d10<=d30-.035)))
+            shadow_ctx=_research_context(setup='RETEST',level=level,break_ts=arm.get('meta',{}).get('break_ts'),price_ready=price_ready,base_flow=ft,fast_flow=fast_flow,score=score)
+            if price_ready: record_shadow('RETEST','PRICE',side,score,['FIRST_RETEST','LEVEL_HOLD','1M_STRUCTURE','NO_FLOW_REQUIREMENT'],b5,shadow_ctx)
+            if price_ready and fast_flow: record_shadow('RETEST','FAST',side,score,['FIRST_RETEST','LEVEL_HOLD','1M_STRUCTURE','FAST_FLOW'],b5,shadow_ctx)
             if slow_ok and in_zone and touch and hold and micro and ft and score>=82:
                 emit('RETEST',side,score,['STRUCT_BREAK','FIRST_RETEST','LEVEL_HOLD','1M_STRUCTURE','FLOW_RESUME'],b5,level)
 
@@ -991,6 +1176,7 @@ def evaluate_setup_signals():
     out.sort(key=lambda x:(rank.get(x['stage'],0),x['score']),reverse=True)
     setup_watch={'updated_ts':now,'best':out[0] if out else None,'items':out,
                  'flow':{'d10':round(d10,4),'d30':round(d30,4),'accel':round(flow_accel,4),'intensity':round(float(inten),2)}}
+    sync_setup_stage_events(items,_research_context(flow_accel=round(flow_accel,6),overall=overall,A5=A5,A15=A15))
 
 def evaluate():
     # v6.57: old WATCH/EARLY/TURN pipeline is retained in source for audit/history,
@@ -1321,7 +1507,7 @@ async def public_loop():
                         evaluate();evaluate_macro()
                         last_heavy_ms["evaluate"]=now_ms
                     if now_ms-last_heavy_ms["outcomes"]>=1000:
-                        update_outcomes(); update_signal_research(); last_heavy_ms["outcomes"]=now_ms
+                        update_outcomes(); update_signal_research(); update_shadow_research(); update_user_trade_research(); last_heavy_ms["outcomes"]=now_ms
         except Exception as e:
             status["public"]="reconnecting";print("public",e);await asyncio.sleep(2)
 
@@ -1361,7 +1547,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.59 THREE SETUP VWAP HOTFIX KST","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.61 RESEARCH FOUNDATION KST","ok":True,"status":status}
 
 def market_bias_snapshot():
     vals={tf:trend_bias_tf(tf) for tf in ("5M","15M","1H","4H")}
@@ -1455,6 +1641,51 @@ def live():
     return {"price":last_price,"d10":a["ratio"],"d30":b["ratio"],"oi":current_oi,"oi60":oi_delta(),
             "flow":flow_intensity(),"book":book_imb,"liqH":H,"liqL":L,"armed":trap_arm,"status":status,
             "bias":market_bias_snapshot(),"radar":turn_radar_snapshot(),"setup_watch":setup_watch,"daily":daily_move_snapshot()}
+
+@app.get("/api/setup-watch")
+def api_setup_watch():
+    """Lightweight 3-SETUP state endpoint for ~2s UI polling."""
+    return setup_watch
+
+@app.get("/api/research/summary")
+def api_research_summary():
+    c=db(); c.row_factory=sqlite3.Row
+    stages=[dict(x) for x in c.execute("""SELECT setup,stage,COUNT(*) n FROM setup_stage_events GROUP BY setup,stage ORDER BY setup,stage""").fetchall()]
+    shadows=[dict(x) for x in c.execute("""SELECT setup,variant,COUNT(*) n,AVG(r.mfe_pct) avg_mfe,AVG(r.mae_pct) avg_mae
+      FROM shadow_signals s LEFT JOIN shadow_research r ON r.shadow_id=s.id GROUP BY setup,variant ORDER BY setup,variant""").fetchall()]
+    base=[dict(x) for x in c.execute("""SELECT CASE WHEN name LIKE 'PULLBACK%' THEN 'PULLBACK' WHEN name LIKE 'REVERSAL%' THEN 'REVERSAL' WHEN name LIKE 'RETEST%' THEN 'RETEST' ELSE 'OTHER' END setup,
+      COUNT(*) n,AVG(r.mfe_pct) avg_mfe,AVG(r.mae_pct) avg_mae FROM signals s LEFT JOIN signal_research r ON r.signal_id=s.id
+      WHERE name LIKE 'PULLBACK%' OR name LIKE 'REVERSAL%' OR name LIKE 'RETEST%' GROUP BY setup""").fetchall()]
+    user=c.execute("""SELECT COUNT(*) n,AVG(mfe_pct) avg_mfe,AVG(mae_pct) avg_mae FROM user_trade_research""").fetchone()
+    c.close(); return {"setup_stage_events":stages,"shadow":shadows,"base":base,"user":dict(user) if user else {}}
+
+@app.get("/api/research/export")
+def api_research_export(limit:int=5000):
+    lim=min(max(int(limit),1),20000); c=db(); c.row_factory=sqlite3.Row
+    out={
+      "generated_ts":int(time.time()*1000),
+      "signals":[dict(x) for x in c.execute("""SELECT s.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM signals s LEFT JOIN signal_research r ON r.signal_id=s.id ORDER BY s.ts DESC LIMIT ?""",(lim,)).fetchall()],
+      "setup_events":[dict(x) for x in c.execute("SELECT * FROM setup_stage_events ORDER BY ts DESC LIMIT ?",(lim,)).fetchall()],
+      "shadow":[dict(x) for x in c.execute("""SELECT s.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM shadow_signals s LEFT JOIN shadow_research r ON r.shadow_id=s.id ORDER BY s.ts DESC LIMIT ?""",(lim,)).fetchall()],
+      "user":[dict(x) for x in c.execute("SELECT * FROM user_trade_research ORDER BY started_ts DESC LIMIT ?",(lim,)).fetchall()]
+    }
+    c.close(); return out
+
+@app.get("/api/research/export.csv")
+def api_research_export_csv(kind:str="signals", limit:int=10000):
+    import csv, io
+    lim=min(max(int(limit),1),30000); k=kind.lower(); c=db(); c.row_factory=sqlite3.Row
+    qs={
+      "signals":"SELECT s.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM signals s LEFT JOIN signal_research r ON r.signal_id=s.id ORDER BY s.ts DESC LIMIT ?",
+      "setup":"SELECT * FROM setup_stage_events ORDER BY ts DESC LIMIT ?",
+      "shadow":"SELECT s.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM shadow_signals s LEFT JOIN shadow_research r ON r.shadow_id=s.id ORDER BY s.ts DESC LIMIT ?",
+      "user":"SELECT * FROM user_trade_research ORDER BY started_ts DESC LIMIT ?"
+    }
+    if k not in qs: c.close(); return Response("kind must be signals, setup, shadow, or user",status_code=400,media_type="text/plain")
+    rows=[dict(x) for x in c.execute(qs[k],(lim,)).fetchall()]; c.close(); buf=io.StringIO()
+    if rows:
+        w=csv.DictWriter(buf,fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
+    return Response(buf.getvalue(),media_type="text/csv; charset=utf-8",headers={"Content-Disposition":f"attachment; filename=btc_research_{k}.csv"})
 
 @app.get("/api/signals")
 def signals(limit:int=100, engine:str="ALL"):
