@@ -1,65 +1,75 @@
-# BTC OKX RADAR v6.64 MTF PRESSURE KST
+# BTC OKX RADAR v6.65 — EXEC + PRECURSOR LAB
 
-## Purpose
-v6.64 changes the flow architecture instead of adding another signal condition.
+This version freezes the current EXEC Decision Layer for validation and removes unrelated live signal generation from the runtime/UI. It adds one independent leading-anomaly research engine (PRECURSOR) without changing or vetoing EXEC.
 
-The directional pressure input is now built from **1M / 3M / 5M / 15M aggressor-flow windows**. The old 10s / 30s flow is retained only as a final MICRO timing check.
+## Live signal scope
 
-## MTF pressure engine
-- Incoming OKX trades are aggregated into persistent 1-minute buy/sell-notional buckets.
-- Recent minute buckets are stored in SQLite (`flow_minutes`) and restored after Railway restart/deploy.
-- Live pressure is calculated for rolling 1M, 3M, 5M, and 15M windows.
-- Each window exposes buy-vs-sell pressure, delta ratio, price movement, flow intensity, data coverage, and a BUY / SELL / BALANCE state.
-- FAST pressure = 1M + 3M.
-- SLOW pressure = 5M + 15M.
-- A FAST-vs-SLOW divergence is tracked as an early TURN indication.
-- Pressure values are evidence strength, not win probability.
+Only two signal layers are exposed on the chart:
 
-## Signal system changes
-- PULLBACK / RETEST still require their original location + price-response + 1M structure logic.
-- Their flow confirmation now requires MTF pressure alignment first; 10s/30s can only confirm the final timing.
-- REVERSAL now uses 5M/15M aggression for the sweep/absorption context and FAST-vs-SLOW pressure turn for the reversal transition.
-- 1H / 4H legacy tactical triggers also use MTF pressure as the directional flow layer, with micro flow only as the final timing check.
-- The engine-position HOLD / PRESSURE / EXIT / SWITCH manager now weights MTF pressure heavily and gives 10s/30s only a small timing weight.
+- `EXEC L / EXEC S`: the existing Decision Layer trigger. PB / REVERSAL / RETEST remain internal feeder states so EXEC can continue to be tested unchanged.
+- `EARLY L / EARLY S`: the new PRECURSOR warning. It is an independent research warning, not an entry signal and it does not affect EXEC.
 
-## Decision Layer
-The v6.62 conflict resolver remains in place and now also consumes MTF pressure:
-- stable bias: LONG / SHORT / NEUTRAL
-- action: WAIT / WATCH / READY / TRIGGER / CONFLICT
-- LONG <-> SHORT still cannot flip directly; it must pass through NEUTRAL
-- a RAW trigger can be held at READY when MTF pressure is materially opposite
-- MTF pressure contributes to evidence but is not treated as probability
+`X` on the chart is reserved for the user's own manually simulated position exit. Decision invalidation is still recorded internally but is no longer drawn as `X`.
 
-## UI
-A new panel under the price chart shows:
-- 1M / 3M / 5M / 15M LONG vs SHORT pressure
-- delta, price move, flow intensity, and warm-up coverage
-- FAST vs SLOW pressure and early TURN direction
-- 10s / 30s remain visible in the right-side MICRO TIMING box
+## Removed / frozen signal paths
 
-The default chart still shows only Decision Layer execution markers. `RAW 연구신호 보기` restores PB / RV / RT research markers.
+No new live signals are generated from the following paths:
 
-## Persistence and warm-up
-The first fresh deployment needs a short warm-up before MTF pressure becomes a valid signal input. Once minute-flow data has been collected, it is persisted and restored across Railway restarts. The UI explicitly displays WARM coverage instead of pretending incomplete 15M data is complete.
+- independent 1H / 4H signal engines
+- legacy SCALP 1M/3M engine
+- legacy standalone 15M engine
+- standalone VWAP signal generator
+- PRICE / FAST shadow-signal variants
+- public PB / REVERSAL / RETEST raw signal rows
 
-## Research
-Existing research remains intact:
-- BASE signals + forward MFE/MAE
-- PREP / ARMED / TRIGGER lifecycle events
-- SHADOW PRICE / FAST variants
-- manual-trade benchmark
-- Decision Layer history
+Historical database rows are not deleted. 1H / 4H market structure is still used as context inside the existing EXEC feeder logic; only their independent signal generation is stopped.
 
-Setup lifecycle context now also records the 1M / 3M / 5M / 15M pressure state at the time of the event.
+## PRECURSOR engine
 
-## Important
-This is still a research trading system. MTF pressure is intended to reduce micro-flow noise and improve timing context; it is not evidence by itself that a trade is profitable.
+PRECURSOR looks for a combination of four leading-anomaly ideas plus location:
 
+1. **Impact decay** — aggressive buying/selling continues but produces less matching price progress than previous minutes.
+2. **Absorption** — one-sided aggressor flow persists while price refuses to continue in that direction.
+3. **Pressure deceleration** — 1M/3M fast pressure weakens before 5M/15M slow pressure fully turns.
+4. **Liquidity sweep / reclaim** — a recent 1M local extreme is swept and quickly reclaimed.
+5. **Location** — the anomaly is near 15M liquidity or a recent 5M local extreme.
 
-## v6.64 — MTF PANEL FIX / CACHE BUST
-- 1M / 3M / 5M / 15M pressure cards are physically rendered immediately below the BTC chart on PC and mobile.
-- Static WARMUP placeholders are present before API data arrives, so a missing/late API cannot make the panel disappear.
-- Existing MTF pressure calculation and Decision Layer signal logic are unchanged from v6.63.
-- index iframe cache key bumped to v=664.
-- HTML/static terminal responses use no-store/no-cache headers; mobile service-worker cache bumped and old caches are removed on activation.
-- The panel displays an explicit UI v6.64 stamp so deployment freshness is obvious.
+An `EARLY` chart event requires a high combined score, at least three independent sensor groups, meaningful location/sweep context, and a margin over the opposite side. Repeated events are episode-deduplicated so the chart does not spam the same warning.
+
+## Research / validation
+
+v6.65 records forward research for both layers:
+
+- EXEC: MFE / MAE and 5 / 15 / 30 / 60 minute forward prices.
+- PRECURSOR: MFE / MAE and 5 / 15 / 30 / 60 minute forward prices.
+- PRECURSOR also records the next same-direction EXEC within 60 minutes and its lead time in seconds.
+
+Exports:
+
+- `/api/research/export.csv?kind=decision` — EXEC events + forward research
+- `/api/research/export.csv?kind=precursor` — EARLY events + forward research + lead time to EXEC
+- setup lifecycle / historical research exports remain available for audit.
+
+## Runtime/UI changes
+
+- PC and mobile chart signal controls are simplified to EXEC + EARLY only.
+- RAW PB/RV/RT toggle and legacy signal-engine selectors are removed.
+- Legacy engine position panels are removed from the live UI.
+- The MTF 1M / 3M / 5M / 15M pressure panel remains unchanged.
+- A dedicated PRECURSOR panel shows LONG/SHORT early scores, sensor groups and reasons.
+- Cache key bumped to `v665`.
+
+## Validation performed
+
+- Python compile check.
+- PC and mobile JavaScript syntax checks.
+- Duplicate HTML ID checks.
+- Synthetic LONG and SHORT precursor scenarios.
+- Neutral-flow scenario to verify no EARLY event is emitted from location alone.
+- PRECURSOR episode de-duplication check.
+- EXEC and PRECURSOR research tables / exports tested.
+- PRECURSOR → next EXEC lead-time linking tested.
+- Confirmed `public_loop` no longer calls the independent 1H/4H signal engines or legacy shadow/signal research hot paths.
+- Confirmed PB/RV/RT live evaluator no longer inserts public raw signal rows.
+
+The actual OKX/Railway long-running soak test still has to occur in the deployed environment.

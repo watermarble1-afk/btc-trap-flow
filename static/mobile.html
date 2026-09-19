@@ -68,8 +68,8 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
 <body class="embedded-btc"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.64 · MTF PANEL FIX KST</h1>
-    <div class="sub">실시간 TRAP FLOW · ← 과거로 밀면 300봉씩 자동 추가 · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO · VWAP 표시 · 약한 미시 신호는 저장 중단 · PREP → ARMED → TRIGGER 선행 감지 · 1M/3M/5M/15M 압력 + MICRO 타점 · 큰 방향 BIAS 제공</div>
+    <h1>BTC OKX RADAR v6.65 · MTF PANEL FIX KST</h1>
+    <div class="sub">EXEC Decision Layer 검증 + PRECURSOR 선행경보 연구 · 1M / 3M / 5M / 15M 압력 · 10s/30s MICRO 타이밍 · 1H/4H는 방향 컨텍스트만</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
 </div>
@@ -80,15 +80,15 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
   <div class="card"><div class="lbl">TURN ZONE</div><div class="val" id="topZone">—</div><div class="tiny" id="topZoneDetail">15M liquidity / ATR</div></div>
   <div class="card"><div class="lbl">STRUCTURE</div><div class="val" id="topStructure">—</div><div class="tiny" id="topStructureDetail">5M / 15M</div></div>
   <div class="card"><div class="lbl">MTF FLOW PRESSURE</div><div class="val" id="topPressure">—</div><div class="tiny" id="topPressureDetail">1M · 3M · 5M · 15M</div></div>
-  <div class="card"><div class="lbl">EXECUTION</div><div class="val" id="topRadar">WAIT</div><div class="tiny" id="topRadarDetail">Decision Layer · RAW와 분리</div></div>
-  <div class="card"><div class="lbl">포지션 누적 성과</div><div class="val" id="fwd">0W / 0L</div></div>
+  <div class="card"><div class="lbl">EXECUTION</div><div class="val" id="topRadar">WAIT</div><div class="tiny" id="topRadarDetail">Decision Layer · EXEC 전용</div></div>
+  <div class="card"><div class="lbl">PRECURSOR</div><div class="val" id="topPrecursor">SCANNING</div><div class="tiny" id="topPrecursorDetail">추진력 약화 · 흡수 · sweep · 압력감속</div></div>
 </div>
 
 <div class="grid">
 <section class="panel">
   <div class="buttons"><button data-tf="1M">1M</button><button data-tf="3M">3M</button><button data-tf="5M" class="on">5M</button><button data-tf="15M">15M</button><button data-tf="1H">1H</button><button data-tf="4H">4H</button><button data-tf="1D">1D</button><button class="tf" data-tf="1W">1W</button><button class="tf" data-tf="1MO">1MO</button></div>
   
-<div id="serverSyncBox" style="margin:8px 0;padding:9px 12px;border:1px solid #263249;border-radius:10px;background:#101622;font-size:12px"><b>24H SERVER</b> · <span id="srvState">연결 확인중…</span> · 저장 신호 <b id="srvCount">0</b> · <span id="srvLast">-</span></div>
+<div id="serverSyncBox" style="margin:8px 0;padding:9px 12px;border:1px solid #263249;border-radius:10px;background:#101622;font-size:12px"><b>24H SERVER</b> · <span id="srvState">연결 확인중…</span> · EXEC/EARLY <b id="srvCount">0</b> · <span id="srvLast">-</span></div>
 <div class="chartTools"><button class="indBtn" id="indBtn">⚙ 지표 설정</button>
 <div class="indPanel" id="indPanel">
  <b style="font-size:12px">차트 지표</b>
@@ -98,17 +98,14 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
  <div style="height:1px;background:#263249;margin:10px 0"></div>
  <div class="indRow"><span>기타</span><label><input type="checkbox" id="vwapChk"> VWAP</label><label><input type="checkbox" id="volChk" checked> 거래량</label></div>
  <div style="font-size:9px;color:#7f8ba0;margin-top:7px">예: 5·20·60·120·240 또는 직접 숫자 입력 · 설정은 이 브라우저에 저장</div>
-</div></div><div id="enginePanel" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:7px;border:1px solid #263247;border-radius:8px;background:#0b111b">
-<b style="font-size:10px">SIGNAL ENGINE</b>
-<button class="btn engBtn" data-eng="NONE">신호 제거</button><button class="btn engBtn" data-eng="SCALP">1/3M 과거</button><button class="btn engBtn" data-eng="5M">3-SETUP LIVE</button><button class="btn engBtn" data-eng="15M">15M 과거</button><button class="btn engBtn" data-eng="1H">1H</button><button class="btn engBtn" data-eng="4H">4H</button><button class="btn engBtn" data-eng="ALL">ALL</button><label style="display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #3d2a55;border-radius:7px;background:#171022;font-size:10px;color:#d8b4ff;cursor:pointer"><input type="checkbox" id="vwapSigChk" checked> VWAP 신호</label><label style="display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border:1px solid #24445b;border-radius:7px;background:#0d1822;font-size:10px;color:#8fc9ff;cursor:pointer"><input type="checkbox" id="rawResearchChk"> RAW 연구신호 보기</label>
-<span id="scalpStat" style="font-size:10px;color:#8d99ad">1/3M —</span><span id="m5Stat" style="font-size:10px;color:#8d99ad">5M —</span><span id="m15Stat" style="font-size:10px;color:#8d99ad">15M —</span><span id="h1Stat" style="font-size:10px;color:#8d99ad">1H —</span><span id="h4Stat" style="font-size:10px;color:#8d99ad">4H —</span>
-<div style="width:100%;font-size:9px;color:#78869a;margin-top:2px">기본 차트는 DECISION TRIGGER만 표시 · PB/RV/RT 원신호는 DB에 계속 기록되며 RAW 연구신호 보기에서만 노출</div><div style="width:100%;display:flex;gap:12px;flex-wrap:wrap;font-size:9px;margin-top:4px">
-<span style="color:#35d98a">▲ PULLBACK L</span><span style="color:#ff5c70">▼ PULLBACK S</span><span style="color:#00e5ff">◆ REVERSAL L</span><span style="color:#ffd400">◆ REVERSAL S</span><span style="color:#b56cff">● RETEST</span><span style="color:#8d99ad">PREP(낌새) → ARMED(자리) → TRIGGER(타점) · 10s/30s는 마지막 확인만</span>
-
-<span style="color:#27c2a4">● 1H L/S</span><span style="color:#c86cff">● 4H L/S</span><span style="color:#b37cff">● VWAP선</span><span style="color:#d7dee9">● X 종료</span></div>
+</div></div><div id="enginePanel" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:8px 10px;border:1px solid #263247;border-radius:8px;background:#0b111b">
+<b style="font-size:10px">LIVE SIGNALS · v6.65</b>
+<span style="color:#35d98a;font-size:10px;font-weight:800">▲ EXEC L</span><span style="color:#ff5c70;font-size:10px;font-weight:800">▼ EXEC S</span>
+<span style="color:#8fb5ff;font-size:10px;font-weight:800">◌ EARLY L</span><span style="color:#ff9bd2;font-size:10px;font-weight:800">◌ EARLY S</span>
+<span style="color:#78869a;font-size:9px">PB/RV/RT는 EXEC 내부 feeder로만 유지 · 1H/4H 독립신호/SCALP/구15M/VWAP 신호 생성 중단 · X는 내 포지션 종료만</span>
 </div><div style="font-size:10px;color:#8d99ad;margin:3px 0">TIMEFRAME · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO</div><div class="hoverPctBar" id="hoverPctBar">봉에 마우스를 올리면 해당 봉의 등락률이 표시됩니다.</div><div id="chart"></div>
   <div class="pressureDeck" id="mtfPressurePanel">
-    <div class="pressureHead"><div><div class="pressureTitle">MTF ORDER FLOW · 1M / 3M / 5M / 15M <span style="font-size:9px;color:#6da7ff">UI v6.64</span> · 매집/체결 압력 <span class="microTag">메인 방향 입력</span></div><div class="tiny">1M이 먼저 움직이고 3M→5M→15M이 따라오는지 추적 · 수치는 확률이 아니라 공격적 체결 비중</div></div><div class="pressureSummary" id="pressureSummary">분봉 체결 데이터 수집 중…</div></div>
+    <div class="pressureHead"><div><div class="pressureTitle">MTF ORDER FLOW · 1M / 3M / 5M / 15M <span style="font-size:9px;color:#6da7ff">UI v6.65</span> · 매집/체결 압력 <span class="microTag">메인 방향 입력</span></div><div class="tiny">1M이 먼저 움직이고 3M→5M→15M이 따라오는지 추적 · 수치는 확률이 아니라 공격적 체결 비중</div></div><div class="pressureSummary" id="pressureSummary">분봉 체결 데이터 수집 중…</div></div>
     <div class="pressureGrid" id="pressureGrid">
       <div class="pressureTf"><div class="pressureTfHead"><span>1M</span><span class="pressureWarm">WARMUP</span></div><div class="pressureNums"><span style="color:#35d98a">L —</span><span style="color:#ff5c70">S —</span></div><div class="pressureTrack"><div class="pressureBuy" style="width:50%"></div><div class="pressureSell" style="width:50%"></div></div><div class="pressureMeta"><span>Δ —</span><span>가격 —</span><span>강도 —</span><span class="pressureWarm">수집 중</span></div></div>
       <div class="pressureTf"><div class="pressureTfHead"><span>3M</span><span class="pressureWarm">WARMUP</span></div><div class="pressureNums"><span style="color:#35d98a">L —</span><span style="color:#ff5c70">S —</span></div><div class="pressureTrack"><div class="pressureBuy" style="width:50%"></div><div class="pressureSell" style="width:50%"></div></div><div class="pressureMeta"><span>Δ —</span><span>가격 —</span><span>강도 —</span><span class="pressureWarm">수집 중</span></div></div>
@@ -117,11 +114,9 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
     </div>
     <div class="pressureTurn" id="pressureTurn">FAST 1M+3M — · SLOW 5M+15M — · MICRO 10s/30s는 최종 타점 확인만</div>
   </div>
-  <div class="legend">
-    <span><b style="color:#35d7e5">RETEST</b> 청록</span><span><b style="color:#c7d0dd">X</b> 포지션 정리</span><span><b class="purple">VWAP</b> 선택 봉 기준 앵커 VWAP</span>
-  </div>
+  <div class="legend"><span><b style="color:#35d98a">▲ EXEC</b> 최종 실행 후보</span><span><b style="color:#8fb5ff">◌ EARLY</b> 선행 이상징후(진입신호 아님)</span><span><b style="color:#c7d0dd">X</b> 내 포지션 종료</span><span><b class="purple">VWAP</b> 차트 지표</span></div>
   <div class="warn">
-    1M·3M·5M·15M·1H·4H·1D 차트를 자유롭게 볼 수 있습니다. v6.64는 1M·3M·5M·15M 체결 압력을 메인 방향 입력으로 사용하고 Decision Layer가 RAW 3-SETUP 충돌·중복을 정리해 실전 화면에는 하나의 실행 상태만 보여줍니다. 기존 3-SETUP 엔진이 PREP → ARMED → TRIGGER로 상태를 나눠 선행 징후와 실제 타점을 분리합니다. PULLBACK은 눌림 위치, REVERSAL은 15M 유동성 sweep/실패, RETEST는 확인된 돌파 후 첫 되돌림을 추적합니다. 10s/30s 체결은 방향 결정에서 제외하고 마지막 MICRO 타이밍 확인에만 사용합니다.
+    v6.65는 실전 검증 화면을 EXEC + PRECURSOR 두 계층으로 정리했습니다. PB/RV/RT는 차트에 별도 신호로 뿌리지 않고 EXEC Decision Layer의 내부 입력으로만 유지합니다. PRECURSOR는 가격 추진력 감소 · 공격적 체결 흡수 · 1M liquidity sweep/reclaim · 압력 감속을 감지하는 독립 연구엔진이며 EXEC를 수정하거나 막지 않습니다. EARLY는 “여기 이상하다”는 경고일 뿐 진입 신호가 아닙니다. 1H/4H 독립 신호와 레거시 SCALP/15M/VWAP 신호 생성은 중단했습니다.
   </div>
 </section>
 
@@ -164,21 +159,21 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
     <div class="reason" id="decisionWhy" style="margin-top:7px">RAW 3-SETUP을 하나의 실행 상태로 정리 중…</div>
   </div>
 
-  <div class="box">
-    <h3>RAW SETUP RADAR <span class="tiny">연구용 · PREP → ARMED → TRIGGER</span></h3>
-    <div id="setupRawState" class="signal yellow">SCANNING</div>
-    <div class="row"><span>LOCATION</span><b id="radLocation">—</b></div>
-    <div class="row"><span>STRUCTURE</span><b id="radStructure">—</b></div>
-    <div class="row"><span>MA / VWAP</span><b id="radMa">—</b></div>
-    <div class="row"><span>FLOW REVERSAL</span><b id="radFlow">—</b></div>
-    <div class="reason" id="radWhy" style="margin-top:7px">서버 분석값 수집 중…</div>
+  <div class="box" id="precursorBox">
+    <h3>PRECURSOR ENGINE <span class="tiny">선행 이상징후 · EXEC와 독립</span></h3>
+    <div id="precursorState" class="signal yellow">SCANNING</div>
+    <div class="row"><span>EARLY LONG</span><b id="precursorLong">0</b></div>
+    <div class="row"><span>EARLY SHORT</span><b id="precursorShort">0</b></div>
+    <div class="row"><span>감지 센서</span><b id="precursorGroups">—</b></div>
+    <div class="reason" id="precursorWhy" style="margin-top:7px">추진력 약화 · 흡수 · sweep · 압력감속 감시 중…</div>
+    <div class="tiny" style="margin-top:6px;color:#8d99ad">EARLY는 진입 명령이 아닙니다. EXEC보다 먼저 이상징후가 반복적으로 잡히는지 연구합니다.</div>
     <div style="display:none"><span id="liqH"></span><span id="liqL"></span><span id="liqDist"></span><span id="bs10"></span><span id="bs30"></span><span id="oiNow"></span><span id="oi60"></span><span id="bookImb"></span><div id="flowfill"></div><div id="sig"></div><span id="entry"></span><span id="sl"></span><span id="tp1"></span><span id="tp2"></span><div id="why"></div></div>
   </div>
 
   <div class="box">
-    <h3>RESEARCH LAB <span class="tiny">조건 동결 · 비교군 기록</span></h3>
+    <h3>RESEARCH LAB <span class="tiny">EXEC 동결 · EARLY 비교 연구</span></h3>
     <div id="researchSummary" class="reason">연구 데이터 집계 중…</div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"><a href="/api/research/export" target="_blank" style="color:#8fb5ff;font-size:10px">JSON 전체</a><a href="/api/research/export.csv?kind=signals" style="color:#8fb5ff;font-size:10px">BASE CSV</a><a href="/api/research/export.csv?kind=setup" style="color:#8fb5ff;font-size:10px">SETUP CSV</a><a href="/api/research/export.csv?kind=shadow" style="color:#8fb5ff;font-size:10px">SHADOW CSV</a><a href="/api/research/export.csv?kind=user" style="color:#8fb5ff;font-size:10px">USER CSV</a><a href="/api/research/export.csv?kind=decision" style="color:#8fb5ff;font-size:10px">DECISION CSV</a></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"><a href="/api/research/export" target="_blank" style="color:#8fb5ff;font-size:10px">JSON 전체</a><a href="/api/research/export.csv?kind=signals" style="color:#8fb5ff;font-size:10px">BASE CSV</a><a href="/api/research/export.csv?kind=setup" style="color:#8fb5ff;font-size:10px">SETUP CSV</a><a href="/api/research/export.csv?kind=shadow" style="color:#8fb5ff;font-size:10px">SHADOW CSV</a><a href="/api/research/export.csv?kind=user" style="color:#8fb5ff;font-size:10px">USER CSV</a><a href="/api/research/export.csv?kind=decision" style="color:#8fb5ff;font-size:10px">EXEC CSV</a><a href="/api/research/export.csv?kind=precursor" style="color:#8fb5ff;font-size:10px">PRECURSOR CSV</a></div>
   </div>
 
   <div class="box mySidePosition">
@@ -186,29 +181,13 @@ html,body{overscroll-behavior-y:none} body{padding-bottom:74px}.wrap{padding:8px
     <div class="myTradeControls"><button onclick="openMyPos('LONG')">LONG 진입</button><button onclick="openMyPos('SHORT')">SHORT 진입</button></div>
     <div id="myPosition" class="myPositionBox">불러오는 중…</div>
   </div>
-
 <div class="box">
-<h3>엔진별 현재 포지션 <span class="tiny">HOLD ↔ PRESSURE → X / SWITCH</span></h3>
-<div id="enginePositions" class="tiny">불러오는 중…</div>
-</div>
-
-
-  <div class="box">
     <h3>🧭 TURN EVENT LOG <span class="tiny">확정 TURN과 핵심 컨텍스트만</span> <span style="font-size:8px;font-weight:400"><span style="color:#35d98a">●1/3 L</span> <span style="color:#4f8cff">●5/15 L</span> <span style="color:#ff78b4">●1/3 S</span> <span style="color:#ff4f64">●5/15 S</span></span></h3>
     <div class="history" id="history"><div class="tiny">아직 없음</div></div>
   </div>
 </aside>
 </div>
 <div class="tradeDesk">
-  <section class="panel deskPane">
-    <h3>🤖 엔진 포지션 / 거래 기록 <span class="tiny">자동 시뮬레이터</span></h3>
-    <div style="overflow:auto;max-height:430px">
-      <table style="width:100%;border-collapse:collapse;font-size:10px">
-        <thead><tr style="color:#8d99ad;text-align:left"><th style="padding:6px">시간</th><th>엔진</th><th>방향</th><th>진입가</th><th>청산가</th><th>보유</th><th>종료사유</th><th>수익금</th><th>결과</th></tr></thead>
-        <tbody id="tradeLedger"><tr><td colspan="9" class="tiny" style="padding:8px">기록 불러오는 중…</td></tr></tbody>
-      </table>
-    </div>
-  </section>
   <section class="panel deskPane">
     <h3>👤 내 거래 기록 <span class="tiny">엔진과 완전 분리</span></h3>
     <div style="overflow:auto;max-height:350px;margin-top:10px">
@@ -246,6 +225,7 @@ let serverLive=null;
 let liveEnginePositions=[];
 let myPosition={side:"FLAT"}, myPositionEvents=[];
 let decisionEvents=[];
+let precursorEvents=[];
 let livePosition={side:'FLAT'};
 
 const $=id=>document.getElementById(id);
@@ -585,49 +565,37 @@ function engColor(e,side){
 }
 let positionPerf={closed:0,wins:0,losses:0,winrate:null,engines:{}};
 let engineView='MULTI';
-let selectedEngines=new Set(['5M']);
 function allSaved(){
   let m=new Map();
   for(const x of saved)m.set('local:'+x.id,x);
   for(const x of serverSaved)m.set('server:'+x.id,x);
   return [...m.values()].sort((a,b)=>a.ts-b.ts);
 }
-function renderForward(){
-  const p=positionPerf||{};
-  const wr=p.winrate==null?'—':Number(p.winrate).toFixed(1)+'%';
-  $('fwd').textContent=`${p.wins||0}W / ${p.losses||0}L · ${wr}`;
-}
+function renderForward(){const el=$('fwd');if(!el)return;const p=positionPerf||{};const wr=p.winrate==null?'—':Number(p.winrate).toFixed(1)+'%';el.textContent=`${p.wins||0}W / ${p.losses||0}L · ${wr}`;}
 function renderHistory(){
-  renderForward();renderTradeLedger();updateDailyMove();
-  const rows=[...(decisionEvents||[])].sort((a,b)=>Number(b.ts)-Number(a.ts)).slice(0,60);
-  $('history').innerHTML=rows.length?rows.map(x=>{
-    const tm=new Date(Number(x.ts)).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}), ev=String(x.event||''), side=String(x.side||'');
-    const c=ev==='INVALIDATE'?'#d7dee9':side==='LONG'?'#35d98a':side==='SHORT'?'#ff5c70':'#f1c75b';
-    const label=ev==='TRIGGER'?`EXEC ${side}`:ev==='BIAS'?`BIAS ${side}`:`X ${side}`;
-    return `<div class="histrow"><span>${tm}</span><b style="color:${c}">${label}</b><span class="tiny">${x.setups||'—'} · E ${Number(x.evidence||0).toFixed(0)}/${Number(x.opposite_evidence||0).toFixed(0)}</span></div>`;
-  }).join(''):'<div class="tiny">v6.62부터 실행결정 기록 시작 · RAW 신호는 연구 DB에 계속 저장</div>';
+  updateDailyMove();
+  const rows=[];
+  for(const x of (decisionEvents||[])){if(String(x.event||'').toUpperCase()==='TRIGGER')rows.push({ts:Number(x.ts),kind:'EXEC',side:String(x.side||''),score:Number(x.evidence||0),detail:x.setups||'EXEC'});}
+  for(const x of (precursorEvents||[])){rows.push({ts:Number(x.ts),kind:'EARLY',side:String(x.side||''),score:Number(x.score||0),detail:x.groups||'PRECURSOR'});}
+  rows.sort((a,b)=>b.ts-a.ts);
+  $('history').innerHTML=rows.length?rows.slice(0,60).map(x=>{
+    const tm=new Date(x.ts).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}), isL=x.side==='LONG';
+    const c=x.kind==='EXEC'?(isL?'#35d98a':'#ff5c70'):(isL?'#8fb5ff':'#ff9bd2');
+    return `<div class="histrow"><span>${tm}</span><b style="color:${c}">${x.kind} ${isL?'L':'S'}</b><span class="tiny">${x.detail||'—'} · ${x.score.toFixed(0)}</span></div>`;
+  }).join(''):'<div class="tiny">EXEC / EARLY 이벤트 대기 중</div>';
 }
 
 function signalAnchorRows(){
   const from=cache[cur]?.[0]?.time||0, bucketSec={'1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800,'1MO':2592000}[cur]||300;
-  const raw=!!$('rawResearchChk')?.checked;
-  if(!raw){
-    const out=[];
-    for(const e of (decisionEvents||[])){
-      const ev=String(e.event||'').toUpperCase();if(!['TRIGGER','INVALIDATE'].includes(ev))continue;
-      const rawTs=Math.floor(Number(e.ts||0)/1000);if(!rawTs||rawTs<from)continue;
-      out.push({mode:'DECISION',event:ev,setup:ev==='TRIGGER'?'EXEC':'X',side:String(e.side||'').toUpperCase()==='LONG'?'L':'S',candleTs:Math.floor(rawTs/bucketSec)*bucketSec,rawTs,score:Math.round(Number(e.evidence||0)),name:e.setups||ev,entry:Number(e.price||0)});
-    }
-    return out;
+  const out=[];
+  for(const e of (decisionEvents||[])){
+    if(String(e.event||'').toUpperCase()!=='TRIGGER')continue;
+    const rawTs=Math.floor(Number(e.ts||0)/1000);if(!rawTs||rawTs<from)continue;
+    out.push({mode:'EXEC',side:String(e.side||'').toUpperCase()==='LONG'?'L':'S',candleTs:Math.floor(rawTs/bucketSec)*bucketSec,rawTs,score:Math.round(Number(e.evidence||0)),name:e.setups||'EXEC',entry:Number(e.price||0)});
   }
-  const seen=new Set(), out=[];
-  for(const s of allSaved()){
-    if(!selectedEngines.has(s.engine||'5M'))continue;
-    const rawTs=Number(s.time||Math.floor(Number(s.ts||0)/1000));if(!rawTs||rawTs<from)continue;
-    const n=String(s.name||'').toUpperCase(), setup=n.includes('PULLBACK')?'PB':n.includes('REVERSAL')?'RV':n.includes('RETEST')?'RT':null;if(!setup)continue;
-    const side=String(s.dir||s.side||'').toUpperCase()==='LONG'?'L':'S', candleTs=Math.floor(rawTs/bucketSec)*bucketSec;
-    const key=`${setup}|${side}|${candleTs}`;if(seen.has(key))continue;seen.add(key);
-    out.push({mode:'RAW',setup,side,candleTs,rawTs,score:Math.round(Number(s.score||0)),name:s.name||setup,entry:Number(s.entry||0)});
+  for(const e of (precursorEvents||[])){
+    const rawTs=Math.floor(Number(e.ts||0)/1000);if(!rawTs||rawTs<from)continue;
+    out.push({mode:'EARLY',side:String(e.side||'').toUpperCase()==='LONG'?'L':'S',candleTs:Math.floor(rawTs/bucketSec)*bucketSec,rawTs,score:Math.round(Number(e.score||0)),name:e.groups||'PRECURSOR',entry:Number(e.price||0)});
   }
   return out;
 }
@@ -642,34 +610,27 @@ function renderSignalAnchors(){
     const x=chart.timeScale().timeToCoordinate(a.candleTs);if(x==null)continue;
     const isL=a.side==='L', y=candle.priceToCoordinate(isL?Number(bar.low):Number(bar.high));if(y==null)continue;
     const sk=`${a.candleTs}|${a.side}`, idx=stack[sk]||0;stack[sk]=idx+1;
-    const col=a.mode==='DECISION'?(a.event==='INVALIDATE'?'#d7dee9':(isL?'#35d98a':'#ff5c70')):a.setup==='PB'?(isL?'#35d98a':'#ff5c70'):a.setup==='RV'?(isL?'#00e5ff':'#ffd400'):'#b56cff';
+    const col=a.mode==='EXEC'?(isL?'#35d98a':'#ff5c70'):(isL?'#8fb5ff':'#ff9bd2');
     const badgeY=Math.max(12,Math.min(host.clientHeight-22,y+(isL?1:-1)*(30+idx*24)));
     const line=document.createElement('div');line.className='sigAnchorLine';line.style.color=col;line.style.left=x+'px';line.style.top=Math.min(y,badgeY)+'px';line.style.height=Math.max(6,Math.abs(badgeY-y))+'px';layer.appendChild(line);
     const dot=document.createElement('div');dot.className='sigAnchorDot';dot.style.color=col;dot.style.left=x+'px';dot.style.top=y+'px';layer.appendChild(dot);
-    const badge=document.createElement('div');badge.className='sigAnchorBadge';badge.style.color=col;badge.style.left=x+'px';badge.style.top=badgeY+'px';badge.textContent=a.mode==='DECISION'?(a.event==='INVALIDATE'?`× ${a.side}`:`${isL?'▲':'▼'} EXEC ${a.side}`):`${isL?'▲':'▼'} ${a.setup} ${a.side} ${a.score}`;
+    const badge=document.createElement('div');badge.className='sigAnchorBadge';badge.style.color=col;badge.style.left=x+'px';badge.style.top=badgeY+'px';badge.textContent=a.mode==='EXEC'?`${isL?'▲':'▼'} EXEC ${a.side}`:`◌ EARLY ${a.side} ${a.score}`;
     const tm=new Date(a.rawTs*1000).toLocaleString('ko-KR',{hour12:false});badge.title=`${a.name} · ${tm} · score ${a.score}${a.entry?` · $${fmt(a.entry)}`:''}`;layer.appendChild(badge);
   }
 }
 function renderMarkers(){
   const from=cache[cur]?.[0]?.time||0, marks=[];
-  const raw=!!$('rawResearchChk')?.checked;
   const bucketSec={'1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800,'1MO':2592000}[cur]||300;
-  if(raw){
-    const seen=new Set();
-    for(const s of allSaved()){
-      if(!selectedEngines.has(s.engine||'5M'))continue;
-      const rawTs=Number(s.time||Math.floor(Number(s.ts||0)/1000));if(!rawTs||rawTs<from)continue;
-      const n=String(s.name||'').toUpperCase(), isPull=n.includes('PULLBACK'),isRev=n.includes('REVERSAL'),isRet=n.includes('RETEST');if(!isPull&&!isRev&&!isRet)continue;
-      const isL=String(s.dir||s.side||'').toUpperCase()==='LONG', candleTs=Math.floor(rawTs/bucketSec)*bucketSec, key=`${isPull?'PB':isRev?'RV':'RT'}|${isL?'L':'S'}|${candleTs}`;if(seen.has(key))continue;seen.add(key);
-      marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:isPull?(isL?'#35d98a':'#ff5c70'):isRev?(isL?'#00e5ff':'#ffd400'):'#b56cff',shape:isPull?(isL?'arrowUp':'arrowDown'):isRev?'diamond':'circle',text:''});
-    }
-  }else{
-    for(const e of (decisionEvents||[])){
-      const ev=String(e.event||'').toUpperCase();if(!['TRIGGER','INVALIDATE'].includes(ev))continue;
-      const ts=Math.floor(Number(e.ts||0)/1000);if(!ts||ts<from)continue;
-      const isL=String(e.side||'').toUpperCase()==='LONG', candleTs=Math.floor(ts/bucketSec)*bucketSec;
-      marks.push({time:candleTs,position:ev==='INVALIDATE'?(isL?'aboveBar':'belowBar'):(isL?'belowBar':'aboveBar'),color:ev==='INVALIDATE'?'#ffffff':(isL?'#35d98a':'#ff5c70'),shape:ev==='INVALIDATE'?'circle':(isL?'arrowUp':'arrowDown'),text:ev==='INVALIDATE'?'X':''});
-    }
+  for(const e of (decisionEvents||[])){
+    if(String(e.event||'').toUpperCase()!=='TRIGGER')continue;
+    const ts=Math.floor(Number(e.ts||0)/1000);if(!ts||ts<from)continue;
+    const isL=String(e.side||'').toUpperCase()==='LONG', candleTs=Math.floor(ts/bucketSec)*bucketSec;
+    marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:isL?'#35d98a':'#ff5c70',shape:isL?'arrowUp':'arrowDown',text:''});
+  }
+  for(const e of (precursorEvents||[])){
+    const ts=Math.floor(Number(e.ts||0)/1000);if(!ts||ts<from)continue;
+    const isL=String(e.side||'').toUpperCase()==='LONG', candleTs=Math.floor(ts/bucketSec)*bucketSec;
+    marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:isL?'#8fb5ff':'#ff9bd2',shape:'circle',text:''});
   }
   for(const e of (myPositionEvents||[])){
     const ts=Math.floor(Number(e.ts||0)/1000),ev=String(e.event||'').toUpperCase();if(!ts||ts<from||!['OPEN','EXIT'].includes(ev))continue;
@@ -780,91 +741,39 @@ function renderMyTradeLedger(){
 let setupWatchBusy=false;
 async function syncSetupWatch(){
   if(setupWatchBusy)return;setupWatchBusy=true;
-  try{const sw=await fetch(SERVER_API+'/api/setup-watch',{cache:'no-store'}).then(r=>r.json());if(sw){if(!serverLive)serverLive={};serverLive.setup_watch=sw;if(sw.pressure)serverLive.pressure=sw.pressure;renderSetupWatch(sw);renderPressure(sw.pressure||serverLive.pressure);renderDecision(sw.decision||serverLive.decision)}}catch(e){}finally{setupWatchBusy=false}
+  try{const sw=await fetch(SERVER_API+'/api/setup-watch',{cache:'no-store'}).then(r=>r.json());if(sw){if(!serverLive)serverLive={};serverLive.setup_watch=sw;if(sw.pressure)serverLive.pressure=sw.pressure;renderSetupWatch(sw);renderPressure(sw.pressure||serverLive.pressure);renderDecision(sw.decision||serverLive.decision);renderPrecursor(sw.precursor||serverLive.precursor)}}catch(e){}finally{setupWatchBusy=false}
 }
 async function syncResearchSummary(){
   const el=$('researchSummary');if(!el)return;
   try{const x=await fetch(SERVER_API+'/api/research/summary',{cache:'no-store'}).then(r=>r.json());
-    const base=(x.base||[]).map(z=>`${z.setup} ${z.n}`).join(' · ')||'0';
-    const sh=(x.shadow||[]).reduce((n,z)=>n+Number(z.n||0),0), u=Number(x.user?.n||0);
     const trig=(x.setup_stage_events||[]).filter(z=>z.stage==='TRIGGER').reduce((n,z)=>n+Number(z.n||0),0);
-    const de=(x.decision||[]).reduce((n,z)=>n+Number(z.n||0),0);el.innerHTML=`BASE ${base}<br>SETUP TRIGGER ${trig} · DECISION ${de} · SHADOW ${sh} · USER ${u}<br><span class="tiny">RAW/SHADOW는 연구용 · 기본 차트는 Decision Layer만 표시</span>`;
+    const de=(x.decision||[]).filter(z=>z.event==='TRIGGER').reduce((n,z)=>n+Number(z.n||0),0);
+    const pre=(x.precursor||[]).reduce((n,z)=>n+Number(z.n||0),0), u=Number(x.user?.n||0);
+    el.innerHTML=`EXEC ${de} · PRECURSOR ${pre}<br>내부 3-SETUP trigger ${trig} · USER ${u}<br><span class="tiny">PB/RV/RT는 EXEC feeder 연구만 계속 · 차트에는 EXEC/EARLY만 표시</span>`;
   }catch(e){el.textContent='연구 집계 연결 대기'}
 }
 let syncServerBusy=false;
 async function syncServer(){
-  if(syncServerBusy) return;
-  syncServerBusy=true;
+  if(syncServerBusy)return;syncServerBusy=true;
   try{
-    const [live,sigs,pos,events,stats,positions,mypos,myevents,devents]=await Promise.all([
+    const [live,mypos,myevents,devents,pevents]=await Promise.all([
       fetch(SERVER_API+'/api/live',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/signals?limit=1000',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/position',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/position-events?limit=1000',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/position-performance',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/positions',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[]),
       fetch(SERVER_API+'/api/user-position',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/user-position-events',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/decision-events?limit=1000',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[])
+      fetch(SERVER_API+'/api/decision-events?limit=1000',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[]),
+      fetch(SERVER_API+'/api/precursor-events?limit=1000',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[])
     ]);
-    serverLive=live;
-    if(Number(serverLive?.price)>0 && $('price')) $('price').textContent='$'+fmt(Number(serverLive.price));
-    renderTurnRadar(serverLive?.radar);renderSetupWatch(serverLive?.setup_watch);renderPressure(serverLive?.pressure||serverLive?.setup_watch?.pressure||serverLive?.radar?.flow_reversal?.mtf);renderDecision(serverLive?.decision);renderContext();updateDailyMove();
-    serverSaved=(Array.isArray(sigs)?sigs:[]).map(x=>({
-      id:'srv_'+x.id,name:x.name,dir:x.side,score:x.score,entry:x.entry,sl:x.sl,tp1:x.tp1,tp2:x.tp2,
-      ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000),status:x.status,closed:x.closed_ts,
-      metrics:{d10:x.d10,d30:x.d30,oi60:x.oi60,int:x.flow,book:x.book},source:'SERVER',engine:x.engine||'5M'
-    }));
-    const latestServer=[...serverSaved].filter(x=>/PULLBACK|REVERSAL|RETEST/i.test(String(x.name||''))).sort((a,b)=>b.ts-a.ts)[0];
-    if(latestServer && Date.now()-latestServer.ts<60*60*1000){
-      liveSignal=latestServer;
-      renderSignal(latestServer);
-    }
-    livePosition=pos||{side:'FLAT'};
-    positionPerf=stats||{closed:0,wins:0,losses:0,winrate:null,engines:{}};
-    const pe=positionPerf.engines||{};
-    if($('scalpStat')){let q=pe.SCALP||{};$('scalpStat').textContent=`1/3M POS ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':Number(q.winrate).toFixed(1)+'%'}`;}
-    for(const [id,e] of [['m5Stat','5M'],['m15Stat','15M'],['h1Stat','1H'],['h4Stat','4H']]){if($(id)){let q=pe[e]||{};$(id).textContent=`${e} POS ${q.wins||0}W/${q.losses||0}L · ${q.winrate==null?'—':Number(q.winrate).toFixed(1)+'%'}`;}}
-
-    positionEvents=(Array.isArray(events)?events:[]).map(x=>({
-      ...x,ts:Number(x.ts),time:Math.floor(Number(x.ts)/1000)
-    }));
-    decisionEvents=Array.isArray(devents)?devents:[];
-    const ep=$('enginePositions');
-    if(ep){
-      const ps=Array.isArray(positions)?positions:[];
-      liveEnginePositions=ps;
-      myPosition=mypos||{side:'FLAT'}; myPositionEvents=Array.isArray(myevents)?myevents:[]; renderMyTradeLedger();
-      const mp=$('myPosition'); if(mp){
-        if(myPosition.side&&myPosition.side!=='FLAT'){const ent=Number(myPosition.entry||0), now=Number(myPosition.current_price||currentPrice()||live?.price||0), usd=Number.isFinite(Number(myPosition.live_usd))?Number(myPosition.live_usd):(myPosition.side==='LONG'?now-ent:ent-now), pc=Number.isFinite(Number(myPosition.live_pct))?Number(myPosition.live_pct):(ent?usd/ent*100:0); mp.innerHTML=`<b style="color:${myPosition.side==='LONG'?'#35d98a':'#ff5c70'}">${myPosition.side}</b> · 진입 $${fmt(ent)} · 현재 $${fmt(now)} · <b class="myLivePnl" style="color:${pc>=0?'#35d98a':'#ff5c70'}">실시간 ${pc>=0?'+':''}${pc.toFixed(3)}% · ${usd>=0?'+':'-'}$${fmt(Math.abs(usd))}</b> <button onclick="closeMyPos()" style="margin-left:8px">포지션 종료</button>`;}
-        else mp.innerHTML='<span style="color:#8d99ad">현재 내 포지션 없음</span>';
-      }
-      ep.innerHTML=ps.length?ps.map(p=>{
-        const tf=engLabel(p.engine);
-        const col=engColor(p.engine,p.side);
-        const mins=Math.max(0,Math.floor((Date.now()-Number(p.opened_ts))/60000));
-        const hold=mins>=60?`${Math.floor(mins/60)}시간 ${mins%60}분`:`${mins}분`;
-        const st=p.state||'HOLD', ps=Number(p.pressure_score||0);
-        const stColor=st==='PRESSURE'?'#f0c84b':'#35d98a';
-        const nowPx=Number(currentPrice()||serverLive?.price||0), ent=Number(p.entry||0);
-        const pnlPct=(nowPx>0&&ent>0)?((p.side==='LONG'?(nowPx-ent):(ent-nowPx))/ent*100):0;
-        const pnlUsd=(nowPx>0&&ent>0)?(p.side==='LONG'?(nowPx-ent):(ent-nowPx)):0;
-        const pnlColor=pnlPct>0?'#35d98a':pnlPct<0?'#ff4f64':'#9aa7b8';
-        const pnlSign=pnlPct>0?'+':'';
-        return `<div style="padding:7px 0;border-bottom:1px solid #1f2a3a"><b style="color:${col}">${tf} ${p.side}</b> · 진입 $${fmt(p.entry)} · <b style="color:${stColor}">${st}</b> ${hold}<br><b class="livePosPnl" data-entry="${ent}" data-side="${p.side}" style="color:${pnlColor}">현재수익률 ${pnlSign}${pnlPct.toFixed(3)}% · 현재손익 ${pnlUsd>=0?'+':'-'}$${fmt(Math.abs(pnlUsd))}</b><br><span class="tiny">반대압력 ${ps.toFixed(0)} · MFE +$${fmt(Number(p.mfe||0))} · MAE -$${fmt(Number(p.mae||0))}</span><br><button onclick="manualCloseMain('${p.engine}')" style="margin-top:6px;padding:5px 10px;border:1px solid #ff5a6b;border-radius:7px;background:#251219;color:#ff7180;font-size:11px;font-weight:800;cursor:pointer">강제청산</button></div>`;
-      }).join(''):`<span style="color:#f0c84b">현재 열린 포지션 없음</span><br><span class="tiny">포지션 종료는 반드시 X(EXIT) 이벤트가 기록되어야 합니다.</span>`;
-    }
-    let st=$('srvState'); if(st){st.textContent=(live?.status?.public==='live'&&live?.status?.business==='live')?'● LIVE':'● CONNECTED';st.style.color='#2fd58b'}
-    if($('srvCount'))$('srvCount').textContent=serverSaved.length;
-    if($('srvLast')){
-      const ps=livePosition?.side && livePosition.side!=='FLAT'
-        ? ` · POSITION ${livePosition.side} · 진입 $${fmt(livePosition.entry)}`
-        : ' · POSITION FLAT';
-      $('srvLast').textContent=(serverSaved.length?`최근 ${serverSaved.at(-1).name} @ $${fmt(serverSaved.at(-1).entry)} · `:`BTC $${fmt(live.price)} · 아직 서버 신호 없음`)+ps;
-    }
+    serverLive=live||{};decisionEvents=Array.isArray(devents)?devents:[];precursorEvents=Array.isArray(pevents)?pevents:[];serverSaved=[];positionEvents=[];liveEnginePositions=[];
+    myPosition=mypos||{side:'FLAT'};myPositionEvents=Array.isArray(myevents)?myevents:[];
+    if(Number(serverLive?.price)>0&&$('price'))$('price').textContent='$'+fmt(Number(serverLive.price));
+    renderTurnRadar(serverLive?.radar);renderPressure(serverLive?.pressure||serverLive?.setup_watch?.pressure);renderDecision(serverLive?.decision);renderPrecursor(serverLive?.precursor);renderContext();updateDailyMove();renderMyTradeLedger();
+    const mp=$('myPosition');if(mp){if(myPosition.side&&myPosition.side!=='FLAT'){const ent=Number(myPosition.entry||0),now=Number(myPosition.current_price||currentPrice()||live?.price||0),usd=Number.isFinite(Number(myPosition.live_usd))?Number(myPosition.live_usd):(myPosition.side==='LONG'?now-ent:ent-now),pc=Number.isFinite(Number(myPosition.live_pct))?Number(myPosition.live_pct):(ent?usd/ent*100:0);mp.innerHTML=`<b style="color:${myPosition.side==='LONG'?'#35d98a':'#ff5c70'}">${myPosition.side}</b> · 진입 $${fmt(ent)} · 현재 $${fmt(now)} · <b class="myLivePnl" style="color:${pc>=0?'#35d98a':'#ff4f64'}">실시간 ${pc>=0?'+':''}${pc.toFixed(3)}% · ${usd>=0?'+':'-'}$${fmt(Math.abs(usd))}</b> <button onclick="closeMyPos()" style="margin-left:8px">포지션 종료</button>`;}else mp.innerHTML='<span style="color:#8d99ad">현재 내 포지션 없음</span>';}
+    const trig=decisionEvents.filter(x=>String(x.event||'').toUpperCase()==='TRIGGER');
+    if($('srvState')){$('srvState').textContent='● 연결됨';$('srvState').style.color='#35d98a'}
+    if($('srvCount'))$('srvCount').textContent=`${trig.length}/${precursorEvents.length}`;
+    if($('srvLast')){const latest=[...trig.map(x=>({ts:+x.ts,label:`EXEC ${x.side}`})),...precursorEvents.map(x=>({ts:+x.ts,label:`EARLY ${x.side}`}))].sort((a,b)=>b.ts-a.ts)[0];$('srvLast').textContent=latest?`최근 ${latest.label} · ${new Date(latest.ts).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})}`:`BTC $${fmt(live.price)} · 이벤트 대기`;}
     renderHistory();renderMarkers();
-  }catch(e){let st=$('srvState');if(st){st.textContent='● 연결 재시도';st.style.color='#f1c75b'}}
-  finally{syncServerBusy=false;}
+  }catch(e){let st=$('srvState');if(st){st.textContent='● 연결 재시도';st.style.color='#f1c75b'}}finally{syncServerBusy=false;}
 }
 async function openMyPos(side){try{const r=await fetch(SERVER_API+'/api/user-position/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({side})});const j=await r.json();if(!j.ok)throw new Error(j.error||'failed');await syncServer();}catch(e){alert('내 포지션 진입 실패: '+e.message)}}
 async function closeMyPos(){if(!confirm('내 시뮬레이터 포지션을 현재가로 종료할까?'))return;try{const r=await fetch(SERVER_API+'/api/user-position/close',{method:'POST'});const j=await r.json();if(!j.ok)throw new Error(j.error||'failed');await syncServer();}catch(e){alert('내 포지션 종료 실패: '+e.message)}}
@@ -891,6 +800,18 @@ function refreshLivePositionReturns(){
   });
 }
 setInterval(refreshLivePositionReturns,500);
+
+function renderPrecursor(p){
+  if(!p)return;
+  const state=String(p.state||'SCANNING'), side=String(p.side||'NONE'), sc=Number(p.score||0), l=Number(p.long_score||0), sh=Number(p.short_score||0);
+  const col=state==='EARLY'?(side==='LONG'?'#8fb5ff':'#ff9bd2'):state==='WATCH'?'#f1c75b':'#8d99ad';
+  const el=$('precursorState');if(el){el.textContent=state==='SCANNING'||state==='WARMUP'?state:`${state} · ${side==='LONG'?'L':'S'} · ${sc.toFixed(0)}`;el.style.color=col}
+  if($('precursorLong')){$('precursorLong').textContent=l.toFixed(0);$('precursorLong').style.color='#8fb5ff'}
+  if($('precursorShort')){$('precursorShort').textContent=sh.toFixed(0);$('precursorShort').style.color='#ff9bd2'}
+  if($('precursorGroups'))$('precursorGroups').textContent=(p.groups||[]).join(' + ')||'—';
+  if($('precursorWhy'))$('precursorWhy').innerHTML=`· ${(p.reasons||[]).join(' → ')||'이상징후 탐색 중'}<br>· LONG ${l.toFixed(0)} / SHORT ${sh.toFixed(0)} · margin ${Number(p.margin||0).toFixed(0)}<br>· EARLY는 EXEC에 개입하지 않는 연구 경고`;
+  const top=$('topPrecursor'),det=$('topPrecursorDetail');if(top){top.textContent=state==='SCANNING'||state==='WARMUP'?state:`${state} ${side==='LONG'?'L':'S'} ${sc.toFixed(0)}`;top.style.color=col}if(det)det.textContent=(p.groups||[]).join(' · ')||'추진력 약화 · 흡수 · sweep · 압력감속';
+}
 
 function renderDecision(d){
   if(!d)return;
@@ -1110,24 +1031,8 @@ function initInd(){
 }
 setTimeout(initInd,300);
 
-// v6.46: chart-only VWAP signal visibility toggle.
-// This does NOT disable VWAP as internal evidence for EARLY/CONF; it only hides/shows VWAP-family markers.
-(function initVwapSignalToggle(){
-  const el=document.getElementById('vwapSigChk');
-  if(!el)return;
-  try{ const saved=localStorage.getItem('btc_vwap_signal_visible'); if(saved!==null) el.checked=(saved==='1'); }catch(e){}
-  el.onchange=()=>{
-    try{localStorage.setItem('btc_vwap_signal_visible',el.checked?'1':'0')}catch(e){}
-    try{renderMarkers()}catch(e){}
-  };
-})();
 
-// v6.62: default chart is execution-only. Raw PB/RV/RT remain available for research on demand.
-(function initRawResearchToggle(){
-  const el=document.getElementById('rawResearchChk');if(!el)return;
-  try{el.checked=localStorage.getItem('btc_raw_research_visible')==='1'}catch(e){el.checked=false}
-  el.onchange=()=>{try{localStorage.setItem('btc_raw_research_visible',el.checked?'1':'0')}catch(e){};renderMarkers();renderHistory()};
-})();
+
 
 // v4.7: BTC weekly/monthly historical candles from OKX REST.
 async function loadBTCBigTF(tf){
@@ -1146,47 +1051,6 @@ async function loadBTCBigTF(tf){
 window.__btcSetTF=function(tf){loadBTCBigTF(tf)};
 document.addEventListener('click',e=>{const x=e.target.closest('[data-tf="1W"],[data-tf="1MO"],[data-v="1W"],[data-v="1MO"]');if(x){e.preventDefault();loadBTCBigTF(x.dataset.tf||x.dataset.v)}});
 
-// v4.9 compact L/S + persistent position EXIT overlay
-let __positionExitMarkers=[];
-async function loadPositionExitMarkers(){
- try{
-  const r=await fetch('/api/position-events?limit=500',{cache:'no-store'});
-  if(!r.ok)return;
-  const ev=await r.json();
-  const a=Array.isArray(ev)?ev:(ev.events||[]);
-  __positionExitMarkers=a.filter(x=>String(x.event||'').toUpperCase()==='EXIT').map(x=>({
-    time:Math.floor(Number(x.ts)>1e12?Number(x.ts)/1000:Number(x.ts)),
-    position:String(x.side||'').toUpperCase()==='LONG'?'aboveBar':'belowBar',
-    color:'#d7dee9',shape:'circle',text:'X · $'+fmt(Number(x.price))
-  })).filter(x=>Number.isFinite(x.time));
- }catch(e){console.error('position exit markers',e)}
-}
-function mergeExitMarkers(base){
- const z=[...(base||[]),...__positionExitMarkers];
- const seen=new Set();
- return z.filter(x=>{const k=x.time+'|'+x.text+'|'+x.position;if(seen.has(k))return false;seen.add(k);return true}).sort((a,b)=>a.time-b.time);
-}
-setInterval(async()=>{await loadPositionExitMarkers();try{if(typeof render==='function')render()}catch(e){}},5000);
-loadPositionExitMarkers();
-
-function paintEngineButtons(){
- document.querySelectorAll('.engBtn').forEach(b=>{
-   const e=b.dataset.eng;
-   const on=e==='ALL' ? selectedEngines.size===4 : e==='NONE' ? selectedEngines.size===0 : selectedEngines.has(e);
-   b.style.borderColor=on?'#4f8cff':'';
-   b.style.background=on?'#13243c':'';
- });
-}
-document.querySelectorAll('.engBtn').forEach(x=>x.onclick=()=>{
- const e=x.dataset.eng;
- if(e==='NONE') selectedEngines.clear();
- else if(e==='ALL'){ selectedEngines=new Set(['5M','15M','1H','4H']); }
- else { selectedEngines.has(e)?selectedEngines.delete(e):selectedEngines.add(e); }
- engineView='MULTI';
- paintEngineButtons();
- renderMarkers();
-});
-paintEngineButtons();
 </script>
 <div class="mobilebar mobilebar6"><button class="on" data-jump="chart"><b>⌁</b>차트</button><button data-jump="structure"><b>⌗</b>구조</button><button data-jump="flow"><b>⇄</b>주문</button><button data-jump="target"><b>◎</b>타점</button><button data-jump="position"><b>◆</b>포지션</button><button data-jump="records"><b>≡</b>기록</button></div><script>
 (function(){
@@ -1196,7 +1060,7 @@ paintEngineButtons();
    chart:document.getElementById('chart'),
    structure:byTitle('TURN LOCATION') || byTitle('MARKET REGIME'),
    flow:byTitle('REVERSAL PRESSURE'),
-   target:byTitle('EXECUTION DECISION') || byTitle('RAW SETUP RADAR'),
+   target:byTitle('EXECUTION DECISION') || byTitle('PRECURSOR ENGINE'),
    position:byTitle('엔진별 현재 포지션'),
    records:byTitle('포지션 / 거래 기록') || byTitle('라이브 신호 기록')
  };

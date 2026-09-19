@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.64 MTF PANEL FIX KST")
+app=FastAPI(title="BTC Trap Flow Collector v6.65 EXEC + PRECURSOR LAB KST")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 @app.middleware("http")
@@ -66,9 +66,19 @@ decision_state={
 }
 decision_last_trigger_bucket={"LONG":-1,"SHORT":-1}
 decision_last_event_sig=None
+# v6.65: independent precursor research engine. It never feeds or vetoes EXEC.
+precursor_state={
+    "updated_ts":0,"state":"SCANNING","side":"NONE","score":0.0,
+    "long_score":0.0,"short_score":0.0,"groups":[],"reasons":[],
+    "active_since":0,"last_event_ts":0,
+    "note":"early anomaly warning only; not an entry signal"
+}
+precursor_runtime={"active_side":None,"active_since":0,"clear_since":0,
+                   "last_emit":{"LONG":0,"SHORT":0}}
 setup_flow_prev={"ts":0,"d10":0.0,"d30":0.0}
 setup_stage_last={}
 shadow_last_bucket={}
+LEGACY_SHADOW_ENABLED=False  # v6.65: PRICE/FAST shadow variants frozen; no new shadow signals.
 retest_consumed_break={"LONG":0,"SHORT":0}
 retest_consumed_loaded=False
 scalp_prev_d10=0.0
@@ -183,6 +193,27 @@ def db():
       evidence REAL, opposite_evidence REAL, setups TEXT, reason TEXT, price REAL
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_decision_events_ts ON decision_events(ts)")
+    # v6.65: independent leading-anomaly research. Kept separate from EXEC and legacy signals.
+    c.execute("""CREATE TABLE IF NOT EXISTS precursor_events(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, bucket INTEGER, side TEXT, score REAL,
+      price REAL, groups TEXT, reason TEXT, context_json TEXT,
+      UNIQUE(bucket,side)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_precursor_events_ts ON precursor_events(ts)")
+    c.execute("""CREATE TABLE IF NOT EXISTS precursor_research(
+      precursor_id INTEGER PRIMARY KEY, started_ts INTEGER, last_ts INTEGER,
+      mfe_pct REAL DEFAULT 0, mae_pct REAL DEFAULT 0, p5 REAL, p15 REAL, p30 REAL, p60 REAL,
+      next_exec_ts INTEGER, lead_sec REAL,
+      FOREIGN KEY(precursor_id) REFERENCES precursor_events(id)
+    )""")
+    prcols={r[1] for r in c.execute("PRAGMA table_info(precursor_research)").fetchall()}
+    if "next_exec_ts" not in prcols:c.execute("ALTER TABLE precursor_research ADD COLUMN next_exec_ts INTEGER")
+    if "lead_sec" not in prcols:c.execute("ALTER TABLE precursor_research ADD COLUMN lead_sec REAL")
+    c.execute("""CREATE TABLE IF NOT EXISTS decision_research(
+      decision_id INTEGER PRIMARY KEY, started_ts INTEGER, last_ts INTEGER,
+      mfe_pct REAL DEFAULT 0, mae_pct REAL DEFAULT 0, p5 REAL, p15 REAL, p30 REAL, p60 REAL,
+      FOREIGN KEY(decision_id) REFERENCES decision_events(id)
+    )""")
     c.commit(); return c
 
 def median(xs):
@@ -300,6 +331,205 @@ def mtf_pressure_snapshot(now=None):
     return {'updated_ts':now,'timeframes':tfs,'weighted_delta':weighted,'fast_delta':fast,'slow_delta':slow,
             'turn_delta':turn,'long':50*(1+weighted),'short':50*(1-weighted),'state':state,
             'turn_side':turn_side,'ready':ready,'note':'1M/3M/5M/15M aggressor pressure; evidence, not probability'}
+
+
+def _precursor_minute_metrics():
+    """Compact per-minute price-impact features from persistent aggressor-flow buckets."""
+    out=[]
+    for z in list(flow_minutes)[-6:]:
+        buy=float(z.get('buy') or 0); sell=float(z.get('sell') or 0); total=buy+sell
+        op=float(z.get('open') or 0); cl=float(z.get('close') or 0)
+        ratio=(buy-sell)/total if total else 0.0
+        pp=((cl/op)-1)*100 if op and cl else 0.0
+        out.append({'ts':int(z.get('ts') or 0),'ratio':ratio,'price_pct':pp,'total':total,
+                    'buy':buy,'sell':sell})
+    return out
+
+
+def _precursor_side_features(side, now, snap):
+    """Return a deliberately small set of *leading-anomaly* sensors.
+
+    The aim is not to predict price from a single metric. We only warn when order-flow
+    effort stops producing matching price progress near a meaningful location.
+    """
+    p=float(last_price or 0); A5=max(atr_tf('5M',24),1.0); A15=max(atr_tf('15M',24),1.0); A1=max(atr_tf('1M',30),1.0)
+    t=snap.get('timeframes') or {}; f1=t.get('1M') or {}; f3=t.get('3M') or {}; f5=t.get('5M') or {}; f15=t.get('15M') or {}
+    d1=float(f1.get('ratio') or 0); d3=float(f3.get('ratio') or 0); fast=float(snap.get('fast_delta') or 0); slow=float(snap.get('slow_delta') or 0)
+    score=0.0; groups=[]; reasons=[]; comp={}
+    isL=side=='LONG'; sign=1 if isL else -1
+
+    # 1) LOCATION: anomaly matters more near prior liquidity / local extremes.
+    H15,L15=liquidity_tf('15M',100,30)
+    confirmed5=[x for x in candles.get('5M',[]) if x.get('confirm')=='1']
+    prev5=confirmed5[-24:-1] if len(confirmed5)>=4 else []
+    local_low=min((float(x['low']) for x in prev5),default=None); local_high=max((float(x['high']) for x in prev5),default=None)
+    level15=float(L15 if isL else H15) if (L15 is not None and H15 is not None) else None
+    dist15=((p-level15)/A15 if isL else (level15-p)/A15) if level15 is not None else 99.0
+    local_level=local_low if isL else local_high
+    dist5=((p-local_level)/A5 if isL else (local_level-p)/A5) if local_level is not None else 99.0
+    near15=(-.25<=dist15<=.65); near5=(-.22<=dist5<=.55)
+    if near15 or near5:
+        pts=10+(6 if near15 else 0)+(4 if near5 else 0); score+=pts; groups.append('LOCATION');
+        reasons.append(('15M_LIQ' if near15 else 'LOCAL_EXTREME')+f' {min(abs(dist15),abs(dist5)):.2f}ATR'); comp['location']=pts
+    else: comp['location']=0
+
+    # 2) IMPACT DECAY: similar aggression is moving price less than prior minutes.
+    mm=_precursor_minute_metrics(); cur=mm[-1] if mm else {'ratio':0,'price_pct':0,'total':0}
+    prev=mm[-4:-1] if len(mm)>=4 else mm[:-1]
+    def agg(m): return max(0.0,-float(m['ratio'])) if isL else max(0.0,float(m['ratio']))
+    def adverse(m): return max(0.0,-float(m['price_pct'])) if isL else max(0.0,float(m['price_pct']))
+    prior_eff=[adverse(m)/max(.04,agg(m)) for m in prev if agg(m)>=.04 and m.get('total',0)>0]
+    cur_agg=agg(cur); cur_eff=adverse(cur)/max(.04,cur_agg)
+    pe=median(prior_eff) if prior_eff else 0.0
+    impact=(cur_agg>=.04 and ((pe>=.025 and cur_eff<=pe*.62) or (cur_agg>=.08 and ((float(cur['price_pct'])>=-.012) if isL else (float(cur['price_pct'])<=.012)))))
+    if impact:
+        score+=25;groups.append('IMPACT_DECAY');reasons.append(f'IMPACT_DECAY {cur_eff:.3f}<{pe:.3f}');comp['impact_decay']=25
+    else: comp['impact_decay']=0
+
+    # 3) ABSORPTION: aggressive flow persists but price refuses to progress with it.
+    c1=list(candles.get('1M',[]))[-1] if candles.get('1M') else None; sh1=_bar_shape(c1) if c1 else None
+    if isL:
+        flow_abs=(d1<=-.06 and float(f1.get('price_pct') or 0)>=-.022) or (d3<=-.08 and float(f3.get('price_pct') or 0)>=-.05)
+        wick_abs=bool(sh1 and d1<=-.03 and sh1['lower']>=max(sh1['body'],.20*sh1['rng']) and sh1['close_pos']>=.45)
+    else:
+        flow_abs=(d1>=.06 and float(f1.get('price_pct') or 0)<=.022) or (d3>=.08 and float(f3.get('price_pct') or 0)<=.05)
+        wick_abs=bool(sh1 and d1>=.03 and sh1['upper']>=max(sh1['body'],.20*sh1['rng']) and sh1['close_pos']<=.55)
+    absorption=flow_abs or wick_abs
+    if absorption:
+        score+=25;groups.append('ABSORPTION');reasons.append('AGGRESSION_WITHOUT_PROGRESS'+(' + WICK' if wick_abs else ''));comp['absorption']=25
+    else: comp['absorption']=0
+
+    # 4) PRESSURE DECELERATION: dominant side has not flipped yet, but fast pressure is fading first.
+    if isL:
+        decel=(d3<=-.025 and d1-d3>=.035) or (slow<=-.02 and fast-slow>=.05)
+    else:
+        decel=(d3>=.025 and d1-d3<=-.035) or (slow>=.02 and fast-slow<=-.05)
+    if decel:
+        score+=20;groups.append('PRESSURE_DECAY');reasons.append(f'FAST-SLOW {(fast-slow)*100:+.1f}%');comp['pressure_decay']=20
+    else: comp['pressure_decay']=0
+
+    # 5) LIQUIDITY SWEEP / RECLAIM: optional but strong. This is still earlier than EXEC confirmation.
+    confirmed1=[x for x in candles.get('1M',[]) if x.get('confirm')=='1']
+    prior1=confirmed1[-13:-1] if len(confirmed1)>=4 else []
+    sweep=False; sweep_level=None
+    if c1 and prior1:
+        if isL:
+            sweep_level=min(float(x['low']) for x in prior1)
+            sweep=float(c1['low'])<sweep_level-.010*A1 and p>sweep_level+.004*A1
+        else:
+            sweep_level=max(float(x['high']) for x in prior1)
+            sweep=float(c1['high'])>sweep_level+.010*A1 and p<sweep_level-.004*A1
+    if sweep:
+        score+=15;groups.append('SWEEP');reasons.append('1M_SWEEP_RECLAIM');comp['sweep']=15
+    else: comp['sweep']=0
+
+    score=max(0.0,min(100.0,score))
+    return {'side':side,'score':round(score,1),'groups':groups,'reasons':reasons,'components':comp,
+            'dist15_atr':round(dist15,3),'dist5_atr':round(dist5,3),'d1':round(d1,4),'d3':round(d3,4),
+            'fast':round(fast,4),'slow':round(slow,4),'price':p,'coverage':round(float(f3.get('coverage') or 0),3)}
+
+
+def _save_precursor_event(side, feat, now):
+    bucket=int(now//300000); c=db(); ctx=json.dumps(feat,separators=(',',':'),ensure_ascii=False)
+    cur=c.execute("""INSERT OR IGNORE INTO precursor_events(ts,bucket,side,score,price,groups,reason,context_json)
+      VALUES(?,?,?,?,?,?,?,?)""",(now,bucket,side,float(feat['score']),float(last_price or 0),','.join(feat['groups']),' | '.join(feat['reasons']),ctx))
+    inserted=cur.rowcount>0
+    if inserted:
+        pid=cur.lastrowid
+        c.execute("""INSERT OR IGNORE INTO precursor_research(precursor_id,started_ts,last_ts,mfe_pct,mae_pct)
+          VALUES(?,?,?,?,?)""",(pid,now,now,0.0,0.0))
+    c.commit();c.close();return inserted
+
+
+def evaluate_precursor():
+    """Independent early-warning engine. It does not influence EXEC in v6.65."""
+    global precursor_state, precursor_runtime
+    if not last_price or len(flow_minutes)<2:return precursor_state
+    now=int(time.time()*1000); snap=mtf_pressure_snapshot(now)
+    if float((snap.get('timeframes') or {}).get('3M',{}).get('coverage') or 0)<.45:
+        precursor_state={**precursor_state,'updated_ts':now,'state':'WARMUP','side':'NONE','score':0.0,'long_score':0.0,'short_score':0.0,'groups':[],'reasons':['3M FLOW WARMUP']}
+        return precursor_state
+    L=_precursor_side_features('LONG',now,snap); S=_precursor_side_features('SHORT',now,snap)
+    best=L if L['score']>=S['score'] else S; other=S if best is L else L
+    margin=float(best['score'])-float(other['score']); qualifies=(best['score']>=68 and len(best['groups'])>=3 and ('LOCATION' in best['groups'] or 'SWEEP' in best['groups']) and margin>=8)
+    watch=(best['score']>=48 and len(best['groups'])>=2)
+    state='EARLY' if qualifies else 'WATCH' if watch else 'SCANNING'; side=best['side'] if state!='SCANNING' else 'NONE'
+
+    active=precursor_runtime.get('active_side'); active_since=int(precursor_runtime.get('active_since') or 0)
+    # An episode remains one event. It must genuinely cool off before another same-side warning.
+    if active and (now-active_since>25*60*1000):
+        precursor_runtime['active_side']=None; precursor_runtime['active_since']=0; precursor_runtime['clear_since']=0; active=None
+    if active:
+        active_feat=L if active=='LONG' else S
+        if float(active_feat['score'])<42:
+            if not precursor_runtime.get('clear_since'): precursor_runtime['clear_since']=now
+            elif now-int(precursor_runtime['clear_since'])>=75*1000:
+                precursor_runtime['active_side']=None; precursor_runtime['active_since']=0; precursor_runtime['clear_since']=0; active=None
+        else: precursor_runtime['clear_since']=0
+    emitted=False
+    if qualifies and (not active or active==best['side']):
+        if not active:
+            last=int((precursor_runtime.get('last_emit') or {}).get(best['side']) or 0)
+            if now-last>=5*60*1000:
+                emitted=_save_precursor_event(best['side'],best,now)
+                if emitted:
+                    precursor_runtime['active_side']=best['side']; precursor_runtime['active_since']=now; precursor_runtime['clear_since']=0
+                    precursor_runtime['last_emit'][best['side']]=now; active=best['side']; active_since=now
+    elif qualifies and active and active!=best['side']:
+        state='WATCH'; side=best['side']; best={**best,'reasons':best['reasons']+['OPPOSITE_EPISODE_STILL_ACTIVE']}
+
+    last_evt=int(precursor_state.get('last_event_ts') or 0)
+    if emitted:last_evt=now
+    precursor_state={'updated_ts':now,'state':state,'side':side,'score':round(float(best['score']),1),
+      'long_score':round(float(L['score']),1),'short_score':round(float(S['score']),1),'groups':list(best['groups']),
+      'reasons':list(best['reasons']),'active_side':precursor_runtime.get('active_side'),'active_since':int(precursor_runtime.get('active_since') or 0),
+      'last_event_ts':last_evt,'margin':round(margin,1),'components':best.get('components') or {},
+      'note':'EARLY = effort/result anomaly warning. Independent from EXEC; not an entry signal.'}
+    return precursor_state
+
+
+def update_precursor_research():
+    if not last_price:return
+    now=int(time.time()*1000); px=float(last_price); c=db()
+    rows=c.execute("""SELECT e.id,e.ts,e.side,e.price,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec
+      FROM precursor_events e LEFT JOIN precursor_research r ON r.precursor_id=e.id
+      WHERE e.ts>=? ORDER BY e.ts DESC LIMIT 2000""",(now-4*60*60*1000,)).fetchall()
+    for pid,ts,side,entry,mfe,mae,p5,p15,p30,p60,next_exec_ts,lead_sec in rows:
+        if not entry:continue
+        entry=float(entry); move=(px-entry)/entry*100.0; fav=move if side=='LONG' else -move; adv=-move if side=='LONG' else move
+        mfe=max(float(mfe or 0),fav,0.0); mae=max(float(mae or 0),adv,0.0); vals=[p5,p15,p30,p60]
+        for i,m in enumerate((5,15,30,60)):
+            if vals[i] is None and now-int(ts)>=m*60000: vals[i]=px
+        if next_exec_ts is None:
+            hit=c.execute("""SELECT ts FROM decision_events WHERE event='TRIGGER' AND side=? AND ts>=? AND ts<=? ORDER BY ts ASC LIMIT 1""",(side,int(ts),int(ts)+60*60*1000)).fetchone()
+            if hit:
+                next_exec_ts=int(hit[0]); lead_sec=(next_exec_ts-int(ts))/1000.0
+        c.execute("""INSERT INTO precursor_research(precursor_id,started_ts,last_ts,mfe_pct,mae_pct,p5,p15,p30,p60,next_exec_ts,lead_sec)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(precursor_id) DO UPDATE SET last_ts=excluded.last_ts,mfe_pct=excluded.mfe_pct,mae_pct=excluded.mae_pct,
+          p5=COALESCE(precursor_research.p5,excluded.p5),p15=COALESCE(precursor_research.p15,excluded.p15),p30=COALESCE(precursor_research.p30,excluded.p30),p60=COALESCE(precursor_research.p60,excluded.p60),
+          next_exec_ts=COALESCE(precursor_research.next_exec_ts,excluded.next_exec_ts),lead_sec=COALESCE(precursor_research.lead_sec,excluded.lead_sec)""",
+          (pid,ts,now,mfe,mae,*vals,next_exec_ts,lead_sec))
+    c.commit();c.close()
+
+
+def update_decision_research():
+    """Forward MFE/MAE + horizons for the *actual EXEC* trigger events."""
+    if not last_price:return
+    now=int(time.time()*1000); px=float(last_price); c=db()
+    rows=c.execute("""SELECT e.id,e.ts,e.side,e.price,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60
+      FROM decision_events e LEFT JOIN decision_research r ON r.decision_id=e.id
+      WHERE e.event='TRIGGER' AND e.ts>=? ORDER BY e.ts DESC LIMIT 2000""",(now-4*60*60*1000,)).fetchall()
+    for did,ts,side,entry,mfe,mae,p5,p15,p30,p60 in rows:
+        if not entry:continue
+        entry=float(entry); move=(px-entry)/entry*100.0; fav=move if side=='LONG' else -move; adv=-move if side=='LONG' else move
+        mfe=max(float(mfe or 0),fav,0.0); mae=max(float(mae or 0),adv,0.0); vals=[p5,p15,p30,p60]
+        for i,m in enumerate((5,15,30,60)):
+            if vals[i] is None and now-int(ts)>=m*60000: vals[i]=px
+        c.execute("""INSERT INTO decision_research(decision_id,started_ts,last_ts,mfe_pct,mae_pct,p5,p15,p30,p60)
+          VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(decision_id) DO UPDATE SET last_ts=excluded.last_ts,mfe_pct=excluded.mfe_pct,mae_pct=excluded.mae_pct,
+          p5=COALESCE(decision_research.p5,excluded.p5),p15=COALESCE(decision_research.p15,excluded.p15),p30=COALESCE(decision_research.p30,excluded.p30),p60=COALESCE(decision_research.p60,excluded.p60)""",
+          (did,ts,now,mfe,mae,*vals))
+    c.commit();c.close()
 
 
 def minute_pressure_gate(side, reversal=False, loose=False, snap=None):
@@ -1018,8 +1248,9 @@ def sync_setup_stage_events(items, context):
           VALUES(?,?,?,?,?,?,?,?,?,?)""",rows); c.commit(); c.close()
 
 def record_shadow(setup, variant, side, score, reasons, bucket, context):
-    """Research-only candidate. Never appears as a live signal and never opens a position."""
+    """Legacy PRICE/FAST comparison frozen in v6.65. Historical rows are preserved."""
     global shadow_last_bucket
+    if not LEGACY_SHADOW_ENABLED:return False
     key=(setup,variant,side)
     if shadow_last_bucket.get(key)==bucket:return False
     now=int(time.time()*1000); px=float(last_price or 0)
@@ -1166,7 +1397,8 @@ def evaluate_setup_signals():
     def emit(setup,side,score,reasons,bucket,level=None):
         key=f'SETUP_{setup}_{side}'
         if stage_last_bucket.get(key)==bucket:return False
-        _save_stage_signal(f'{setup} {"L" if side=="LONG" else "S"}',side,min(100,max(0,score)),'5M',A5,' | '.join(reasons),False)
+        # v6.65: PB/RV/RT are internal EXEC feeder states only. Their lifecycle is still
+        # persisted in setup_stage_events/shadow tables, but no public raw signal row is created.
         stage_last_bucket[key]=bucket
         a=setup_arms.get(arm_key(setup,side))
         if a:
@@ -1839,10 +2071,10 @@ async def public_loop():
                             print("position_manager",repr(e))
                         last_heavy_ms["manager"]=now_ms
                     if now_ms-last_heavy_ms["evaluate"]>=350:
-                        evaluate();evaluate_macro()
+                        evaluate(); evaluate_precursor()
                         last_heavy_ms["evaluate"]=now_ms
                     if now_ms-last_heavy_ms["outcomes"]>=1000:
-                        update_outcomes(); update_signal_research(); update_shadow_research(); update_user_trade_research(); last_heavy_ms["outcomes"]=now_ms
+                        update_user_trade_research(); update_decision_research(); update_precursor_research(); last_heavy_ms["outcomes"]=now_ms
         except Exception as e:
             status["public"]="reconnecting";print("public",e);await asyncio.sleep(2)
 
@@ -1882,7 +2114,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.64 MTF PANEL FIX KST","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.65 EXEC + PRECURSOR LAB KST","ok":True,"status":status}
 
 def market_bias_snapshot():
     vals={tf:trend_bias_tf(tf) for tf in ("5M","15M","1H","4H")}
@@ -1977,12 +2209,12 @@ def live():
     a,b=flow(10000),flow(30000);H,L=liquidity15()
     return {"price":last_price,"d10":a["ratio"],"d30":b["ratio"],"oi":current_oi,"oi60":oi_delta(),
             "flow":flow_intensity(),"book":book_imb,"liqH":H,"liqL":L,"armed":trap_arm,"status":status,
-            "bias":market_bias_snapshot(),"radar":turn_radar_snapshot(),"pressure":mtf_pressure_snapshot(),"setup_watch":setup_watch,"decision":decision_state,"daily":daily_move_snapshot()}
+            "bias":market_bias_snapshot(),"radar":turn_radar_snapshot(),"pressure":mtf_pressure_snapshot(),"setup_watch":setup_watch,"decision":decision_state,"precursor":precursor_state,"daily":daily_move_snapshot()}
 
 @app.get("/api/setup-watch")
 def api_setup_watch():
     """Lightweight 3-SETUP + fresh MTF pressure endpoint for ~2s UI polling."""
-    return {**setup_watch,"pressure":mtf_pressure_snapshot(),"decision":decision_state}
+    return {**setup_watch,"pressure":mtf_pressure_snapshot(),"decision":decision_state,"precursor":precursor_state}
 
 @app.get("/api/pressure")
 def api_pressure():
@@ -1991,6 +2223,16 @@ def api_pressure():
 @app.get("/api/decision")
 def api_decision():
     return decision_state
+
+@app.get("/api/precursor")
+def api_precursor():
+    return precursor_state
+
+@app.get("/api/precursor-events")
+def api_precursor_events(limit:int=500):
+    c=db(); c.row_factory=sqlite3.Row
+    rows=[dict(x) for x in c.execute("SELECT * FROM precursor_events ORDER BY ts DESC LIMIT ?",(min(max(int(limit),1),2000),)).fetchall()]
+    c.close(); return rows
 
 @app.get("/api/decision-events")
 def api_decision_events(limit:int=500):
@@ -2008,8 +2250,12 @@ def api_research_summary():
       COUNT(*) n,AVG(r.mfe_pct) avg_mfe,AVG(r.mae_pct) avg_mae FROM signals s LEFT JOIN signal_research r ON r.signal_id=s.id
       WHERE name LIKE 'PULLBACK%' OR name LIKE 'REVERSAL%' OR name LIKE 'RETEST%' GROUP BY setup""").fetchall()]
     user=c.execute("""SELECT COUNT(*) n,AVG(mfe_pct) avg_mfe,AVG(mae_pct) avg_mae FROM user_trade_research""").fetchone()
-    decisions=[dict(x) for x in c.execute("SELECT event,side,COUNT(*) n FROM decision_events GROUP BY event,side ORDER BY event,side").fetchall()]
-    c.close(); return {"setup_stage_events":stages,"shadow":shadows,"base":base,"user":dict(user) if user else {},"decision":decisions}
+    decisions=[dict(x) for x in c.execute("""SELECT e.event,e.side,COUNT(*) n,AVG(r.mfe_pct) avg_mfe,AVG(r.mae_pct) avg_mae
+      FROM decision_events e LEFT JOIN decision_research r ON r.decision_id=e.id GROUP BY e.event,e.side ORDER BY e.event,e.side""").fetchall()]
+    precursor=[dict(x) for x in c.execute("""SELECT e.side,COUNT(*) n,AVG(r.mfe_pct) avg_mfe,AVG(r.mae_pct) avg_mae,AVG(r.lead_sec) avg_lead_sec,
+      SUM(CASE WHEN r.next_exec_ts IS NOT NULL THEN 1 ELSE 0 END) matched_exec
+      FROM precursor_events e LEFT JOIN precursor_research r ON r.precursor_id=e.id GROUP BY e.side ORDER BY e.side""").fetchall()]
+    c.close(); return {"setup_stage_events":stages,"shadow":shadows,"base":base,"user":dict(user) if user else {},"decision":decisions,"precursor":precursor}
 
 @app.get("/api/research/export")
 def api_research_export(limit:int=5000):
@@ -2020,7 +2266,8 @@ def api_research_export(limit:int=5000):
       "setup_events":[dict(x) for x in c.execute("SELECT * FROM setup_stage_events ORDER BY ts DESC LIMIT ?",(lim,)).fetchall()],
       "shadow":[dict(x) for x in c.execute("""SELECT s.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM shadow_signals s LEFT JOIN shadow_research r ON r.shadow_id=s.id ORDER BY s.ts DESC LIMIT ?""",(lim,)).fetchall()],
       "user":[dict(x) for x in c.execute("SELECT * FROM user_trade_research ORDER BY started_ts DESC LIMIT ?",(lim,)).fetchall()],
-      "decision":[dict(x) for x in c.execute("SELECT * FROM decision_events ORDER BY ts DESC LIMIT ?",(lim,)).fetchall()]
+      "decision":[dict(x) for x in c.execute("""SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM decision_events e LEFT JOIN decision_research r ON r.decision_id=e.id ORDER BY e.ts DESC LIMIT ?""",(lim,)).fetchall()],
+      "precursor":[dict(x) for x in c.execute("""SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec FROM precursor_events e LEFT JOIN precursor_research r ON r.precursor_id=e.id ORDER BY e.ts DESC LIMIT ?""",(lim,)).fetchall()]
     }
     c.close(); return out
 
@@ -2033,9 +2280,10 @@ def api_research_export_csv(kind:str="signals", limit:int=10000):
       "setup":"SELECT * FROM setup_stage_events ORDER BY ts DESC LIMIT ?",
       "shadow":"SELECT s.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM shadow_signals s LEFT JOIN shadow_research r ON r.shadow_id=s.id ORDER BY s.ts DESC LIMIT ?",
       "user":"SELECT * FROM user_trade_research ORDER BY started_ts DESC LIMIT ?",
-      "decision":"SELECT * FROM decision_events ORDER BY ts DESC LIMIT ?"
+      "decision":"SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM decision_events e LEFT JOIN decision_research r ON r.decision_id=e.id ORDER BY e.ts DESC LIMIT ?",
+      "precursor":"SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec FROM precursor_events e LEFT JOIN precursor_research r ON r.precursor_id=e.id ORDER BY e.ts DESC LIMIT ?"
     }
-    if k not in qs: c.close(); return Response("kind must be signals, setup, shadow, user, or decision",status_code=400,media_type="text/plain")
+    if k not in qs: c.close(); return Response("kind must be signals, setup, shadow, user, decision, or precursor",status_code=400,media_type="text/plain")
     rows=[dict(x) for x in c.execute(qs[k],(lim,)).fetchall()]; c.close(); buf=io.StringIO()
     if rows:
         w=csv.DictWriter(buf,fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
