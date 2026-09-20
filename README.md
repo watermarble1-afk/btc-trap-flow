@@ -89,3 +89,11 @@ The actual OKX/Railway long-running soak test still has to occur in the deployed
 - Sequence: exhaustion/absorption -> liquidity sweep or failed auction -> reclaim -> first 1M structure response -> micro not opposing.
 - EVENT does not feed, block, boost, or veto EXEC/EARLY.
 - Adds EVENT chart layer toggle, live panel, stream/history entries, MFE/MAE + 5/15/30/60m research, and EXEC lead-time matching.
+
+
+## v6.67a — EVENT TOGGLE HOTFIX
+- EVENT 타점 버튼 ON 상태 CSS가 누락되어 클릭해도 시각적으로 상태가 바뀌지 않던 UI 버그 수정.
+- 모든 신호 레이어 버튼에 aria-pressed / ON-OFF title 상태 동기화 추가.
+- OFF 버튼은 opacity를 낮춰 ON/OFF 구분을 명확히 함.
+- iframe/service-worker cache key를 v668로 갱신.
+- 서버/EXEC/EARLY/EVENT 신호 로직은 v6.67과 동일.
