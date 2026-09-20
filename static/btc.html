@@ -21,6 +21,8 @@ h1{font-size:20px;margin:0}.sub{font-size:11px;color:var(--muted);margin-top:3px
 .flowbar{height:8px;border-radius:99px;background:#161e2b;overflow:hidden;margin-top:5px;position:relative}.flowfill{position:absolute;top:0;height:100%;width:0;left:50%;background:#718096}.tiny{font-size:9px;color:#778398}
 .pressureDeck{display:block!important;visibility:visible!important;margin:12px 0 4px;border:1px solid #33445f;border-radius:12px;background:linear-gradient(180deg,#0d1623,#0a111b);padding:12px;min-height:196px;box-shadow:inset 0 0 0 1px rgba(109,167,255,.04)}.pressureHead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;margin-bottom:10px}.pressureTitle{font-size:14px;font-weight:900;letter-spacing:.2px}.pressureSummary{font-size:10px;color:#b7c3d6;text-align:right;line-height:1.5}.pressureGrid{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.pressureTf{display:block!important;border:1px solid #2a3950;border-radius:10px;padding:10px;background:#101a29;min-width:0;min-height:118px}.pressureTfHead{display:flex;justify-content:space-between;align-items:center;font-size:12px;font-weight:900}.pressureTfHead>span:first-child{font-size:15px}.pressureNums{display:flex;justify-content:space-between;margin-top:10px;font-size:16px;font-weight:900}.pressureTrack{height:9px;border-radius:99px;overflow:hidden;background:#1a2230;margin:8px 0;display:flex}.pressureBuy{height:100%;background:#2fd58b}.pressureSell{height:100%;background:#ff5c70}.pressureMeta{display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:10px;color:#93a1b5}.pressureWarm{color:#f1c75b}.pressureTurn{margin-top:10px;padding:9px 2px 0;border-top:1px solid #26344a;font-size:11px;color:#c0cad9}.microTag{display:inline-block;margin-left:6px;padding:2px 6px;border:1px solid #3b4e6d;border-radius:99px;font-size:8px;color:#9bb3d2}@media(max-width:800px){.pressureDeck{min-height:0}.pressureGrid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.pressureSummary{text-align:left;margin-top:5px}.pressureHead{display:block}.pressureTf{min-height:108px}}
 .mtf{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}.mtf>div{text-align:center;border:1px solid var(--line);border-radius:7px;padding:6px;font-size:10px}.mtf b{display:block;margin-top:2px}
+
+.sigLayerCtl{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.sigLayerBtn{border:1px solid #33425a;background:#101723;color:#7f8ba0;border-radius:7px;padding:5px 9px;font-size:10px;font-weight:900;cursor:pointer}.sigLayerBtn.on[data-layer="exec"]{color:#35d98a;border-color:#267c5a;background:#0d1b18}.sigLayerBtn.on[data-layer="early"]{color:#8fb5ff;border-color:#355a86;background:#0d1622}.sigLayerBtn.on[data-layer="research"]{color:#d7b6ff;border-color:#69448e;background:#171022}.sigLayerHint{font-size:9px;color:#78869a}
 .signal{font-size:17px;font-weight:900}.warn{font-size:10px;line-height:1.55;color:#d4c18f;background:#17130c;border-radius:8px;padding:8px;margin-top:8px}
 .dot{font-size:10px}.history{max-height:165px;overflow:auto}.histrow{display:grid;grid-template-columns:75px 1fr 60px;gap:6px;font-size:10px;padding:5px 0;border-bottom:1px solid #192130}
 @media(max-width:1050px){.grid{grid-template-columns:1fr}.cards{grid-template-columns:repeat(3,1fr)}#chart{height:560px}}
@@ -87,13 +89,16 @@ body.embedded-btc header{position:relative!important}
  <div class="indRow"><span>기타</span><label><input type="checkbox" id="vwapChk"> VWAP</label><label><input type="checkbox" id="volChk" checked> 거래량</label></div>
  <div style="font-size:9px;color:#7f8ba0;margin-top:7px">예: 5·20·60·120·240 또는 직접 숫자 입력 · 설정은 이 브라우저에 저장</div>
 </div></div><div id="enginePanel" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:8px 10px;border:1px solid #263247;border-radius:8px;background:#0b111b">
-<b style="font-size:10px">LIVE SIGNALS · v6.65</b>
-<span style="color:#35d98a;font-size:10px;font-weight:800">▲ EXEC L</span><span style="color:#ff5c70;font-size:10px;font-weight:800">▼ EXEC S</span>
-<span style="color:#8fb5ff;font-size:10px;font-weight:800">◌ EARLY L</span><span style="color:#ff9bd2;font-size:10px;font-weight:800">◌ EARLY S</span>
-<span style="color:#78869a;font-size:9px">PB/RV/RT는 EXEC 내부 feeder로만 유지 · 1H/4H 독립신호/SCALP/구15M/VWAP 신호 생성 중단 · X는 내 포지션 종료만</span>
+<b style="font-size:10px">LIVE SIGNALS · v6.66</b>
+<div class="sigLayerCtl">
+  <button class="sigLayerBtn on" data-layer="exec" type="button">▲▼ EXEC 확정</button>
+  <button class="sigLayerBtn on" data-layer="early" type="button">◌ EARLY</button>
+  <button class="sigLayerBtn" data-layer="research" type="button">PB/RV/RT 연구</button>
+</div>
+<span class="sigLayerHint">차트 표시만 ON/OFF · 엔진/DB 기록에는 영향 없음 · X는 내 포지션 종료만</span>
 </div><div style="font-size:10px;color:#8d99ad;margin:3px 0">TIMEFRAME · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO</div><div class="hoverPctBar" id="hoverPctBar">봉에 마우스를 올리면 해당 봉의 등락률이 표시됩니다.</div><div id="chart"></div>
   <div class="pressureDeck" id="mtfPressurePanel">
-    <div class="pressureHead"><div><div class="pressureTitle">MTF ORDER FLOW · 1M / 3M / 5M / 15M <span style="font-size:9px;color:#6da7ff">UI v6.65</span> · 매집/체결 압력 <span class="microTag">메인 방향 입력</span></div><div class="tiny">1M이 먼저 움직이고 3M→5M→15M이 따라오는지 추적 · 수치는 확률이 아니라 공격적 체결 비중</div></div><div class="pressureSummary" id="pressureSummary">분봉 체결 데이터 수집 중…</div></div>
+    <div class="pressureHead"><div><div class="pressureTitle">MTF ORDER FLOW · 1M / 3M / 5M / 15M <span style="font-size:9px;color:#6da7ff">UI v6.66</span> · 매집/체결 압력 <span class="microTag">메인 방향 입력</span></div><div class="tiny">1M이 먼저 움직이고 3M→5M→15M이 따라오는지 추적 · 수치는 확률이 아니라 공격적 체결 비중</div></div><div class="pressureSummary" id="pressureSummary">분봉 체결 데이터 수집 중…</div></div>
     <div class="pressureGrid" id="pressureGrid">
       <div class="pressureTf"><div class="pressureTfHead"><span>1M</span><span class="pressureWarm">WARMUP</span></div><div class="pressureNums"><span style="color:#35d98a">L —</span><span style="color:#ff5c70">S —</span></div><div class="pressureTrack"><div class="pressureBuy" style="width:50%"></div><div class="pressureSell" style="width:50%"></div></div><div class="pressureMeta"><span>Δ —</span><span>가격 —</span><span>강도 —</span><span class="pressureWarm">수집 중</span></div></div>
       <div class="pressureTf"><div class="pressureTfHead"><span>3M</span><span class="pressureWarm">WARMUP</span></div><div class="pressureNums"><span style="color:#35d98a">L —</span><span style="color:#ff5c70">S —</span></div><div class="pressureTrack"><div class="pressureBuy" style="width:50%"></div><div class="pressureSell" style="width:50%"></div></div><div class="pressureMeta"><span>Δ —</span><span>가격 —</span><span>강도 —</span><span class="pressureWarm">수집 중</span></div></div>
@@ -104,7 +109,7 @@ body.embedded-btc header{position:relative!important}
   </div>
   <div class="legend"><span><b style="color:#35d98a">▲ EXEC</b> 최종 실행 후보</span><span><b style="color:#8fb5ff">◌ EARLY</b> 선행 이상징후(진입신호 아님)</span><span><b style="color:#c7d0dd">X</b> 내 포지션 종료</span><span><b class="purple">VWAP</b> 차트 지표</span></div>
   <div class="warn">
-    v6.65는 실전 검증 화면을 EXEC + PRECURSOR 두 계층으로 정리했습니다. PB/RV/RT는 차트에 별도 신호로 뿌리지 않고 EXEC Decision Layer의 내부 입력으로만 유지합니다. PRECURSOR는 가격 추진력 감소 · 공격적 체결 흡수 · 1M liquidity sweep/reclaim · 압력 감속을 감지하는 독립 연구엔진이며 EXEC를 수정하거나 막지 않습니다. EARLY는 “여기 이상하다”는 경고일 뿐 진입 신호가 아닙니다. 1H/4H 독립 신호와 레거시 SCALP/15M/VWAP 신호 생성은 중단했습니다.
+    v6.66은 EXEC + PRECURSOR를 유지하면서 PB/RV/RT 연구 결과 오버레이를 다시 선택 표시할 수 있게 정리했습니다. PB/RV/RT는 EXEC Decision Layer의 내부 입력으로 유지하면서, 차트 연구 오버레이 버튼을 켠 경우에만 저장된 확정 연구신호를 다시 표시합니다. PRECURSOR는 가격 추진력 감소 · 공격적 체결 흡수 · 1M liquidity sweep/reclaim · 압력 감속을 감지하는 독립 연구엔진이며 EXEC를 수정하거나 막지 않습니다. EARLY는 “여기 이상하다”는 경고일 뿐 진입 신호가 아닙니다. 1H/4H 독립 신호와 레거시 SCALP/15M/VWAP 신호 생성은 중단했습니다.
   </div>
 </section>
 
@@ -212,6 +217,19 @@ let liveEnginePositions=[];
 let myPosition={side:"FLAT"}, myPositionEvents=[];
 let decisionEvents=[];
 let precursorEvents=[];
+// v6.66 chart-layer visibility. Display only; never changes server engines or research recording.
+const SIGNAL_LAYER_KEY='btc_signal_layers_v666';
+let signalLayers={exec:true,early:true,research:false};
+try{const z=JSON.parse(localStorage.getItem(SIGNAL_LAYER_KEY)||'null');if(z&&typeof z==='object')signalLayers={...signalLayers,...z}}catch(e){}
+function applySignalLayerUI(){
+  document.querySelectorAll('.sigLayerBtn').forEach(b=>b.classList.toggle('on',!!signalLayers[b.dataset.layer]));
+}
+function setSignalLayer(layer){
+  if(!(layer in signalLayers))return;signalLayers[layer]=!signalLayers[layer];
+  try{localStorage.setItem(SIGNAL_LAYER_KEY,JSON.stringify(signalLayers))}catch(e){}
+  applySignalLayerUI();renderMarkers();
+}
+
 let livePosition={side:'FLAT'};
 
 const $=id=>document.getElementById(id);
@@ -580,18 +598,32 @@ function renderHistory(){
 function signalAnchorRows(){
   const from=cache[cur]?.[0]?.time||0, bucketSec={'1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800,'1MO':2592000}[cur]||300;
   const out=[];
-  for(const e of (decisionEvents||[])){
-    if(String(e.event||'').toUpperCase()!=='TRIGGER')continue;
-    const rawTs=Math.floor(Number(e.ts||0)/1000);if(!rawTs||rawTs<from)continue;
-    out.push({mode:'EXEC',side:String(e.side||'').toUpperCase()==='LONG'?'L':'S',candleTs:Math.floor(rawTs/bucketSec)*bucketSec,rawTs,score:Math.round(Number(e.evidence||0)),name:e.setups||'EXEC',entry:Number(e.price||0)});
+  if(signalLayers.exec){
+    for(const e of (decisionEvents||[])){
+      if(String(e.event||'').toUpperCase()!=='TRIGGER')continue;
+      const rawTs=Math.floor(Number(e.ts||0)/1000);if(!rawTs||rawTs<from)continue;
+      out.push({mode:'EXEC',side:String(e.side||'').toUpperCase()==='LONG'?'L':'S',candleTs:Math.floor(rawTs/bucketSec)*bucketSec,rawTs,score:Math.round(Number(e.evidence||0)),name:e.setups||'EXEC',entry:Number(e.price||0)});
+    }
   }
-  for(const e of (precursorEvents||[])){
-    const rawTs=Math.floor(Number(e.ts||0)/1000);if(!rawTs||rawTs<from)continue;
-    out.push({mode:'EARLY',side:String(e.side||'').toUpperCase()==='LONG'?'L':'S',candleTs:Math.floor(rawTs/bucketSec)*bucketSec,rawTs,score:Math.round(Number(e.score||0)),name:e.groups||'PRECURSOR',entry:Number(e.price||0)});
+  if(signalLayers.early){
+    for(const e of (precursorEvents||[])){
+      const rawTs=Math.floor(Number(e.ts||0)/1000);if(!rawTs||rawTs<from)continue;
+      out.push({mode:'EARLY',side:String(e.side||'').toUpperCase()==='LONG'?'L':'S',candleTs:Math.floor(rawTs/bucketSec)*bucketSec,rawTs,score:Math.round(Number(e.score||0)),name:e.groups||'PRECURSOR',entry:Number(e.price||0)});
+    }
+  }
+  if(signalLayers.research){
+    const seen=new Set();
+    for(const s of (serverSaved||[])){
+      const n=String(s.name||'').toUpperCase(), setup=n.includes('PULLBACK')?'PB':n.includes('REVERSAL')?'RV':n.includes('RETEST')?'RT':null;
+      if(!setup)continue;
+      const rawTs=Math.floor(Number(s.ts||0)/1000)||Number(s.time||0);if(!rawTs||rawTs<from)continue;
+      const side=String(s.dir||s.side||'').toUpperCase()==='LONG'?'L':'S', candleTs=Math.floor(rawTs/bucketSec)*bucketSec;
+      const key=`${setup}|${side}|${candleTs}`;if(seen.has(key))continue;seen.add(key);
+      out.push({mode:'RESEARCH',setup,side,candleTs,rawTs,score:Math.round(Number(s.score||0)),name:s.name||setup,entry:Number(s.entry||0)});
+    }
   }
   return out;
 }
-
 function renderSignalAnchors(){
   const host=$('chart');if(!host||!chart||!candle)return;
   let layer=host.querySelector('.signalAnchorLayer');if(!layer){layer=document.createElement('div');layer.className='signalAnchorLayer';host.appendChild(layer)}
@@ -602,27 +634,37 @@ function renderSignalAnchors(){
     const x=chart.timeScale().timeToCoordinate(a.candleTs);if(x==null)continue;
     const isL=a.side==='L', y=candle.priceToCoordinate(isL?Number(bar.low):Number(bar.high));if(y==null)continue;
     const sk=`${a.candleTs}|${a.side}`, idx=stack[sk]||0;stack[sk]=idx+1;
-    const col=a.mode==='EXEC'?(isL?'#35d98a':'#ff5c70'):(isL?'#8fb5ff':'#ff9bd2');
+    const col=a.mode==='EXEC'?(isL?'#35d98a':'#ff5c70'):a.mode==='EARLY'?(isL?'#8fb5ff':'#ff9bd2'):a.setup==='PB'?(isL?'#35d98a':'#ff5c70'):a.setup==='RV'?(isL?'#00e5ff':'#ffd400'):'#b56cff';
     const badgeY=Math.max(12,Math.min(host.clientHeight-22,y+(isL?1:-1)*(30+idx*24)));
     const line=document.createElement('div');line.className='sigAnchorLine';line.style.color=col;line.style.left=x+'px';line.style.top=Math.min(y,badgeY)+'px';line.style.height=Math.max(6,Math.abs(badgeY-y))+'px';layer.appendChild(line);
     const dot=document.createElement('div');dot.className='sigAnchorDot';dot.style.color=col;dot.style.left=x+'px';dot.style.top=y+'px';layer.appendChild(dot);
-    const badge=document.createElement('div');badge.className='sigAnchorBadge';badge.style.color=col;badge.style.left=x+'px';badge.style.top=badgeY+'px';badge.textContent=a.mode==='EXEC'?`${isL?'▲':'▼'} EXEC ${a.side}`:`◌ EARLY ${a.side} ${a.score}`;
+    const badge=document.createElement('div');badge.className='sigAnchorBadge';badge.style.color=col;badge.style.left=x+'px';badge.style.top=badgeY+'px';badge.textContent=a.mode==='EXEC'?`${isL?'▲':'▼'} EXEC ${a.side}`:a.mode==='EARLY'?`◌ EARLY ${a.side} ${a.score}`:`${isL?'▲':'▼'} ${a.setup} ${a.side} ${a.score}`;
     const tm=new Date(a.rawTs*1000).toLocaleString('ko-KR',{hour12:false});badge.title=`${a.name} · ${tm} · score ${a.score}${a.entry?` · $${fmt(a.entry)}`:''}`;layer.appendChild(badge);
   }
 }
 function renderMarkers(){
   const from=cache[cur]?.[0]?.time||0, marks=[];
   const bucketSec={'1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800,'1MO':2592000}[cur]||300;
-  for(const e of (decisionEvents||[])){
+  if(signalLayers.exec){for(const e of (decisionEvents||[])){
     if(String(e.event||'').toUpperCase()!=='TRIGGER')continue;
     const ts=Math.floor(Number(e.ts||0)/1000);if(!ts||ts<from)continue;
     const isL=String(e.side||'').toUpperCase()==='LONG', candleTs=Math.floor(ts/bucketSec)*bucketSec;
     marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:isL?'#35d98a':'#ff5c70',shape:isL?'arrowUp':'arrowDown',text:''});
-  }
-  for(const e of (precursorEvents||[])){
+  }}
+  if(signalLayers.early){for(const e of (precursorEvents||[])){
     const ts=Math.floor(Number(e.ts||0)/1000);if(!ts||ts<from)continue;
     const isL=String(e.side||'').toUpperCase()==='LONG', candleTs=Math.floor(ts/bucketSec)*bucketSec;
     marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:isL?'#8fb5ff':'#ff9bd2',shape:'circle',text:''});
+  }}
+  if(signalLayers.research){
+    const seen=new Set();
+    for(const s of (serverSaved||[])){
+      const n=String(s.name||'').toUpperCase(), setup=n.includes('PULLBACK')?'PB':n.includes('REVERSAL')?'RV':n.includes('RETEST')?'RT':null;if(!setup)continue;
+      const ts=Math.floor(Number(s.ts||0)/1000)||Number(s.time||0);if(!ts||ts<from)continue;
+      const isL=String(s.dir||s.side||'').toUpperCase()==='LONG', candleTs=Math.floor(ts/bucketSec)*bucketSec, key=`${setup}|${isL?'L':'S'}|${candleTs}`;if(seen.has(key))continue;seen.add(key);
+      const col=setup==='PB'?(isL?'#35d98a':'#ff5c70'):setup==='RV'?(isL?'#00e5ff':'#ffd400'):'#b56cff';
+      marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:col,shape:setup==='RV'?'diamond':setup==='RT'?'circle':(isL?'arrowUp':'arrowDown'),text:''});
+    }
   }
   for(const e of (myPositionEvents||[])){
     const ts=Math.floor(Number(e.ts||0)/1000),ev=String(e.event||'').toUpperCase();if(!ts||ts<from||!['OPEN','EXIT'].includes(ev))continue;
@@ -741,21 +783,22 @@ async function syncResearchSummary(){
     const trig=(x.setup_stage_events||[]).filter(z=>z.stage==='TRIGGER').reduce((n,z)=>n+Number(z.n||0),0);
     const de=(x.decision||[]).filter(z=>z.event==='TRIGGER').reduce((n,z)=>n+Number(z.n||0),0);
     const pre=(x.precursor||[]).reduce((n,z)=>n+Number(z.n||0),0), u=Number(x.user?.n||0);
-    el.innerHTML=`EXEC ${de} · PRECURSOR ${pre}<br>내부 3-SETUP trigger ${trig} · USER ${u}<br><span class="tiny">PB/RV/RT는 EXEC feeder 연구만 계속 · 차트에는 EXEC/EARLY만 표시</span>`;
+    el.innerHTML=`EXEC ${de} · PRECURSOR ${pre}<br>내부 3-SETUP trigger ${trig} · USER ${u}<br><span class="tiny">PB/RV/RT는 EXEC feeder 연구 계속 · 차트 오버레이는 버튼으로 독립 ON/OFF</span>`;
   }catch(e){el.textContent='연구 집계 연결 대기'}
 }
 let syncServerBusy=false;
 async function syncServer(){
   if(syncServerBusy)return;syncServerBusy=true;
   try{
-    const [live,mypos,myevents,devents,pevents]=await Promise.all([
+    const [live,mypos,myevents,devents,pevents,baseSignals]=await Promise.all([
       fetch(SERVER_API+'/api/live',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/user-position',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/user-position-events',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/decision-events?limit=1000',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[]),
-      fetch(SERVER_API+'/api/precursor-events?limit=1000',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[])
+      fetch(SERVER_API+'/api/precursor-events?limit=1000',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[]),
+      fetch(SERVER_API+'/api/signals?limit=1000',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[])
     ]);
-    serverLive=live||{};decisionEvents=Array.isArray(devents)?devents:[];precursorEvents=Array.isArray(pevents)?pevents:[];serverSaved=[];positionEvents=[];liveEnginePositions=[];
+    serverLive=live||{};decisionEvents=Array.isArray(devents)?devents:[];precursorEvents=Array.isArray(pevents)?pevents:[];serverSaved=(Array.isArray(baseSignals)?baseSignals:[]).filter(x=>/PULLBACK|REVERSAL|RETEST/i.test(String(x.name||'')));positionEvents=[];liveEnginePositions=[];
     myPosition=mypos||{side:'FLAT'};myPositionEvents=Array.isArray(myevents)?myevents:[];
     if(Number(serverLive?.price)>0&&$('price'))$('price').textContent='$'+fmt(Number(serverLive.price));
     renderTurnRadar(serverLive?.radar);renderPressure(serverLive?.pressure||serverLive?.setup_watch?.pressure);renderDecision(serverLive?.decision);renderPrecursor(serverLive?.precursor);renderContext();updateDailyMove();renderMyTradeLedger();
@@ -1017,7 +1060,9 @@ function drawInd(){
 }
 function initInd(){
  loadInd();
- $('indBtn').onclick=()=>$('indPanel').classList.toggle('open');
+ document.querySelectorAll('.sigLayerBtn').forEach(b=>b.addEventListener('click',()=>setSignalLayer(b.dataset.layer)));
+applySignalLayerUI();
+$('indBtn').onclick=()=>$('indPanel').classList.toggle('open');
  $('addMA').onclick=()=>{let n=Math.max(2,Math.min(500,+$('maLen').value||20)),type=$('maType').value;let c=$('maColor').value;if(!userMA.some(x=>x.n===n&&x.type===type))userMA.push({n,type,c});saveInd();drawInd()};
  $('vwapChk').onchange=$('volChk').onchange=()=>{saveInd();drawInd()};
  setTimeout(drawInd,1200);
