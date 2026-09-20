@@ -1,4 +1,4 @@
-# BTC OKX RADAR v6.66 — EXEC + PRECURSOR LAB
+# BTC OKX RADAR v6.67 — EXEC + PRECURSOR LAB
 
 This version freezes the current EXEC Decision Layer for validation and removes unrelated live signal generation from the runtime/UI. It adds one independent leading-anomaly research engine (PRECURSOR) without changing or vetoing EXEC.
 
@@ -38,7 +38,7 @@ An `EARLY` chart event requires a high combined score, at least three independen
 
 ## Research / validation
 
-v6.66 records forward research for both layers:
+v6.67 records forward research for both layers:
 
 - EXEC: MFE / MAE and 5 / 15 / 30 / 60 minute forward prices.
 - PRECURSOR: MFE / MAE and 5 / 15 / 30 / 60 minute forward prices.
@@ -75,9 +75,17 @@ Exports:
 The actual OKX/Railway long-running soak test still has to occur in the deployed environment.
 
 
-## v6.66 — SIGNAL LAYER TOGGLES
+## v6.67 — SIGNAL LAYER TOGGLES
 - EXEC confirmed, PRECURSOR EARLY, and stored PB/RV/RT research-result overlays can be shown/hidden independently.
 - Research overlay is display-only: it does not restart retired 1H/4H/SCALP/old-15M/VWAP generators and does not alter EXEC or EARLY logic.
 - Chart defaults: EXEC ON, EARLY ON, PB/RV/RT research OFF. Choice persists in localStorage.
 - User B/S/X markers always remain visible; X remains user-position exit only.
 - Base PB/RV/RT records are fetched from /api/signals solely for optional chart review.
+
+
+## v6.67 — EVENT ENTRY LAB
+- EXEC and PRECURSOR/EARLY logic are preserved.
+- Adds an independent stateful EVENT ENTRY research engine.
+- Sequence: exhaustion/absorption -> liquidity sweep or failed auction -> reclaim -> first 1M structure response -> micro not opposing.
+- EVENT does not feed, block, boost, or veto EXEC/EARLY.
+- Adds EVENT chart layer toggle, live panel, stream/history entries, MFE/MAE + 5/15/30/60m research, and EXEC lead-time matching.

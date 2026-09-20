@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.65 EXEC + PRECURSOR LAB KST")
+app=FastAPI(title="BTC Trap Flow Collector v6.67 EXEC + PRECURSOR + EVENT LAB KST")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 @app.middleware("http")
@@ -75,6 +75,16 @@ precursor_state={
 }
 precursor_runtime={"active_side":None,"active_since":0,"clear_since":0,
                    "last_emit":{"LONG":0,"SHORT":0}}
+# v6.67: independent stateful EVENT ENTRY engine. It does not feed/veto EXEC or EARLY.
+event_entry_state={
+    "updated_ts":0,"state":"SCANNING","side":"NONE","score":0.0,"phase":"NONE",
+    "level":None,"started_ts":0,"reasons":[],"last_event_ts":0,
+    "note":"stateful exhaustion -> sweep/failure -> reclaim entry research; independent from EXEC"
+}
+event_entry_runtime={
+    "LONG":None,"SHORT":None,"last_emit":{"LONG":0,"SHORT":0},
+    "last_stage":{"LONG":None,"SHORT":None}
+}
 setup_flow_prev={"ts":0,"d10":0.0,"d30":0.0}
 setup_stage_last={}
 shadow_last_bucket={}
@@ -209,6 +219,22 @@ def db():
     prcols={r[1] for r in c.execute("PRAGMA table_info(precursor_research)").fetchall()}
     if "next_exec_ts" not in prcols:c.execute("ALTER TABLE precursor_research ADD COLUMN next_exec_ts INTEGER")
     if "lead_sec" not in prcols:c.execute("ALTER TABLE precursor_research ADD COLUMN lead_sec REAL")
+    # v6.67: EVENT ENTRY is a separate, stateful research signal. No EXEC coupling.
+    c.execute("""CREATE TABLE IF NOT EXISTS event_entry_stage_events(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, side TEXT, stage TEXT, score REAL,
+      price REAL, level REAL, reason TEXT, context_json TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_event_entry_stage_ts ON event_entry_stage_events(ts)")
+    c.execute("""CREATE TABLE IF NOT EXISTS event_entry_events(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, bucket INTEGER, side TEXT, score REAL,
+      price REAL, level REAL, reason TEXT, context_json TEXT, UNIQUE(bucket,side)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_event_entry_events_ts ON event_entry_events(ts)")
+    c.execute("""CREATE TABLE IF NOT EXISTS event_entry_research(
+      event_id INTEGER PRIMARY KEY, started_ts INTEGER, last_ts INTEGER,
+      mfe_pct REAL DEFAULT 0, mae_pct REAL DEFAULT 0, p5 REAL, p15 REAL, p30 REAL, p60 REAL,
+      next_exec_ts INTEGER, lead_sec REAL, FOREIGN KEY(event_id) REFERENCES event_entry_events(id)
+    )""")
     c.execute("""CREATE TABLE IF NOT EXISTS decision_research(
       decision_id INTEGER PRIMARY KEY, started_ts INTEGER, last_ts INTEGER,
       mfe_pct REAL DEFAULT 0, mae_pct REAL DEFAULT 0, p5 REAL, p15 REAL, p30 REAL, p60 REAL,
@@ -487,6 +513,183 @@ def evaluate_precursor():
       'note':'EARLY = effort/result anomaly warning. Independent from EXEC; not an entry signal.'}
     return precursor_state
 
+
+
+def _event_stage_log(side, stage, score, level, reasons, context, now):
+    """Persist only state transitions so research can reconstruct the sequence without DB spam."""
+    global event_entry_runtime
+    sig=f"{stage}|{round(float(level or 0),2)}"
+    if (event_entry_runtime.get('last_stage') or {}).get(side)==sig:
+        return
+    event_entry_runtime['last_stage'][side]=sig
+    c=db(); c.execute("""INSERT INTO event_entry_stage_events(ts,side,stage,score,price,level,reason,context_json)
+      VALUES(?,?,?,?,?,?,?,?)""",(int(now),side,stage,float(score or 0),float(last_price or 0),float(level or 0),
+      ' | '.join(reasons or []),json.dumps(context or {},separators=(',',':'),ensure_ascii=False)))
+    c.commit(); c.close()
+
+
+def _event_reference_level(side):
+    """Nearest short-horizon liquidity edge used by the event sequence."""
+    a=[x for x in candles.get('1M',[]) if x.get('confirm')=='1']
+    prior=a[-13:-1] if len(a)>=4 else a[:-1]
+    if not prior:return None
+    return min(float(x['low']) for x in prior) if side=='LONG' else max(float(x['high']) for x in prior)
+
+
+def _event_micro_structure(side, A1):
+    """First local structure response. Intentionally much faster than EXEC's MTF confirmation."""
+    a=[x for x in candles.get('1M',[]) if x.get('confirm')=='1']
+    if len(a)<3 or not last_price:return False, None
+    prev=a[-2:]
+    if side=='LONG':
+        level=max(float(x['high']) for x in prev)
+        return float(last_price)>=level+.006*A1, level
+    level=min(float(x['low']) for x in prev)
+    return float(last_price)<=level-.006*A1, level
+
+
+def _save_event_entry(side, score, level, reasons, ctx, now):
+    bucket=int(now//300000); c=db()
+    cur=c.execute("""INSERT OR IGNORE INTO event_entry_events(ts,bucket,side,score,price,level,reason,context_json)
+      VALUES(?,?,?,?,?,?,?,?)""",(int(now),bucket,side,float(score),float(last_price or 0),float(level or 0),
+      ' | '.join(reasons or []),json.dumps(ctx or {},separators=(',',':'),ensure_ascii=False)))
+    inserted=cur.rowcount>0
+    if inserted:
+        eid=cur.lastrowid
+        c.execute("""INSERT OR IGNORE INTO event_entry_research(event_id,started_ts,last_ts,mfe_pct,mae_pct)
+          VALUES(?,?,?,?,?)""",(eid,int(now),int(now),0.0,0.0))
+    c.commit(); c.close(); return inserted
+
+
+def evaluate_event_entry():
+    """v6.67 stateful EVENT ENTRY research engine.
+
+    Unlike EARLY (anomaly warning), EVENT requires a *sequence*:
+      1) exhaustion/absorption while the old side still has pressure,
+      2) liquidity sweep or failed-auction response around a local extreme,
+      3) reclaim + first 1M structure response,
+      4) micro flow must not strongly oppose the entry.
+
+    It deliberately does NOT wait for full 1M/3M/5M/15M alignment, so it can be earlier
+    than EXEC. It never feeds, blocks or changes EXEC/EARLY.
+    """
+    global event_entry_state, event_entry_runtime
+    if not last_price or len(flow_minutes)<2:return event_entry_state
+    now=int(time.time()*1000); p=float(last_price); snap=mtf_pressure_snapshot(now); t=snap.get('timeframes') or {}
+    if float((t.get('3M') or {}).get('coverage') or 0)<.45:
+        event_entry_state={**event_entry_state,'updated_ts':now,'state':'WARMUP','side':'NONE','phase':'NONE','score':0.0,'reasons':['3M FLOW WARMUP']}
+        return event_entry_state
+    A1=max(atr_tf('1M',30),1.0); A5=max(atr_tf('5M',24),1.0)
+    d1=float((t.get('1M') or {}).get('ratio') or 0); d3=float((t.get('3M') or {}).get('ratio') or 0)
+    fast=float(snap.get('fast_delta') or 0); slow=float(snap.get('slow_delta') or 0)
+    micro10=float(flow(10000).get('ratio') or 0); micro30=float(flow(30000).get('ratio') or 0)
+    c1=list(candles.get('1M',[]))[-1] if candles.get('1M') else None
+    sh1=_bar_shape(c1) if c1 else None
+    current=[]
+
+    for side in ('LONG','SHORT'):
+        isL=side=='LONG'; sign=1 if isL else -1
+        feat=_precursor_side_features(side,now,snap); comp=feat.get('components') or {}
+        anomaly=sum(1 for k in ('impact_decay','absorption','pressure_decay') if float(comp.get(k) or 0)>0)
+        level=_event_reference_level(side)
+        arm=event_entry_runtime.get(side)
+        # Arm while the OLD pressure still exists. This is the important difference from a normal confirmation signal.
+        old_pressure=(d3<=.045 and (d1<=.09 or slow<=.035)) if isL else (d3>=-.045 and (d1>=-.09 or slow>=-.035))
+        near=level is not None and (((p-level)/A5<=.55 and (p-level)/A5>=-.35) if isL else ((level-p)/A5<=.55 and (level-p)/A5>=-.35))
+        arm_ok=float(feat.get('score') or 0)>=48 and anomaly>=2 and old_pressure and (near or 'LOCATION' in (feat.get('groups') or []) or 'SWEEP' in (feat.get('groups') or []))
+        if arm is None and arm_ok:
+            arm={'side':side,'started_ts':now,'origin':p,'level':float(level or p),'extreme':p,'expires_ts':now+12*60*1000,
+                 'base_score':float(feat.get('score') or 0),'base_groups':list(feat.get('groups') or []),'swept':('SWEEP' in (feat.get('groups') or [])),
+                 'sweep_ts':now if 'SWEEP' in (feat.get('groups') or []) else 0}
+            event_entry_runtime[side]=arm
+            _event_stage_log(side,'ARMED',feat.get('score'),arm['level'],['EXHAUSTION_ARM']+list(feat.get('groups') or []),{'feat':feat},now)
+        if arm is None:continue
+        if now>=int(arm.get('expires_ts') or 0):
+            _event_stage_log(side,'EXPIRED',arm.get('base_score'),arm.get('level'),['TIMEOUT'],{'arm':arm},now)
+            event_entry_runtime[side]=None; event_entry_runtime['last_stage'][side]=None; continue
+        arm['extreme']=min(float(arm.get('extreme') or p),p) if isL else max(float(arm.get('extreme') or p),p)
+        lvl=float(arm.get('level') or p)
+        # New sweep can happen after the initial exhaustion arm.
+        if isL and float(arm['extreme'])<lvl-.012*A1: arm['swept']=True; arm['sweep_ts']=arm.get('sweep_ts') or now
+        if (not isL) and float(arm['extreme'])>lvl+.012*A1: arm['swept']=True; arm['sweep_ts']=arm.get('sweep_ts') or now
+        reclaim=(p>=lvl+.004*A1) if isL else (p<=lvl-.004*A1)
+        # Failed auction can qualify even without a clean textbook sweep: aggression persists, but candle rejects the edge.
+        if isL:
+            reject=bool(sh1 and d1<=.015 and sh1['lower']>=max(sh1['body']*.8,.16*sh1['rng']) and sh1['close_pos']>=.56)
+            pressure_improve=(d1-d3>=.025 or fast-slow>=.035)
+            micro_ok=(micro10>=-.10 and micro30>=-.08)
+        else:
+            reject=bool(sh1 and d1>=-.015 and sh1['upper']>=max(sh1['body']*.8,.16*sh1['rng']) and sh1['close_pos']<=.44)
+            pressure_improve=(d1-d3<=-.025 or fast-slow<=-.035)
+            micro_ok=(micro10<=.10 and micro30<=.08)
+        failed_auction=reject and pressure_improve
+        struct_ok, struct_level=_event_micro_structure(side,A1)
+        # A sweep needs reclaim; a non-sweep path needs a clear failed-auction rejection.
+        response_ok=(bool(arm.get('swept')) and reclaim) or failed_auction
+        reasons=['EXHAUSTION']
+        if arm.get('swept'): reasons.append('SWEEP_RECLAIM' if reclaim else 'SWEEP_WAIT_RECLAIM')
+        if failed_auction: reasons.append('FAILED_AUCTION')
+        if struct_ok: reasons.append('1M_STRUCTURE_RESPONSE')
+        if pressure_improve: reasons.append('PRESSURE_IMPROVING')
+        if micro_ok: reasons.append('MICRO_NOT_OPPOSING')
+        score=48 + (12 if float(comp.get('impact_decay') or 0)>0 else 0) + (12 if float(comp.get('absorption') or 0)>0 else 0) + (8 if float(comp.get('pressure_decay') or 0)>0 else 0) + (12 if response_ok else 0) + (12 if struct_ok else 0) + (6 if micro_ok else 0)
+        score=max(0.0,min(100.0,score))
+        phase='RECLAIM' if response_ok else 'ARMED'
+        current.append({'side':side,'state':'ARMED','phase':phase,'score':score,'level':lvl,'started_ts':int(arm['started_ts']),'reasons':reasons,'feat':feat})
+        _event_stage_log(side,phase,score,lvl,reasons,{'d1':d1,'d3':d3,'fast':fast,'slow':slow,'micro10':micro10,'micro30':micro30,'struct_level':struct_level,'arm':arm},now)
+        # Entry is event sequence completion, not a score threshold alone.
+        cooldown=now-int((event_entry_runtime.get('last_emit') or {}).get(side) or 0)
+        trigger=response_ok and struct_ok and pressure_improve and micro_ok and score>=78 and cooldown>=5*60*1000
+        if trigger:
+            ctx={'feat':feat,'arm':arm,'d1':round(d1,5),'d3':round(d3,5),'fast':round(fast,5),'slow':round(slow,5),
+                 'micro10':round(micro10,5),'micro30':round(micro30,5),'struct_level':struct_level,'pressure_state':snap.get('state')}
+            if _save_event_entry(side,score,lvl,reasons,ctx,now):
+                event_entry_runtime['last_emit'][side]=now
+                _event_stage_log(side,'TRIGGER',score,lvl,reasons,ctx,now)
+                event_entry_runtime[side]=None; event_entry_runtime['last_stage'][side]=None
+                event_entry_state={'updated_ts':now,'state':'TRIGGER','side':side,'phase':'ENTRY','score':round(score,1),'level':lvl,
+                  'started_ts':int(arm['started_ts']),'reasons':reasons,'last_event_ts':now,
+                  'note':'EVENT = exhaustion -> liquidity failure/reclaim -> first 1M structure response. Independent from EXEC/EARLY.'}
+                return event_entry_state
+
+    if current:
+        best=max(current,key=lambda x:x['score'])
+        event_entry_state={'updated_ts':now,'state':'ARMED','side':best['side'],'phase':best['phase'],'score':round(best['score'],1),
+          'level':best['level'],'started_ts':best['started_ts'],'reasons':best['reasons'],'last_event_ts':int(event_entry_state.get('last_event_ts') or 0),
+          'note':'EVENT waits for sequence completion; not connected to EXEC.'}
+    else:
+        # Keep TRIGGER visible briefly, then return to scan.
+        if event_entry_state.get('state')=='TRIGGER' and now-int(event_entry_state.get('last_event_ts') or 0)<120000:
+            event_entry_state={**event_entry_state,'updated_ts':now}
+        else:
+            event_entry_state={'updated_ts':now,'state':'SCANNING','side':'NONE','phase':'NONE','score':0.0,'level':None,'started_ts':0,
+              'reasons':['WAIT_EXHAUSTION_SEQUENCE'],'last_event_ts':int(event_entry_state.get('last_event_ts') or 0),
+              'note':'EVENT waits for exhaustion -> failure/reclaim -> structure response.'}
+    return event_entry_state
+
+
+def update_event_entry_research():
+    if not last_price:return
+    now=int(time.time()*1000); px=float(last_price); c=db()
+    rows=c.execute("""SELECT e.id,e.ts,e.side,e.price,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec
+      FROM event_entry_events e LEFT JOIN event_entry_research r ON r.event_id=e.id
+      WHERE e.ts>=? ORDER BY e.ts DESC LIMIT 2000""",(now-4*60*60*1000,)).fetchall()
+    for eid,ts,side,entry,mfe,mae,p5,p15,p30,p60,next_exec_ts,lead_sec in rows:
+        if not entry:continue
+        entry=float(entry); move=(px-entry)/entry*100.0; fav=move if side=='LONG' else -move; adv=-move if side=='LONG' else move
+        mfe=max(float(mfe or 0),fav,0.0); mae=max(float(mae or 0),adv,0.0); vals=[p5,p15,p30,p60]
+        for i,m in enumerate((5,15,30,60)):
+            if vals[i] is None and now-int(ts)>=m*60000: vals[i]=px
+        if next_exec_ts is None:
+            hit=c.execute("""SELECT ts FROM decision_events WHERE event='TRIGGER' AND side=? AND ts>=? AND ts<=? ORDER BY ts ASC LIMIT 1""",(side,int(ts),int(ts)+60*60*1000)).fetchone()
+            if hit:
+                next_exec_ts=int(hit[0]); lead_sec=(next_exec_ts-int(ts))/1000.0
+        c.execute("""INSERT INTO event_entry_research(event_id,started_ts,last_ts,mfe_pct,mae_pct,p5,p15,p30,p60,next_exec_ts,lead_sec)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(event_id) DO UPDATE SET last_ts=excluded.last_ts,mfe_pct=excluded.mfe_pct,mae_pct=excluded.mae_pct,
+          p5=COALESCE(event_entry_research.p5,excluded.p5),p15=COALESCE(event_entry_research.p15,excluded.p15),p30=COALESCE(event_entry_research.p30,excluded.p30),p60=COALESCE(event_entry_research.p60,excluded.p60),
+          next_exec_ts=COALESCE(event_entry_research.next_exec_ts,excluded.next_exec_ts),lead_sec=COALESCE(event_entry_research.lead_sec,excluded.lead_sec)""",
+          (eid,ts,now,mfe,mae,*vals,next_exec_ts,lead_sec))
+    c.commit(); c.close()
 
 def update_precursor_research():
     if not last_price:return
@@ -2071,10 +2274,10 @@ async def public_loop():
                             print("position_manager",repr(e))
                         last_heavy_ms["manager"]=now_ms
                     if now_ms-last_heavy_ms["evaluate"]>=350:
-                        evaluate(); evaluate_precursor()
+                        evaluate(); evaluate_precursor(); evaluate_event_entry()
                         last_heavy_ms["evaluate"]=now_ms
                     if now_ms-last_heavy_ms["outcomes"]>=1000:
-                        update_user_trade_research(); update_decision_research(); update_precursor_research(); last_heavy_ms["outcomes"]=now_ms
+                        update_user_trade_research(); update_decision_research(); update_precursor_research(); update_event_entry_research(); last_heavy_ms["outcomes"]=now_ms
         except Exception as e:
             status["public"]="reconnecting";print("public",e);await asyncio.sleep(2)
 
@@ -2114,7 +2317,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.65 EXEC + PRECURSOR LAB KST","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.67 EXEC + PRECURSOR + EVENT LAB KST","ok":True,"status":status}
 
 def market_bias_snapshot():
     vals={tf:trend_bias_tf(tf) for tf in ("5M","15M","1H","4H")}
@@ -2209,12 +2412,12 @@ def live():
     a,b=flow(10000),flow(30000);H,L=liquidity15()
     return {"price":last_price,"d10":a["ratio"],"d30":b["ratio"],"oi":current_oi,"oi60":oi_delta(),
             "flow":flow_intensity(),"book":book_imb,"liqH":H,"liqL":L,"armed":trap_arm,"status":status,
-            "bias":market_bias_snapshot(),"radar":turn_radar_snapshot(),"pressure":mtf_pressure_snapshot(),"setup_watch":setup_watch,"decision":decision_state,"precursor":precursor_state,"daily":daily_move_snapshot()}
+            "bias":market_bias_snapshot(),"radar":turn_radar_snapshot(),"pressure":mtf_pressure_snapshot(),"setup_watch":setup_watch,"decision":decision_state,"precursor":precursor_state,"event_entry":event_entry_state,"daily":daily_move_snapshot()}
 
 @app.get("/api/setup-watch")
 def api_setup_watch():
     """Lightweight 3-SETUP + fresh MTF pressure endpoint for ~2s UI polling."""
-    return {**setup_watch,"pressure":mtf_pressure_snapshot(),"decision":decision_state,"precursor":precursor_state}
+    return {**setup_watch,"pressure":mtf_pressure_snapshot(),"decision":decision_state,"precursor":precursor_state,"event_entry":event_entry_state}
 
 @app.get("/api/pressure")
 def api_pressure():
@@ -2227,6 +2430,16 @@ def api_decision():
 @app.get("/api/precursor")
 def api_precursor():
     return precursor_state
+
+@app.get("/api/event-entry")
+def api_event_entry():
+    return event_entry_state
+
+@app.get("/api/event-entry-events")
+def api_event_entry_events(limit:int=500):
+    c=db(); c.row_factory=sqlite3.Row
+    rows=[dict(x) for x in c.execute("SELECT * FROM event_entry_events ORDER BY ts DESC LIMIT ?",(min(max(int(limit),1),2000),)).fetchall()]
+    c.close(); return rows
 
 @app.get("/api/precursor-events")
 def api_precursor_events(limit:int=500):
@@ -2255,7 +2468,10 @@ def api_research_summary():
     precursor=[dict(x) for x in c.execute("""SELECT e.side,COUNT(*) n,AVG(r.mfe_pct) avg_mfe,AVG(r.mae_pct) avg_mae,AVG(r.lead_sec) avg_lead_sec,
       SUM(CASE WHEN r.next_exec_ts IS NOT NULL THEN 1 ELSE 0 END) matched_exec
       FROM precursor_events e LEFT JOIN precursor_research r ON r.precursor_id=e.id GROUP BY e.side ORDER BY e.side""").fetchall()]
-    c.close(); return {"setup_stage_events":stages,"shadow":shadows,"base":base,"user":dict(user) if user else {},"decision":decisions,"precursor":precursor}
+    event_entry=[dict(x) for x in c.execute("""SELECT e.side,COUNT(*) n,AVG(r.mfe_pct) avg_mfe,AVG(r.mae_pct) avg_mae,AVG(r.lead_sec) avg_lead_sec,
+      SUM(CASE WHEN r.next_exec_ts IS NOT NULL THEN 1 ELSE 0 END) matched_exec
+      FROM event_entry_events e LEFT JOIN event_entry_research r ON r.event_id=e.id GROUP BY e.side ORDER BY e.side""").fetchall()]
+    c.close(); return {"setup_stage_events":stages,"shadow":shadows,"base":base,"user":dict(user) if user else {},"decision":decisions,"precursor":precursor,"event_entry":event_entry}
 
 @app.get("/api/research/export")
 def api_research_export(limit:int=5000):
@@ -2267,7 +2483,8 @@ def api_research_export(limit:int=5000):
       "shadow":[dict(x) for x in c.execute("""SELECT s.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM shadow_signals s LEFT JOIN shadow_research r ON r.shadow_id=s.id ORDER BY s.ts DESC LIMIT ?""",(lim,)).fetchall()],
       "user":[dict(x) for x in c.execute("SELECT * FROM user_trade_research ORDER BY started_ts DESC LIMIT ?",(lim,)).fetchall()],
       "decision":[dict(x) for x in c.execute("""SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM decision_events e LEFT JOIN decision_research r ON r.decision_id=e.id ORDER BY e.ts DESC LIMIT ?""",(lim,)).fetchall()],
-      "precursor":[dict(x) for x in c.execute("""SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec FROM precursor_events e LEFT JOIN precursor_research r ON r.precursor_id=e.id ORDER BY e.ts DESC LIMIT ?""",(lim,)).fetchall()]
+      "precursor":[dict(x) for x in c.execute("""SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec FROM precursor_events e LEFT JOIN precursor_research r ON r.precursor_id=e.id ORDER BY e.ts DESC LIMIT ?""",(lim,)).fetchall()],
+      "event_entry":[dict(x) for x in c.execute("""SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec FROM event_entry_events e LEFT JOIN event_entry_research r ON r.event_id=e.id ORDER BY e.ts DESC LIMIT ?""",(lim,)).fetchall()]
     }
     c.close(); return out
 
@@ -2281,9 +2498,10 @@ def api_research_export_csv(kind:str="signals", limit:int=10000):
       "shadow":"SELECT s.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM shadow_signals s LEFT JOIN shadow_research r ON r.shadow_id=s.id ORDER BY s.ts DESC LIMIT ?",
       "user":"SELECT * FROM user_trade_research ORDER BY started_ts DESC LIMIT ?",
       "decision":"SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM decision_events e LEFT JOIN decision_research r ON r.decision_id=e.id ORDER BY e.ts DESC LIMIT ?",
-      "precursor":"SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec FROM precursor_events e LEFT JOIN precursor_research r ON r.precursor_id=e.id ORDER BY e.ts DESC LIMIT ?"
+      "precursor":"SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec FROM precursor_events e LEFT JOIN precursor_research r ON r.precursor_id=e.id ORDER BY e.ts DESC LIMIT ?",
+      "event":"SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec FROM event_entry_events e LEFT JOIN event_entry_research r ON r.event_id=e.id ORDER BY e.ts DESC LIMIT ?"
     }
-    if k not in qs: c.close(); return Response("kind must be signals, setup, shadow, user, decision, or precursor",status_code=400,media_type="text/plain")
+    if k not in qs: c.close(); return Response("kind must be signals, setup, shadow, user, decision, precursor, or event",status_code=400,media_type="text/plain")
     rows=[dict(x) for x in c.execute(qs[k],(lim,)).fetchall()]; c.close(); buf=io.StringIO()
     if rows:
         w=csv.DictWriter(buf,fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)

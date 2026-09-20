@@ -78,7 +78,7 @@ body.embedded-btc header{position:relative!important}
 <section class="panel">
   <div class="buttons"><button data-tf="1M">1M</button><button data-tf="3M">3M</button><button data-tf="5M" class="on">5M</button><button data-tf="15M">15M</button><button data-tf="1H">1H</button><button data-tf="4H">4H</button><button data-tf="1D">1D</button><button class="tf" data-tf="1W">1W</button><button class="tf" data-tf="1MO">1MO</button></div>
   
-<div id="serverSyncBox" style="margin:8px 0;padding:9px 12px;border:1px solid #263249;border-radius:10px;background:#101622;font-size:12px"><b>24H SERVER</b> · <span id="srvState">연결 확인중…</span> · EXEC/EARLY <b id="srvCount">0</b> · <span id="srvLast">-</span></div>
+<div id="serverSyncBox" style="margin:8px 0;padding:9px 12px;border:1px solid #263249;border-radius:10px;background:#101622;font-size:12px"><b>24H SERVER</b> · <span id="srvState">연결 확인중…</span> · EXEC/EARLY/EVENT <b id="srvCount">0</b> · <span id="srvLast">-</span></div>
 <div class="chartTools"><button class="indBtn" id="indBtn">⚙ 지표 설정</button>
 <div class="indPanel" id="indPanel">
  <b style="font-size:12px">차트 지표</b>
@@ -89,16 +89,17 @@ body.embedded-btc header{position:relative!important}
  <div class="indRow"><span>기타</span><label><input type="checkbox" id="vwapChk"> VWAP</label><label><input type="checkbox" id="volChk" checked> 거래량</label></div>
  <div style="font-size:9px;color:#7f8ba0;margin-top:7px">예: 5·20·60·120·240 또는 직접 숫자 입력 · 설정은 이 브라우저에 저장</div>
 </div></div><div id="enginePanel" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:8px 10px;border:1px solid #263247;border-radius:8px;background:#0b111b">
-<b style="font-size:10px">LIVE SIGNALS · v6.66</b>
+<b style="font-size:10px">LIVE SIGNALS · v6.67</b>
 <div class="sigLayerCtl">
   <button class="sigLayerBtn on" data-layer="exec" type="button">▲▼ EXEC 확정</button>
   <button class="sigLayerBtn on" data-layer="early" type="button">◌ EARLY</button>
+  <button class="sigLayerBtn on" data-layer="event" type="button">◎ EVENT 타점</button>
   <button class="sigLayerBtn" data-layer="research" type="button">PB/RV/RT 연구</button>
 </div>
 <span class="sigLayerHint">차트 표시만 ON/OFF · 엔진/DB 기록에는 영향 없음 · X는 내 포지션 종료만</span>
 </div><div style="font-size:10px;color:#8d99ad;margin:3px 0">TIMEFRAME · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO</div><div class="hoverPctBar" id="hoverPctBar">봉에 마우스를 올리면 해당 봉의 등락률이 표시됩니다.</div><div id="chart"></div>
   <div class="pressureDeck" id="mtfPressurePanel">
-    <div class="pressureHead"><div><div class="pressureTitle">MTF ORDER FLOW · 1M / 3M / 5M / 15M <span style="font-size:9px;color:#6da7ff">UI v6.66</span> · 매집/체결 압력 <span class="microTag">메인 방향 입력</span></div><div class="tiny">1M이 먼저 움직이고 3M→5M→15M이 따라오는지 추적 · 수치는 확률이 아니라 공격적 체결 비중</div></div><div class="pressureSummary" id="pressureSummary">분봉 체결 데이터 수집 중…</div></div>
+    <div class="pressureHead"><div><div class="pressureTitle">MTF ORDER FLOW · 1M / 3M / 5M / 15M <span style="font-size:9px;color:#6da7ff">UI v6.67</span> · 매집/체결 압력 <span class="microTag">메인 방향 입력</span></div><div class="tiny">1M이 먼저 움직이고 3M→5M→15M이 따라오는지 추적 · 수치는 확률이 아니라 공격적 체결 비중</div></div><div class="pressureSummary" id="pressureSummary">분봉 체결 데이터 수집 중…</div></div>
     <div class="pressureGrid" id="pressureGrid">
       <div class="pressureTf"><div class="pressureTfHead"><span>1M</span><span class="pressureWarm">WARMUP</span></div><div class="pressureNums"><span style="color:#35d98a">L —</span><span style="color:#ff5c70">S —</span></div><div class="pressureTrack"><div class="pressureBuy" style="width:50%"></div><div class="pressureSell" style="width:50%"></div></div><div class="pressureMeta"><span>Δ —</span><span>가격 —</span><span>강도 —</span><span class="pressureWarm">수집 중</span></div></div>
       <div class="pressureTf"><div class="pressureTfHead"><span>3M</span><span class="pressureWarm">WARMUP</span></div><div class="pressureNums"><span style="color:#35d98a">L —</span><span style="color:#ff5c70">S —</span></div><div class="pressureTrack"><div class="pressureBuy" style="width:50%"></div><div class="pressureSell" style="width:50%"></div></div><div class="pressureMeta"><span>Δ —</span><span>가격 —</span><span>강도 —</span><span class="pressureWarm">수집 중</span></div></div>
@@ -107,9 +108,9 @@ body.embedded-btc header{position:relative!important}
     </div>
     <div class="pressureTurn" id="pressureTurn">FAST 1M+3M — · SLOW 5M+15M — · MICRO 10s/30s는 최종 타점 확인만</div>
   </div>
-  <div class="legend"><span><b style="color:#35d98a">▲ EXEC</b> 최종 실행 후보</span><span><b style="color:#8fb5ff">◌ EARLY</b> 선행 이상징후(진입신호 아님)</span><span><b style="color:#c7d0dd">X</b> 내 포지션 종료</span><span><b class="purple">VWAP</b> 차트 지표</span></div>
+  <div class="legend"><span><b style="color:#35d98a">▲ EXEC</b> 최종 실행 후보</span><span><b style="color:#8fb5ff">◌ EARLY</b> 선행 이상징후(진입신호 아님)</span><span><b style="color:#e7a84a">◎ EVENT</b> 소진→실패→reclaim 타점</span><span><b style="color:#c7d0dd">X</b> 내 포지션 종료</span><span><b class="purple">VWAP</b> 차트 지표</span></div>
   <div class="warn">
-    v6.66은 EXEC + PRECURSOR를 유지하면서 PB/RV/RT 연구 결과 오버레이를 다시 선택 표시할 수 있게 정리했습니다. PB/RV/RT는 EXEC Decision Layer의 내부 입력으로 유지하면서, 차트 연구 오버레이 버튼을 켠 경우에만 저장된 확정 연구신호를 다시 표시합니다. PRECURSOR는 가격 추진력 감소 · 공격적 체결 흡수 · 1M liquidity sweep/reclaim · 압력 감속을 감지하는 독립 연구엔진이며 EXEC를 수정하거나 막지 않습니다. EARLY는 “여기 이상하다”는 경고일 뿐 진입 신호가 아닙니다. 1H/4H 독립 신호와 레거시 SCALP/15M/VWAP 신호 생성은 중단했습니다.
+    v6.67은 기존 EXEC와 EARLY를 동결한 채 EVENT ENTRY 연구엔진을 독립 추가했습니다. EVENT는 단일 점수로 바로 찍지 않고, 힘 소진/흡수 → liquidity sweep 또는 failed auction → reclaim → 첫 1M 구조 복귀 순서를 완성했을 때만 타점을 기록합니다. EVENT는 EXEC/EARLY를 수정하거나 막지 않으며 동일 시장에서 독립 성과를 비교합니다. PB/RV/RT는 EXEC 내부 feeder로 유지되고 차트 연구 오버레이 버튼으로만 표시합니다.
   </div>
 </section>
 
@@ -163,10 +164,21 @@ body.embedded-btc header{position:relative!important}
     <div style="display:none"><span id="liqH"></span><span id="liqL"></span><span id="liqDist"></span><span id="bs10"></span><span id="bs30"></span><span id="oiNow"></span><span id="oi60"></span><span id="bookImb"></span><div id="flowfill"></div><div id="sig"></div><span id="entry"></span><span id="sl"></span><span id="tp1"></span><span id="tp2"></span><div id="why"></div></div>
   </div>
 
+  <div class="box" id="eventEntryBox">
+    <h3>EVENT ENTRY <span class="tiny">소진 → 실패/reclaim → 첫 구조복귀 · 독립 연구</span></h3>
+    <div id="eventEntryState" class="signal yellow">SCANNING</div>
+    <div class="row"><span>방향</span><b id="eventEntrySide">—</b></div>
+    <div class="row"><span>단계</span><b id="eventEntryPhase">—</b></div>
+    <div class="row"><span>EVENT score</span><b id="eventEntryScore">0</b></div>
+    <div class="row"><span>기준 레벨</span><b id="eventEntryLevel">—</b></div>
+    <div class="reason" id="eventEntryWhy" style="margin-top:7px">소진/흡수 뒤 실제 실패→복귀 순서를 기다리는 중…</div>
+    <div class="tiny" style="margin-top:6px;color:#8d99ad">EVENT는 새 독립 타점 연구신호입니다. EXEC와 EARLY 판단에는 개입하지 않습니다.</div>
+  </div>
+
   <div class="box">
-    <h3>RESEARCH LAB <span class="tiny">EXEC 동결 · EARLY 비교 연구</span></h3>
+    <h3>RESEARCH LAB <span class="tiny">EXEC · EARLY · EVENT 독립 비교</span></h3>
     <div id="researchSummary" class="reason">연구 데이터 집계 중…</div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"><a href="/api/research/export" target="_blank" style="color:#8fb5ff;font-size:10px">JSON 전체</a><a href="/api/research/export.csv?kind=signals" style="color:#8fb5ff;font-size:10px">BASE CSV</a><a href="/api/research/export.csv?kind=setup" style="color:#8fb5ff;font-size:10px">SETUP CSV</a><a href="/api/research/export.csv?kind=shadow" style="color:#8fb5ff;font-size:10px">SHADOW CSV</a><a href="/api/research/export.csv?kind=user" style="color:#8fb5ff;font-size:10px">USER CSV</a><a href="/api/research/export.csv?kind=decision" style="color:#8fb5ff;font-size:10px">EXEC CSV</a><a href="/api/research/export.csv?kind=precursor" style="color:#8fb5ff;font-size:10px">PRECURSOR CSV</a></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px"><a href="/api/research/export" target="_blank" style="color:#8fb5ff;font-size:10px">JSON 전체</a><a href="/api/research/export.csv?kind=signals" style="color:#8fb5ff;font-size:10px">BASE CSV</a><a href="/api/research/export.csv?kind=setup" style="color:#8fb5ff;font-size:10px">SETUP CSV</a><a href="/api/research/export.csv?kind=shadow" style="color:#8fb5ff;font-size:10px">SHADOW CSV</a><a href="/api/research/export.csv?kind=user" style="color:#8fb5ff;font-size:10px">USER CSV</a><a href="/api/research/export.csv?kind=decision" style="color:#8fb5ff;font-size:10px">EXEC CSV</a><a href="/api/research/export.csv?kind=precursor" style="color:#8fb5ff;font-size:10px">PRECURSOR CSV</a><a href="/api/research/export.csv?kind=event" style="color:#e7a84a;font-size:10px">EVENT CSV</a></div>
   </div>
 
   <div class="box mySidePosition">
@@ -175,7 +187,7 @@ body.embedded-btc header{position:relative!important}
     <div id="myPosition" class="myPositionBox">불러오는 중…</div>
   </div>
 <div class="box">
-    <h3>📡 LIVE SIGNAL STREAM <span class="tiny">EXEC + PRECURSOR EARLY</span></h3>
+    <h3>📡 LIVE SIGNAL STREAM <span class="tiny">EXEC + EARLY + EVENT</span></h3>
     <div class="history" id="history"><div class="tiny">아직 없음</div></div>
   </div>
 </aside>
@@ -217,9 +229,10 @@ let liveEnginePositions=[];
 let myPosition={side:"FLAT"}, myPositionEvents=[];
 let decisionEvents=[];
 let precursorEvents=[];
-// v6.66 chart-layer visibility. Display only; never changes server engines or research recording.
-const SIGNAL_LAYER_KEY='btc_signal_layers_v666';
-let signalLayers={exec:true,early:true,research:false};
+let eventEntryEvents=[];
+// v6.67 chart-layer visibility. Display only; never changes server engines or research recording.
+const SIGNAL_LAYER_KEY='btc_signal_layers_v667';
+let signalLayers={exec:true,early:true,event:true,research:false};
 try{const z=JSON.parse(localStorage.getItem(SIGNAL_LAYER_KEY)||'null');if(z&&typeof z==='object')signalLayers={...signalLayers,...z}}catch(e){}
 function applySignalLayerUI(){
   document.querySelectorAll('.sigLayerBtn').forEach(b=>b.classList.toggle('on',!!signalLayers[b.dataset.layer]));
@@ -587,12 +600,13 @@ function renderHistory(){
   const rows=[];
   for(const x of (decisionEvents||[])){if(String(x.event||'').toUpperCase()==='TRIGGER')rows.push({ts:Number(x.ts),kind:'EXEC',side:String(x.side||''),score:Number(x.evidence||0),detail:x.setups||'EXEC'});}
   for(const x of (precursorEvents||[])){rows.push({ts:Number(x.ts),kind:'EARLY',side:String(x.side||''),score:Number(x.score||0),detail:x.groups||'PRECURSOR'});}
+  for(const x of (eventEntryEvents||[])){rows.push({ts:Number(x.ts),kind:'EVENT',side:String(x.side||''),score:Number(x.score||0),detail:x.reason||'EVENT ENTRY'});}
   rows.sort((a,b)=>b.ts-a.ts);
   $('history').innerHTML=rows.length?rows.slice(0,60).map(x=>{
     const tm=new Date(x.ts).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}), isL=x.side==='LONG';
-    const c=x.kind==='EXEC'?(isL?'#35d98a':'#ff5c70'):(isL?'#8fb5ff':'#ff9bd2');
+    const c=x.kind==='EXEC'?(isL?'#35d98a':'#ff5c70'):x.kind==='EVENT'?(isL?'#e7a84a':'#ff8a4a'):(isL?'#8fb5ff':'#ff9bd2');
     return `<div class="histrow"><span>${tm}</span><b style="color:${c}">${x.kind} ${isL?'L':'S'}</b><span class="tiny">${x.detail||'—'} · ${x.score.toFixed(0)}</span></div>`;
-  }).join(''):'<div class="tiny">EXEC / EARLY 이벤트 대기 중</div>';
+  }).join(''):'<div class="tiny">EXEC / EARLY / EVENT 이벤트 대기 중</div>';
 }
 
 function signalAnchorRows(){
@@ -609,6 +623,12 @@ function signalAnchorRows(){
     for(const e of (precursorEvents||[])){
       const rawTs=Math.floor(Number(e.ts||0)/1000);if(!rawTs||rawTs<from)continue;
       out.push({mode:'EARLY',side:String(e.side||'').toUpperCase()==='LONG'?'L':'S',candleTs:Math.floor(rawTs/bucketSec)*bucketSec,rawTs,score:Math.round(Number(e.score||0)),name:e.groups||'PRECURSOR',entry:Number(e.price||0)});
+    }
+  }
+  if(signalLayers.event){
+    for(const e of (eventEntryEvents||[])){
+      const rawTs=Math.floor(Number(e.ts||0)/1000);if(!rawTs||rawTs<from)continue;
+      out.push({mode:'EVENT',side:String(e.side||'').toUpperCase()==='LONG'?'L':'S',candleTs:Math.floor(rawTs/bucketSec)*bucketSec,rawTs,score:Math.round(Number(e.score||0)),name:e.reason||'EVENT ENTRY',entry:Number(e.price||0)});
     }
   }
   if(signalLayers.research){
@@ -634,11 +654,11 @@ function renderSignalAnchors(){
     const x=chart.timeScale().timeToCoordinate(a.candleTs);if(x==null)continue;
     const isL=a.side==='L', y=candle.priceToCoordinate(isL?Number(bar.low):Number(bar.high));if(y==null)continue;
     const sk=`${a.candleTs}|${a.side}`, idx=stack[sk]||0;stack[sk]=idx+1;
-    const col=a.mode==='EXEC'?(isL?'#35d98a':'#ff5c70'):a.mode==='EARLY'?(isL?'#8fb5ff':'#ff9bd2'):a.setup==='PB'?(isL?'#35d98a':'#ff5c70'):a.setup==='RV'?(isL?'#00e5ff':'#ffd400'):'#b56cff';
+    const col=a.mode==='EXEC'?(isL?'#35d98a':'#ff5c70'):a.mode==='EVENT'?(isL?'#e7a84a':'#ff8a4a'):a.mode==='EARLY'?(isL?'#8fb5ff':'#ff9bd2'):a.setup==='PB'?(isL?'#35d98a':'#ff5c70'):a.setup==='RV'?(isL?'#00e5ff':'#ffd400'):'#b56cff';
     const badgeY=Math.max(12,Math.min(host.clientHeight-22,y+(isL?1:-1)*(30+idx*24)));
     const line=document.createElement('div');line.className='sigAnchorLine';line.style.color=col;line.style.left=x+'px';line.style.top=Math.min(y,badgeY)+'px';line.style.height=Math.max(6,Math.abs(badgeY-y))+'px';layer.appendChild(line);
     const dot=document.createElement('div');dot.className='sigAnchorDot';dot.style.color=col;dot.style.left=x+'px';dot.style.top=y+'px';layer.appendChild(dot);
-    const badge=document.createElement('div');badge.className='sigAnchorBadge';badge.style.color=col;badge.style.left=x+'px';badge.style.top=badgeY+'px';badge.textContent=a.mode==='EXEC'?`${isL?'▲':'▼'} EXEC ${a.side}`:a.mode==='EARLY'?`◌ EARLY ${a.side} ${a.score}`:`${isL?'▲':'▼'} ${a.setup} ${a.side} ${a.score}`;
+    const badge=document.createElement('div');badge.className='sigAnchorBadge';badge.style.color=col;badge.style.left=x+'px';badge.style.top=badgeY+'px';badge.textContent=a.mode==='EXEC'?`${isL?'▲':'▼'} EXEC ${a.side}`:a.mode==='EVENT'?`◎ EVT ${a.side} ${a.score}`:a.mode==='EARLY'?`◌ EARLY ${a.side} ${a.score}`:`${isL?'▲':'▼'} ${a.setup} ${a.side} ${a.score}`;
     const tm=new Date(a.rawTs*1000).toLocaleString('ko-KR',{hour12:false});badge.title=`${a.name} · ${tm} · score ${a.score}${a.entry?` · $${fmt(a.entry)}`:''}`;layer.appendChild(badge);
   }
 }
@@ -655,6 +675,11 @@ function renderMarkers(){
     const ts=Math.floor(Number(e.ts||0)/1000);if(!ts||ts<from)continue;
     const isL=String(e.side||'').toUpperCase()==='LONG', candleTs=Math.floor(ts/bucketSec)*bucketSec;
     marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:isL?'#8fb5ff':'#ff9bd2',shape:'circle',text:''});
+  }}
+  if(signalLayers.event){for(const e of (eventEntryEvents||[])){
+    const ts=Math.floor(Number(e.ts||0)/1000);if(!ts||ts<from)continue;
+    const isL=String(e.side||'').toUpperCase()==='LONG', candleTs=Math.floor(ts/bucketSec)*bucketSec;
+    marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:isL?'#e7a84a':'#ff8a4a',shape:'diamond',text:''});
   }}
   if(signalLayers.research){
     const seen=new Set();
@@ -775,38 +800,39 @@ function renderMyTradeLedger(){
 let setupWatchBusy=false;
 async function syncSetupWatch(){
   if(setupWatchBusy)return;setupWatchBusy=true;
-  try{const sw=await fetch(SERVER_API+'/api/setup-watch',{cache:'no-store'}).then(r=>r.json());if(sw){if(!serverLive)serverLive={};serverLive.setup_watch=sw;if(sw.pressure)serverLive.pressure=sw.pressure;renderSetupWatch(sw);renderPressure(sw.pressure||serverLive.pressure);renderDecision(sw.decision||serverLive.decision);renderPrecursor(sw.precursor||serverLive.precursor)}}catch(e){}finally{setupWatchBusy=false}
+  try{const sw=await fetch(SERVER_API+'/api/setup-watch',{cache:'no-store'}).then(r=>r.json());if(sw){if(!serverLive)serverLive={};serverLive.setup_watch=sw;if(sw.pressure)serverLive.pressure=sw.pressure;renderSetupWatch(sw);renderPressure(sw.pressure||serverLive.pressure);renderDecision(sw.decision||serverLive.decision);renderPrecursor(sw.precursor||serverLive.precursor);renderEventEntry(sw.event_entry||serverLive.event_entry)}}catch(e){}finally{setupWatchBusy=false}
 }
 async function syncResearchSummary(){
   const el=$('researchSummary');if(!el)return;
   try{const x=await fetch(SERVER_API+'/api/research/summary',{cache:'no-store'}).then(r=>r.json());
     const trig=(x.setup_stage_events||[]).filter(z=>z.stage==='TRIGGER').reduce((n,z)=>n+Number(z.n||0),0);
     const de=(x.decision||[]).filter(z=>z.event==='TRIGGER').reduce((n,z)=>n+Number(z.n||0),0);
-    const pre=(x.precursor||[]).reduce((n,z)=>n+Number(z.n||0),0), u=Number(x.user?.n||0);
-    el.innerHTML=`EXEC ${de} · PRECURSOR ${pre}<br>내부 3-SETUP trigger ${trig} · USER ${u}<br><span class="tiny">PB/RV/RT는 EXEC feeder 연구 계속 · 차트 오버레이는 버튼으로 독립 ON/OFF</span>`;
+    const pre=(x.precursor||[]).reduce((n,z)=>n+Number(z.n||0),0), evt=(x.event_entry||[]).reduce((n,z)=>n+Number(z.n||0),0), u=Number(x.user?.n||0);
+    el.innerHTML=`EXEC ${de} · PRECURSOR ${pre} · EVENT ${evt}<br>내부 3-SETUP trigger ${trig} · USER ${u}<br><span class="tiny">EXEC/EARLY/EVENT는 서로 독립 비교 · PB/RV/RT는 EXEC feeder 연구 유지</span>`;
   }catch(e){el.textContent='연구 집계 연결 대기'}
 }
 let syncServerBusy=false;
 async function syncServer(){
   if(syncServerBusy)return;syncServerBusy=true;
   try{
-    const [live,mypos,myevents,devents,pevents,baseSignals]=await Promise.all([
+    const [live,mypos,myevents,devents,pevents,eevents,baseSignals]=await Promise.all([
       fetch(SERVER_API+'/api/live',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/user-position',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/user-position-events',{cache:'no-store'}).then(r=>r.json()),
       fetch(SERVER_API+'/api/decision-events?limit=1000',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[]),
       fetch(SERVER_API+'/api/precursor-events?limit=1000',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[]),
+      fetch(SERVER_API+'/api/event-entry-events?limit=1000',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[]),
       fetch(SERVER_API+'/api/signals?limit=1000',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[])
     ]);
-    serverLive=live||{};decisionEvents=Array.isArray(devents)?devents:[];precursorEvents=Array.isArray(pevents)?pevents:[];serverSaved=(Array.isArray(baseSignals)?baseSignals:[]).filter(x=>/PULLBACK|REVERSAL|RETEST/i.test(String(x.name||'')));positionEvents=[];liveEnginePositions=[];
+    serverLive=live||{};decisionEvents=Array.isArray(devents)?devents:[];precursorEvents=Array.isArray(pevents)?pevents:[];eventEntryEvents=Array.isArray(eevents)?eevents:[];serverSaved=(Array.isArray(baseSignals)?baseSignals:[]).filter(x=>/PULLBACK|REVERSAL|RETEST/i.test(String(x.name||'')));positionEvents=[];liveEnginePositions=[];
     myPosition=mypos||{side:'FLAT'};myPositionEvents=Array.isArray(myevents)?myevents:[];
     if(Number(serverLive?.price)>0&&$('price'))$('price').textContent='$'+fmt(Number(serverLive.price));
-    renderTurnRadar(serverLive?.radar);renderPressure(serverLive?.pressure||serverLive?.setup_watch?.pressure);renderDecision(serverLive?.decision);renderPrecursor(serverLive?.precursor);renderContext();updateDailyMove();renderMyTradeLedger();
+    renderTurnRadar(serverLive?.radar);renderPressure(serverLive?.pressure||serverLive?.setup_watch?.pressure);renderDecision(serverLive?.decision);renderPrecursor(serverLive?.precursor);renderEventEntry(serverLive?.event_entry);renderContext();updateDailyMove();renderMyTradeLedger();
     const mp=$('myPosition');if(mp){if(myPosition.side&&myPosition.side!=='FLAT'){const ent=Number(myPosition.entry||0),now=Number(myPosition.current_price||currentPrice()||live?.price||0),usd=Number.isFinite(Number(myPosition.live_usd))?Number(myPosition.live_usd):(myPosition.side==='LONG'?now-ent:ent-now),pc=Number.isFinite(Number(myPosition.live_pct))?Number(myPosition.live_pct):(ent?usd/ent*100:0);mp.innerHTML=`<b style="color:${myPosition.side==='LONG'?'#35d98a':'#ff5c70'}">${myPosition.side}</b> · 진입 $${fmt(ent)} · 현재 $${fmt(now)} · <b class="myLivePnl" style="color:${pc>=0?'#35d98a':'#ff4f64'}">실시간 ${pc>=0?'+':''}${pc.toFixed(3)}% · ${usd>=0?'+':'-'}$${fmt(Math.abs(usd))}</b> <button onclick="closeMyPos()" style="margin-left:8px">포지션 종료</button>`;}else mp.innerHTML='<span style="color:#8d99ad">현재 내 포지션 없음</span>';}
     const trig=decisionEvents.filter(x=>String(x.event||'').toUpperCase()==='TRIGGER');
     if($('srvState')){$('srvState').textContent='● 연결됨';$('srvState').style.color='#35d98a'}
-    if($('srvCount'))$('srvCount').textContent=`${trig.length}/${precursorEvents.length}`;
-    if($('srvLast')){const latest=[...trig.map(x=>({ts:+x.ts,label:`EXEC ${x.side}`})),...precursorEvents.map(x=>({ts:+x.ts,label:`EARLY ${x.side}`}))].sort((a,b)=>b.ts-a.ts)[0];$('srvLast').textContent=latest?`최근 ${latest.label} · ${new Date(latest.ts).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})}`:`BTC $${fmt(live.price)} · 이벤트 대기`;}
+    if($('srvCount'))$('srvCount').textContent=`${trig.length}/${precursorEvents.length}/${eventEntryEvents.length}`;
+    if($('srvLast')){const latest=[...trig.map(x=>({ts:+x.ts,label:`EXEC ${x.side}`})),...precursorEvents.map(x=>({ts:+x.ts,label:`EARLY ${x.side}`})),...eventEntryEvents.map(x=>({ts:+x.ts,label:`EVENT ${x.side}`}))].sort((a,b)=>b.ts-a.ts)[0];$('srvLast').textContent=latest?`최근 ${latest.label} · ${new Date(latest.ts).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})}`:`BTC $${fmt(live.price)} · 이벤트 대기`;}
     renderHistory();renderMarkers();
   }catch(e){let st=$('srvState');if(st){st.textContent='● 연결 재시도';st.style.color='#f1c75b'}}finally{syncServerBusy=false;}
 }
@@ -846,6 +872,18 @@ function renderPrecursor(p){
   if($('precursorGroups'))$('precursorGroups').textContent=(p.groups||[]).join(' + ')||'—';
   if($('precursorWhy'))$('precursorWhy').innerHTML=`· ${(p.reasons||[]).join(' → ')||'이상징후 탐색 중'}<br>· LONG ${l.toFixed(0)} / SHORT ${sh.toFixed(0)} · margin ${Number(p.margin||0).toFixed(0)}<br>· EARLY는 EXEC에 개입하지 않는 연구 경고`;
   const top=$('topPrecursor'),det=$('topPrecursorDetail');if(top){top.textContent=state==='SCANNING'||state==='WARMUP'?state:`${state} ${side==='LONG'?'L':'S'} ${sc.toFixed(0)}`;top.style.color=col}if(det)det.textContent=(p.groups||[]).join(' · ')||'추진력 약화 · 흡수 · sweep · 압력감속';
+}
+
+function renderEventEntry(e){
+  if(!e)return;
+  const state=String(e.state||'SCANNING'), side=String(e.side||'NONE'), phase=String(e.phase||'NONE'), score=Number(e.score||0);
+  const col=state==='TRIGGER'?(side==='LONG'?'#e7a84a':'#ff8a4a'):state==='ARMED'?'#f1c75b':'#8d99ad';
+  if($('eventEntryState')){$('eventEntryState').textContent=state+(side!=='NONE'?' · '+side:'');$('eventEntryState').style.color=col;}
+  if($('eventEntrySide')){$('eventEntrySide').textContent=side==='NONE'?'—':side;$('eventEntrySide').style.color=side==='LONG'?'#35d98a':side==='SHORT'?'#ff5c70':'#8d99ad';}
+  if($('eventEntryPhase'))$('eventEntryPhase').textContent=phase==='NONE'?'—':phase;
+  if($('eventEntryScore'))$('eventEntryScore').textContent=score.toFixed(0);
+  if($('eventEntryLevel'))$('eventEntryLevel').textContent=Number(e.level)>0?'$'+fmt(Number(e.level)):'—';
+  if($('eventEntryWhy'))$('eventEntryWhy').innerHTML='· '+((e.reasons||[]).join(' → ')||'이벤트 시퀀스 탐색 중')+'<br>· EXEC/EARLY와 독립 · 순서 완성 시에만 EVENT 타점 기록';
 }
 
 function renderDecision(d){
