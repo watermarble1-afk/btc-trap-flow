@@ -941,7 +941,7 @@ def _vwap_ma_features():
 
 def _save_vwap_ma_event(side,stage,feat,now):
     """Persist MA-cycle phase transitions for chart markers/research."""
-    if side not in ('LONG','SHORT') or stage not in ('RELEASE','ALIGN','EXPANSION','MA_HIT','REALIGN','RE_EXPANSION','BREAKDOWN'):
+    if side not in ('LONG','SHORT') or stage not in ('RELEASE','ALIGN','EXPANSION','MA_HIT','REALIGN','RE_EXPANSION','RE_COMPRESSION','BREAKDOWN'):
         return False,[]
     bucket=int(now//900000); d=feat[side]
     reasons=[]
@@ -994,6 +994,7 @@ def evaluate_vwap_ma():
         elif hit and realign: phase='REALIGN'
         elif align and feat['expanding']: phase='RE_EXPANSION' if str(rt.get('stage')) in ('MA_HIT','REALIGN') else 'EXPANSION'
         elif align: phase='ALIGN'
+        elif feat['compression'] and prev_stage in ('EXPANSION','RE_EXPANSION','REALIGN','MA_HIT','ALIGN'): phase='RE_COMPRESSION'
         elif feat['compression']: phase='COMPRESSION'
         else: phase='RELEASE'
     prev_stage=str(rt.get('stage') or 'NONE')
@@ -1021,7 +1022,7 @@ def evaluate_vwap_ma():
       'invalidation':round(float(d['invalidation']),2) if d else None,
       'slopes':{'short':round(sum(feat['slopes_all'][n] for n in (5,10,20))/3,4),'accel':round(float(feat['spread_delta']),4),'ma20':round(float(feat['slopes_all'][20]),4)},
       'ma':{str(k):round(float(v),2) for k,v in feat['ma'].items()},'reasons':reasons,'active_since':int(rt.get('started_ts') or 0),
-      'note':'BIAS is persistent. PHASE tracks compression/release/alignment/expansion/MA-hit/realign/re-expansion/breakdown.'}
+      'note':'BIAS is persistent. PHASE tracks compression/release/alignment/expansion/MA-hit/realign/re-expansion/re-compression/breakdown.'}
     return vwap_ma_state
 
 def update_vwap_ma_research():
