@@ -165,3 +165,10 @@ It also publishes an invalidation level near the opposite side of VWAP14 / the M
 - Right panel now contains only VWAP14 direction details, signal guide, research summary, manual position and live VWAP14 stream.
 - Default chart timeframe is 15M to match the active engine.
 - Server signal logic remains v6.69 VWAP14-only; this patch changes UI/observability only.
+
+## v6.71 — LIVE SYNC + TODAY MOVE HOTFIX
+- Restored dedicated Today / 1D USD and percent move card.
+- Core `/api/live` sync is now independent from optional user-position/event API failures.
+- Added VWAP14 engine heartbeat (LIVE / STALE / OFFLINE) with update age.
+- 24H SERVER status now reflects public ticker and business candle streams directly.
+- No VWAP14 signal-condition changes from v6.70.

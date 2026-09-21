@@ -63,7 +63,7 @@ body.embedded-btc header{position:relative!important}
 </style>
 <style>
 /* v6.70 VWAP14 ONLY UI */
-body.vwap-only .cards{grid-template-columns:repeat(7,minmax(0,1fr))}
+body.vwap-only .cards{grid-template-columns:repeat(8,minmax(0,1fr))}
 body.vwap-only .cards .card{display:block!important}
 .directionDeck{margin:12px 0 4px;border:1px solid #2d4b48;border-radius:12px;background:linear-gradient(180deg,#0c1718,#091113);padding:12px}
 .directionHead{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
@@ -83,7 +83,7 @@ body.vwap-only .cards .card{display:block!important}
 <body class="embedded-btc vwap-only"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.70 · VWAP14 ONLY</h1>
+    <h1>BTC OKX RADAR v6.71 · VWAP14 ONLY</h1>
     <div class="sub">VWAP14 + MA KNOT 방향 레이더 단독 검증 · 기존 신호 엔진 전원 OFF</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
@@ -91,6 +91,7 @@ body.vwap-only .cards .card{display:block!important}
 
 <div class="cards">
   <div class="card"><div class="lbl">BTC PRICE · TODAY</div><div class="val" id="price">—</div><div class="tiny" id="topDayMove">일봉 —</div></div>
+  <div class="card"><div class="lbl">TODAY · 1D</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:5px"><div><div class="tiny">금액</div><div class="val" id="dayMoveUsd" style="font-size:16px">—</div></div><div><div class="tiny">등락률</div><div class="val" id="dayMovePct" style="font-size:16px">—</div></div></div><div class="tiny" id="dayMoveState">일봉 기준</div></div>
   <div class="card"><div class="lbl">VWAP14</div><div class="val" id="topVwap14">—</div><div class="tiny">최근 14봉 Rolling VWAP</div></div>
   <div class="card"><div class="lbl">SIGNAL STAGE</div><div class="val" id="topVwapStage">SCANNING</div><div class="tiny" id="topVwapStageDetail">WATCH → LEAN → RELEASE</div></div>
   <div class="card"><div class="lbl">DIRECTION</div><div class="val" id="topVwapDirection">—</div><div class="tiny">15M VWAP14 + MA KNOT</div></div>
@@ -114,7 +115,7 @@ body.vwap-only .cards .card{display:block!important}
  <div class="indRow"><span>기타</span><label><input type="checkbox" id="vwapChk"> VWAP</label><label><input type="checkbox" id="volChk" checked> 거래량</label></div>
  <div style="font-size:9px;color:#7f8ba0;margin-top:7px">예: 5·20·60·120·240 또는 직접 숫자 입력 · 설정은 이 브라우저에 저장</div>
 </div></div><div id="enginePanel" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:8px 10px;border:1px solid #263247;border-radius:8px;background:#0b111b">
-<b style="font-size:10px">LIVE SIGNALS · v6.70 · VWAP14 ONLY</b>
+<b style="font-size:10px">LIVE SIGNALS · v6.71 · VWAP14 ONLY</b>
 <div class="sigLayerCtl">
   <button class="sigLayerBtn on" data-layer="vwapma" type="button">↗↘ VWAP14 방향</button>
 </div>
@@ -138,7 +139,7 @@ body.vwap-only .cards .card{display:block!important}
     <div class="directionMeta" id="directionMeta">VWAP14 엔진 데이터 대기 중…</div>
   </div>
   <div class="legend"><span><b style="color:#56e6c2">○/↗/▲ VWAP14</b> WATCH → LEAN → RELEASE</span><span><b style="color:#c7d0dd">X</b> 내 포지션 종료</span><span><b class="purple">VWAP14</b> 최근 14봉 롤링 지표</span></div>
-  <div class="warn">v6.70은 기존 EXEC/EARLY/EVENT/PB·RV·RT/1H·4H 신호 생성을 모두 중단하고 VWAP14 DIRECTION만 단독으로 검증합니다. WATCH=자리 접근, LEAN=방향 낌새, RELEASE=진입 검토.</div>
+  <div class="warn">v6.71은 기존 EXEC/EARLY/EVENT/PB·RV·RT/1H·4H 신호 생성을 모두 중단하고 VWAP14 DIRECTION만 단독으로 검증합니다. WATCH=자리 접근, LEAN=방향 낌새, RELEASE=진입 검토.</div>
 </section>
 
 <aside class="panel">
@@ -153,6 +154,7 @@ body.vwap-only .cards .card{display:block!important}
     <div class="row"><span>단기 MA slope</span><b id="vwapMaSlope">—</b></div>
     <div class="row"><span>slope accel</span><b id="vwapMaAccel">—</b></div>
     <div class="row"><span>무효화</span><b id="vwapMaInvalid">—</b></div>
+    <div class="row"><span>ENGINE HEARTBEAT</span><b id="vwapMaHeartbeat">연결 확인중…</b></div>
     <div class="reason" id="vwapMaWhy" style="margin-top:7px">VWAP14 근처 이평 압축과 실패한 이탈을 탐색 중…</div>
   </div>
 
@@ -221,7 +223,7 @@ let precursorEvents=[];
 let eventEntryEvents=[];
 let vwapMaEvents=[];
 // v6.67 chart-layer visibility. Display only; never changes server engines or research recording.
-const SIGNAL_LAYER_KEY='btc_signal_layers_v669';
+const SIGNAL_LAYER_KEY='btc_signal_layers_v671';
 let signalLayers={vwapma:true};
 try{const z=JSON.parse(localStorage.getItem(SIGNAL_LAYER_KEY)||'null');if(z&&typeof z==='object'&&typeof z.vwapma==='boolean')signalLayers.vwapma=z.vwapma}catch(e){}
 function applySignalLayerUI(){
@@ -689,13 +691,13 @@ function updateDailyMove(){
       if(arr.length){const d=arr[arr.length-1];o=Number(d.open??d.o);if(!(livePx>0))livePx=Number(d.close??d.c)}
     }
     const a=$('dayMoveUsd'), b=$('dayMovePct'), t=$('topDayMove');
-    if(!(o>0)||!(livePx>0)){if(t)t.textContent='일봉 데이터 연결 중…';return;}
+    if(!(o>0)||!(livePx>0)){if(t)t.textContent='일봉 데이터 연결 중…';const ds=$('dayMoveState');if(ds)ds.textContent='일봉 데이터 연결 중…';return;}
     const diff=livePx-o, pct=diff/o*100, col=diff>=0?'#35d98a':'#ff5c70';
     const usd=(diff>=0?'+$':'-$')+Math.abs(diff).toLocaleString(undefined,{maximumFractionDigits:1});
     const pc=(pct>=0?'+':'')+pct.toFixed(2)+'%';
     if(a){a.textContent=usd;a.style.color=col}
     if(b){b.textContent=pc;b.style.color=col}
-    if(t){t.textContent=`오늘 ${usd} · ${pc}`;t.style.color=col}
+    if(t){t.textContent=`오늘 ${usd} · ${pc}`;t.style.color=col} const ds=$('dayMoveState');if(ds){ds.textContent='OKX 1D 시가 대비';ds.style.color='#8d99ad'}
   }catch(e){console.warn('daily move',e)}
 }
 
@@ -780,35 +782,63 @@ function renderMyTradeLedger(){
 let setupWatchBusy=false;
 async function syncSetupWatch(){
   if(setupWatchBusy)return;setupWatchBusy=true;
-  try{const v=await fetch(SERVER_API+'/api/vwap-ma',{cache:'no-store'}).then(r=>r.json());if(v){if(!serverLive)serverLive={};serverLive.vwap_ma=v;renderVWAPMA(v)}}catch(e){}finally{setupWatchBusy=false}
+  try{
+    const r=await fetch(SERVER_API+'/api/vwap-ma',{cache:'no-store'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const v=await r.json();
+    if(v){
+      if(!serverLive)serverLive={};serverLive.vwap_ma=v;renderVWAPMA(v);
+      const hb=$('vwapMaHeartbeat'), age=Math.max(0,(Date.now()-Number(v.updated_ts||0))/1000);
+      if(hb){hb.textContent=Number(v.updated_ts)>0?(age<5?`LIVE · ${age.toFixed(1)}s`:`STALE · ${age.toFixed(0)}s`):'WARMUP';hb.style.color=age<5?'#35d98a':age<15?'#f1c75b':'#ff5c70';}
+    }
+  }catch(e){const hb=$('vwapMaHeartbeat');if(hb){hb.textContent='OFFLINE';hb.style.color='#ff5c70'}}finally{setupWatchBusy=false}
 }
 async function syncResearchSummary(){
   const el=$('researchSummary');if(!el)return;
   try{const x=await fetch(SERVER_API+'/api/research/summary',{cache:'no-store'}).then(r=>r.json());
     const rows=x.vwap_ma||[];const w=rows.filter(z=>z.stage==='WATCH').reduce((n,z)=>n+Number(z.n||0),0),l=rows.filter(z=>z.stage==='LEAN').reduce((n,z)=>n+Number(z.n||0),0),r=rows.filter(z=>z.stage==='RELEASE').reduce((n,z)=>n+Number(z.n||0),0);
-    el.innerHTML=`VWAP14 · WATCH ${w} · LEAN ${l} · RELEASE ${r}<br><span class="tiny">다른 신호 엔진은 v6.70에서 신규 생성 OFF</span>`;
+    el.innerHTML=`VWAP14 · WATCH ${w} · LEAN ${l} · RELEASE ${r}<br><span class="tiny">다른 신호 엔진은 v6.71에서 신규 생성 OFF</span>`;
   }catch(e){el.textContent='VWAP14 연구 집계 연결 대기'}
 }
 let syncServerBusy=false;
 async function syncServer(){
   if(syncServerBusy)return;syncServerBusy=true;
   try{
-    const [live,mypos,myevents,vevents]=await Promise.all([
-      fetch(SERVER_API+'/api/live',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/user-position',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/user-position-events',{cache:'no-store'}).then(r=>r.json()),
-      fetch(SERVER_API+'/api/vwap-ma-events?limit=1200',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[])
-    ]);
-    serverLive=live||{};decisionEvents=[];precursorEvents=[];eventEntryEvents=[];serverSaved=[];positionEvents=[];liveEnginePositions=[];vwapMaEvents=Array.isArray(vevents)?vevents:[];
-    myPosition=mypos||{side:'FLAT'};myPositionEvents=Array.isArray(myevents)?myevents:[];
+    // Core heartbeat first. Optional DB/UI endpoints must never make the VWAP14 engine look dead.
+    const lr=await fetch(SERVER_API+'/api/live',{cache:'no-store'});
+    if(!lr.ok)throw new Error('live HTTP '+lr.status);
+    const live=await lr.json();
+    serverLive=live||{};
     if(Number(serverLive?.price)>0&&$('price'))$('price').textContent='$'+fmt(Number(serverLive.price));
-    renderVWAPMA(serverLive?.vwap_ma);updateDailyMove();renderMyTradeLedger();
+    renderVWAPMA(serverLive?.vwap_ma);updateDailyMove();
+    const st=live?.status||{}, pub=String(st.public||'').toLowerCase(), biz=String(st.business||'').toLowerCase();
+    if($('srvState')){
+      const ok=pub==='live'&&biz==='live';
+      $('srvState').textContent=ok?'● 연결됨 · VWAP14 ONLY':`● SERVER ${pub||'?'} / CANDLE ${biz||'?'}`;
+      $('srvState').style.color=ok?'#35d98a':'#f1c75b';
+    }
+    const hb=$('vwapMaHeartbeat'), vu=Number(serverLive?.vwap_ma?.updated_ts||0), age=vu?Math.max(0,(Date.now()-vu)/1000):999;
+    if(hb){hb.textContent=vu?(age<5?`LIVE · ${age.toFixed(1)}s`:`STALE · ${age.toFixed(0)}s`):'WARMUP';hb.style.color=age<5?'#35d98a':age<15?'#f1c75b':'#ff5c70';}
+
+    // Optional data: failures here do not break price / daily move / VWAP14 status.
+    const rs=await Promise.allSettled([
+      fetch(SERVER_API+'/api/user-position',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('user-position '+r.status))),
+      fetch(SERVER_API+'/api/user-position-events',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('user-events '+r.status))),
+      fetch(SERVER_API+'/api/vwap-ma-events?limit=1200',{cache:'no-store'}).then(r=>r.ok?r.json():Promise.reject(new Error('vwap-events '+r.status)))
+    ]);
+    if(rs[0].status==='fulfilled')myPosition=rs[0].value||{side:'FLAT'};
+    if(rs[1].status==='fulfilled')myPositionEvents=Array.isArray(rs[1].value)?rs[1].value:[];
+    if(rs[2].status==='fulfilled')vwapMaEvents=Array.isArray(rs[2].value)?rs[2].value:[];
+    decisionEvents=[];precursorEvents=[];eventEntryEvents=[];serverSaved=[];positionEvents=[];liveEnginePositions=[];
+    renderMyTradeLedger();
     const mp=$('myPosition');if(mp){if(myPosition.side&&myPosition.side!=='FLAT'){const ent=Number(myPosition.entry||0),now=Number(myPosition.current_price||currentPrice()||live?.price||0),usd=Number.isFinite(Number(myPosition.live_usd))?Number(myPosition.live_usd):(myPosition.side==='LONG'?now-ent:ent-now),pc=Number.isFinite(Number(myPosition.live_pct))?Number(myPosition.live_pct):(ent?usd/ent*100:0);mp.innerHTML=`<b style="color:${myPosition.side==='LONG'?'#35d98a':'#ff5c70'}">${myPosition.side}</b> · 진입 $${fmt(ent)} · 현재 $${fmt(now)} · <b class="myLivePnl" style="color:${pc>=0?'#35d98a':'#ff4f64'}">실시간 ${pc>=0?'+':''}${pc.toFixed(3)}% · ${usd>=0?'+':'-'}$${fmt(Math.abs(usd))}</b> <button onclick="closeMyPos()" style="margin-left:8px">포지션 종료</button>`;}else mp.innerHTML='<span style="color:#8d99ad">현재 내 포지션 없음</span>';}
-    if($('srvState')){$('srvState').textContent='● 연결됨 · VWAP14 ONLY';$('srvState').style.color='#35d98a'}
     if($('srvCount'))$('srvCount').textContent=String(vwapMaEvents.length);
     if($('srvLast')){const latest=[...vwapMaEvents].sort((a,b)=>Number(b.ts)-Number(a.ts))[0];$('srvLast').textContent=latest?`최근 VWAP14 ${latest.stage} ${latest.side} · ${new Date(Number(latest.ts)).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})}`:`BTC $${fmt(live.price)} · VWAP14 이벤트 대기`;}
     renderHistory();renderMarkers();
-  }catch(e){let st=$('srvState');if(st){st.textContent='● 연결 재시도';st.style.color='#f1c75b'}}finally{syncServerBusy=false;}
+  }catch(e){
+    let st=$('srvState');if(st){st.textContent='● CORE API 연결 재시도';st.style.color='#ff5c70'}
+    const hb=$('vwapMaHeartbeat');if(hb){hb.textContent='OFFLINE';hb.style.color='#ff5c70'}
+  }finally{syncServerBusy=false;}
 }
 
 async function openMyPos(side){try{const r=await fetch(SERVER_API+'/api/user-position/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({side})});const j=await r.json();if(!j.ok)throw new Error(j.error||'failed');await syncServer();}catch(e){alert('내 포지션 진입 실패: '+e.message)}}
