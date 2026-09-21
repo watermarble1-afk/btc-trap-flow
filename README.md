@@ -185,3 +185,11 @@ It also publishes an invalidation level near the opposite side of VWAP14 / the M
 - MA CYCLE phase transitions are now persisted and drawn on the actual candle where they occur: RELEASE / ALIGN / EXPANSION / MA_HIT / REALIGN / RE_EXPANSION / BREAKDOWN.
 - Added always-on SMA 5 / 10 / 20 / 60 / 120 / 240 / 480 to BTC desktop and mobile charts.
 - BIAS remains persistent through ordinary pullbacks; chart markers represent PHASE changes, not independent LONG/SHORT calls.
+
+## v7.04 TOP / BOTTOM RADAR
+- Existing MA CYCLE engine logic is unchanged.
+- Adds independent chart-side TOP/BOTTOM research radar for every displayed timeframe.
+- Stages: TOP WATCH → TOP WARNING → EXIT L / BOTTOM WATCH → BOTTOM WARNING → EXIT S.
+- TOP/BOTTOM is a reversal-risk / exit-watch module, not an automatic opposite-position entry signal.
+- Uses only data available up to each candle: VWAP14 distance, short-MA spread, spread contraction, short-MA slope deceleration/turn, and candle rejection context.
+- Adds separate TOP/BOTTOM chart signal ON/OFF toggle; preference is saved in browser localStorage.

@@ -118,6 +118,7 @@ body.vwap-only .cards .card{display:block!important}
 <b style="font-size:10px">LIVE RADAR · v7.0 · MA CYCLE + VWAP</b>
 <div class="sigLayerCtl">
   <button class="sigLayerBtn on" data-layer="vwapma" type="button">↗↘ MA CYCLE</button>
+  <button class="sigLayerBtn on" data-layer="topbottom" type="button">⌃⌄ TOP/BOTTOM</button>
 </div>
 <span class="sigLayerHint">큰 방향(BIAS)은 쉽게 안 뒤집고 · 이평치기 → 재정렬 → 재발산 타점을 추적</span>
 </div><div style="font-size:10px;color:#8d99ad;margin:3px 0">TIMEFRAME · 1M / 3M / 5M / 15M / 1H / 4H / 1D / 1W / 1MO</div><div class="hoverPctBar" id="hoverPctBar">봉에 마우스를 올리면 해당 봉의 등락률이 표시됩니다.</div><div id="chart"></div>
@@ -171,6 +172,14 @@ body.vwap-only .cards .card{display:block!important}
     <div class="guideRow"><b>INVALIDATION</b><span><strong>현재 시나리오 무효화 기준 가격.</strong> 손절가가 아니라, 이 가격대까지 구조가 깨지면 현재 LONG/SHORT BIAS를 다시 봐야 한다는 엔진 기준.</span></div>
   </div>
 
+  <div class="box" id="topBottomBox">
+    <h3>TOP / BOTTOM RADAR <span class="tiny">과열·바닥 / 청산 감시</span></h3>
+    <div id="tbState" class="signal yellow">SCANNING</div>
+    <div class="row"><span>TOP 위험도</span><b id="tbTop">—</b></div>
+    <div class="row"><span>BOTTOM 위험도</span><b id="tbBottom">—</b></div>
+    <div class="row"><span>현재 해석</span><b id="tbWhy">데이터 계산 중</b></div>
+    <div class="warn">TOP/BOTTOM은 반대 포지션 진입 신호가 아닙니다. 이격 과대 → 발산 둔화 → 단기 이평 꺾임을 순서대로 추적해 현재 추세의 청산/되돌림 위험을 표시합니다. TOP WATCH → TOP WARNING → EXIT L, BOTTOM WATCH → BOTTOM WARNING → EXIT S 순으로 강해집니다.</div>
+  </div>
   <div class="box">
     <h3>RESEARCH LAB <span class="tiny">MA CYCLE 검증</span></h3>
     <div id="researchSummary" class="reason">연구 데이터 집계 중…</div>
@@ -229,8 +238,8 @@ let eventEntryEvents=[];
 let vwapMaEvents=[];
 // v6.67 chart-layer visibility. Display only; never changes server engines or research recording.
 const SIGNAL_LAYER_KEY='btc_signal_layers_v672';
-let signalLayers={vwapma:true};
-try{const z=JSON.parse(localStorage.getItem(SIGNAL_LAYER_KEY)||'null');if(z&&typeof z==='object'&&typeof z.vwapma==='boolean')signalLayers.vwapma=z.vwapma}catch(e){}
+let signalLayers={vwapma:true,topbottom:true};
+try{const z=JSON.parse(localStorage.getItem(SIGNAL_LAYER_KEY)||'null');if(z&&typeof z==='object'){if(typeof z.vwapma==='boolean')signalLayers.vwapma=z.vwapma;if(typeof z.topbottom==='boolean')signalLayers.topbottom=z.topbottom}}catch(e){}
 function applySignalLayerUI(){
   document.querySelectorAll('.sigLayerBtn').forEach(b=>{const on=!!signalLayers[b.dataset.layer];b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');b.dataset.state=on?'ON':'OFF';b.title=(b.dataset.layer||'').toUpperCase()+' '+(on?'ON':'OFF')+' · 클릭해서 차트 표시 전환';});
 }
@@ -584,6 +593,71 @@ function renderHistory(){
   h.innerHTML=rows.length?rows.slice(0,60).map(x=>{const tm=new Date(x.ts).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}),isL=x.side==='LONG',rel=String(x.detail||'').startsWith('RELEASE'),c=rel?(isL?'#56e6c2':'#ff7b7b'):(isL?'#79d9c0':'#e9a0a0');return `<div class="histrow"><span>${tm}</span><b style="color:${c}">VWAP14 ${isL?'L':'S'}</b><span class="tiny">${x.detail||'—'} · ${x.score.toFixed(0)}</span></div>`;}).join(''):'<div class="tiny">VWAP14 이벤트 대기 중</div>';
 }
 
+// v7.04 TOP/BOTTOM RADAR — display/research module only. Does not alter MA CYCLE bias/phase logic.
+function calcTopBottomEvents(a){
+  if(!a||a.length<130)return [];
+  const N=a.length, lens=[5,10,20,60,120], ma={};
+  for(const n of lens){
+    const out=Array(N).fill(null);let sum=0;
+    for(let i=0;i<N;i++){sum+=Number(a[i].close);if(i>=n)sum-=Number(a[i-n].close);if(i>=n-1)out[i]=sum/n}
+    ma[n]=out;
+  }
+  const atrs=Array(N).fill(null), vw=Array(N).fill(null);
+  let pv=0,vv=0;
+  for(let i=0;i<N;i++){
+    const start=Math.max(1,i-23), trs=[];
+    for(let j=start;j<=i;j++){const pc=Number(a[j-1]?.close||a[j].open),h=Number(a[j].high),l=Number(a[j].low);trs.push(Math.max(h-l,Math.abs(h-pc),Math.abs(l-pc)))}
+    if(trs.length){const z=trs.slice().sort((x,y)=>x-y),m=Math.floor(z.length/2);atrs[i]=z.length%2?z[m]:(z[m-1]+z[m])/2}
+    const typ=(Number(a[i].high)+Number(a[i].low)+Number(a[i].close))/3, vol=Math.max(0,Number(a[i].volume||0));pv+=typ*vol;vv+=vol;
+    if(i>=14){const q=a[i-14],qt=(Number(q.high)+Number(q.low)+Number(q.close))/3,qv=Math.max(0,Number(q.volume||0));pv-=qt*qv;vv-=qv}
+    if(i>=13)vw[i]=vv>0?pv/vv:null;
+  }
+  const out=[];let lastStage='NONE',lastEmit=-99;
+  for(let i=125;i<N;i++){
+    const A=Math.max(Number(atrs[i]||0),1), p=Number(a[i].close), v=Number(vw[i]||p);
+    if(lens.some(n=>ma[n][i]==null||ma[n][i-3]==null))continue;
+    const slope=n=>(ma[n][i]-ma[n][i-3])/(3*A), prevSlope=n=>i>=6?(ma[n][i-3]-ma[n][i-6])/(3*A):0;
+    const spread=(Math.max(ma[5][i],ma[10][i],ma[20][i])-Math.min(ma[5][i],ma[10][i],ma[20][i]))/A;
+    const ps=(Math.max(ma[5][i-3],ma[10][i-3],ma[20][i-3])-Math.min(ma[5][i-3],ma[10][i-3],ma[20][i-3]))/A;
+    const dSpread=spread-ps, vdist=(p-v)/A, ss=(slope(5)+slope(10)+slope(20))/3, ssPrev=(prevSlope(5)+prevSlope(10)+prevSlope(20))/3;
+    const bull=ma[20][i]>ma[60][i] && ma[60][i]>=ma[120][i]*.998;
+    const bear=ma[20][i]<ma[60][i] && ma[60][i]<=ma[120][i]*1.002;
+    const rng=Math.max(Number(a[i].high)-Number(a[i].low),1), upper=(Number(a[i].high)-p)/rng, lower=(p-Number(a[i].low))/rng;
+    let top=0,bot=0;
+    if(bull)top+=18;if(bear)bot+=18;
+    if(vdist>.8)top+=Math.min(26,(vdist-.8)*22+10);if(vdist<-.8)bot+=Math.min(26,(-vdist-.8)*22+10);
+    if(spread>.65){if(ss>0)top+=16;if(ss<0)bot+=16}
+    if(ss>0 && ss<ssPrev-.012)top+=16;if(ss<0 && ss>ssPrev+.012)bot+=16;
+    if(dSpread<-.02){if(vdist>0)top+=12;if(vdist<0)bot+=12}
+    const topTurn=(ma[5][i]<ma[10][i]) || (p<ma[10][i] && slope(5)<0);
+    const botTurn=(ma[5][i]>ma[10][i]) || (p>ma[10][i] && slope(5)>0);
+    if(topTurn)top+=18;if(botTurn)bot+=18;
+    if(upper>.55 && p<Number(a[i].open))top+=8;if(lower>.55 && p>Number(a[i].open))bot+=8;
+    top=Math.min(100,Math.round(top));bot=Math.min(100,Math.round(bot));
+    let stage='NONE',side='';
+    if(top>=82 && topTurn){stage='EXIT_L';side='TOP'} else if(bot>=82 && botTurn){stage='EXIT_S';side='BOTTOM'}
+    else if(top>=70){stage='TOP_WARNING';side='TOP'} else if(bot>=70){stage='BOTTOM_WARNING';side='BOTTOM'}
+    else if(top>=55){stage='TOP_WATCH';side='TOP'} else if(bot>=55){stage='BOTTOM_WATCH';side='BOTTOM'}
+    if(stage!=='NONE' && (stage!==lastStage || i-lastEmit>=5)){
+      out.push({time:Number(a[i].time),stage,side,score:side==='TOP'?top:bot,price:p,vdist,spread,dSpread,slope:ss});lastStage=stage;lastEmit=i;
+    } else if(stage==='NONE') lastStage='NONE';
+  }
+  return out;
+}
+function currentTopBottom(){const ev=calcTopBottomEvents(cache[cur]||[]), a=cache[cur]||[];if(!a.length)return {events:ev,top:0,bottom:0};
+  // Re-run a short tail and use latest emitted stage as an interpretable live snapshot.
+  const last=ev.at(-1), age=last?Math.max(0,a.length-1-a.findIndex(x=>Number(x.time)===Number(last.time))):999;
+  return {events:ev,last,age};
+}
+function renderTopBottomPanel(){
+  const r=currentTopBottom(),last=r.last, active=last&&r.age<=4;
+  const st=active?last.stage:'SCANNING', score=active?last.score:0;
+  if($('tbState')){$('tbState').textContent=st.replace('_',' ');$('tbState').className='signal '+(st.includes('TOP')||st==='EXIT_L'?'red':st.includes('BOTTOM')||st==='EXIT_S'?'green':'yellow')}
+  if($('tbTop'))$('tbTop').textContent=active&&last.side==='TOP'?score+'/100':'—';
+  if($('tbBottom'))$('tbBottom').textContent=active&&last.side==='BOTTOM'?score+'/100':'—';
+  if($('tbWhy'))$('tbWhy').textContent=!active?'과열/바닥 조건 감시 중':`${last.side} · VWAP ${last.vdist>=0?'+':''}${last.vdist.toFixed(2)} ATR · MA 이격 ${last.spread.toFixed(2)} ATR`;
+}
+
 function signalAnchorRows(){
   const from=cache[cur]?.[0]?.time||0, bucketSec={'1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800,'1MO':2592000}[cur]||300;
   const out=[];
@@ -614,6 +688,12 @@ function signalAnchorRows(){
       out.push({mode:'VWAPMA',stage:st,side:String(e.side||'').toUpperCase()==='LONG'?'L':'S',candleTs:Math.floor(rawTs/bucketSec)*bucketSec,rawTs,score:Math.round(Number(e.score||0)),name:e.reason||'MA CYCLE',entry:Number(e.price||0)});
     }
   }
+  if(signalLayers.topbottom){
+    for(const e of calcTopBottomEvents(cache[cur]||[])){
+      const isTop=e.side==='TOP';
+      out.push({mode:'TOPBOTTOM',stage:e.stage,side:isTop?'S':'L',candleTs:e.time,rawTs:e.time,score:e.score,name:`${e.stage} · VWAP ${e.vdist.toFixed(2)}ATR · MA ${e.spread.toFixed(2)}ATR`,entry:e.price});
+    }
+  }
   if(false){
     const seen=new Set();
     for(const s of (serverSaved||[])){
@@ -638,11 +718,11 @@ function renderSignalAnchors(){
     const isL=a.side==='L', y=candle.priceToCoordinate(isL?Number(bar.low):Number(bar.high));if(y==null)continue;
     const sk=`${a.candleTs}|${a.side}`, idx=stack[sk]||0;stack[sk]=idx+1;
     const cycleColor=(stage,isL)=>({RELEASE:isL?'#56e6c2':'#ff7b7b',ALIGN:'#8fa3b8',EXPANSION:isL?'#35d98a':'#ff5c70',MA_HIT:'#f1c75b',REALIGN:isL?'#00e5ff':'#ff9bd2',RE_EXPANSION:isL?'#b56cff':'#ff8a4a',BREAKDOWN:'#ffffff'}[stage]||'#90a6a0');
-    const col=a.mode==='EXEC'?(isL?'#35d98a':'#ff5c70'):a.mode==='EVENT'?(isL?'#e7a84a':'#ff8a4a'):a.mode==='VWAPMA'?cycleColor(a.stage,isL):a.mode==='EARLY'?(isL?'#8fb5ff':'#ff9bd2'):a.setup==='PB'?(isL?'#35d98a':'#ff5c70'):a.setup==='RV'?(isL?'#00e5ff':'#ffd400'):'#b56cff';
+    const col=a.mode==='TOPBOTTOM'?(a.stage.includes('TOP')||a.stage==='EXIT_L'?'#ffb020':'#5ee6a8'):a.mode==='EXEC'?(isL?'#35d98a':'#ff5c70'):a.mode==='EVENT'?(isL?'#e7a84a':'#ff8a4a'):a.mode==='VWAPMA'?cycleColor(a.stage,isL):a.mode==='EARLY'?(isL?'#8fb5ff':'#ff9bd2'):a.setup==='PB'?(isL?'#35d98a':'#ff5c70'):a.setup==='RV'?(isL?'#00e5ff':'#ffd400'):'#b56cff';
     const badgeY=Math.max(12,Math.min(host.clientHeight-22,y+(isL?1:-1)*(30+idx*24)));
     const line=document.createElement('div');line.className='sigAnchorLine';line.style.color=col;line.style.left=x+'px';line.style.top=Math.min(y,badgeY)+'px';line.style.height=Math.max(6,Math.abs(badgeY-y))+'px';layer.appendChild(line);
     const dot=document.createElement('div');dot.className='sigAnchorDot';dot.style.color=col;dot.style.left=x+'px';dot.style.top=y+'px';layer.appendChild(dot);
-    const badge=document.createElement('div');badge.className='sigAnchorBadge';badge.style.color=col;badge.style.left=x+'px';badge.style.top=badgeY+'px';badge.textContent=a.mode==='EXEC'?`${isL?'▲':'▼'} EXEC ${a.side}`:a.mode==='EVENT'?`◎ EVT ${a.side} ${a.score}`:a.mode==='VWAPMA'?`${a.stage==='RE_EXPANSION'?'🚀':a.stage==='MA_HIT'?'◆':a.stage==='BREAKDOWN'?'✕':(isL?'▲':'▼')} ${a.stage.replace('RE_EXPANSION','RE-EXP').replace('EXPANSION','EXPAND').replace('REALIGN','REALIGN').replace('RELEASE','RELEASE')} ${a.side}`:a.mode==='EARLY'?`◌ EARLY ${a.side} ${a.score}`:`${isL?'▲':'▼'} ${a.setup} ${a.side} ${a.score}`;
+    const badge=document.createElement('div');badge.className='sigAnchorBadge';badge.style.color=col;badge.style.left=x+'px';badge.style.top=badgeY+'px';badge.textContent=a.mode==='TOPBOTTOM'?`${a.stage.includes('TOP')||a.stage==='EXIT_L'?'⌃':'⌄'} ${a.stage.replace('TOP_WARNING','TOP WARN').replace('BOTTOM_WARNING','BOT WARN').replace('TOP_WATCH','TOP WATCH').replace('BOTTOM_WATCH','BOT WATCH').replace('EXIT_L','EXIT L').replace('EXIT_S','EXIT S')} ${a.score}`:a.mode==='EXEC'?`${isL?'▲':'▼'} EXEC ${a.side}`:a.mode==='EVENT'?`◎ EVT ${a.side} ${a.score}`:a.mode==='VWAPMA'?`${a.stage==='RE_EXPANSION'?'🚀':a.stage==='MA_HIT'?'◆':a.stage==='BREAKDOWN'?'✕':(isL?'▲':'▼')} ${a.stage.replace('RE_EXPANSION','RE-EXP').replace('EXPANSION','EXPAND').replace('REALIGN','REALIGN').replace('RELEASE','RELEASE')} ${a.side}`:a.mode==='EARLY'?`◌ EARLY ${a.side} ${a.score}`:`${isL?'▲':'▼'} ${a.setup} ${a.side} ${a.score}`;
     const tm=new Date(a.rawTs*1000).toLocaleString('ko-KR',{hour12:false});badge.title=`${a.name} · ${tm} · score ${a.score}${a.entry?` · $${fmt(a.entry)}`:''}`;layer.appendChild(badge);
   }
 }
@@ -683,6 +763,10 @@ function renderMarkers(){
       marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:col,shape:setup==='RV'?'diamond':setup==='RT'?'circle':(isL?'arrowUp':'arrowDown'),text:''});
     }
   }
+  if(signalLayers.topbottom){for(const e of calcTopBottomEvents(cache[cur]||[])){
+    const isTop=e.side==='TOP', exit=e.stage==='EXIT_L'||e.stage==='EXIT_S';
+    marks.push({time:e.time,position:isTop?'aboveBar':'belowBar',color:isTop?'#ffb020':'#5ee6a8',shape:exit?'diamond':'circle',text:''});
+  }}
   for(const e of (myPositionEvents||[])){
     const ts=Math.floor(Number(e.ts||0)/1000),ev=String(e.event||'').toUpperCase();if(!ts||ts<from||!['OPEN','EXIT'].includes(ev))continue;
     const isL=String(e.side||'').toUpperCase()==='LONG', candleTs=Math.floor(ts/bucketSec)*bucketSec;
@@ -1041,7 +1125,7 @@ function renderChart(full=true){
   volume.setData(a.map(x=>({time:x.time,value:x.volume,color:x.close>=x.open?'rgba(47,213,139,.30)':'rgba(255,92,112,.30)'})));
   vwapSeries.setData(calcVWAP(a,cur));
   for(const z of cycleMaSeries)z.series.setData(calcMA(a,z.n,'SMA'));
-  $('price').textContent='$'+fmt(a.at(-1).close);renderMarkers();renderContext();
+  $('price').textContent='$'+fmt(a.at(-1).close);renderMarkers();renderTopBottomPanel();renderContext();
   try{drawInd()}catch(e){};if(full){let i=Math.max(0,a.length-420);chart.timeScale().setVisibleRange({from:a[i].time,to:a.at(-1).time})}
 }
 
