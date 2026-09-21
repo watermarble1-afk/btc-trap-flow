@@ -641,7 +641,8 @@ function renderSignalAnchors(){
     const x=chart.timeScale().timeToCoordinate(a.candleTs);if(x==null)continue;
     const isL=a.side==='L', y=candle.priceToCoordinate(isL?Number(bar.low):Number(bar.high));if(y==null)continue;
     const sk=`${a.candleTs}|${a.side}`, idx=stack[sk]||0;stack[sk]=idx+1;
-    const col=a.mode==='EXEC'?(isL?'#35d98a':'#ff5c70'):a.mode==='EVENT'?(isL?'#e7a84a':'#ff8a4a'):a.mode==='VWAPMA'?(a.stage==='RELEASE'?(isL?'#56e6c2':'#ff7b7b'):a.stage==='LEAN'?(isL?'#79d9c0':'#e9a0a0'):'#90a6a0'):a.mode==='EARLY'?(isL?'#8fb5ff':'#ff9bd2'):a.setup==='PB'?(isL?'#35d98a':'#ff5c70'):a.setup==='RV'?(isL?'#00e5ff':'#ffd400'):'#b56cff';
+    const cycleColor=(stage,isL)=>({RELEASE:isL?'#56e6c2':'#ff7b7b',ALIGN:'#8fa3b8',EXPANSION:isL?'#35d98a':'#ff5c70',MA_HIT:'#f1c75b',REALIGN:isL?'#00e5ff':'#ff9bd2',RE_EXPANSION:isL?'#b56cff':'#ff8a4a',BREAKDOWN:'#ffffff'}[stage]||'#90a6a0');
+    const col=a.mode==='EXEC'?(isL?'#35d98a':'#ff5c70'):a.mode==='EVENT'?(isL?'#e7a84a':'#ff8a4a'):a.mode==='VWAPMA'?cycleColor(a.stage,isL):a.mode==='EARLY'?(isL?'#8fb5ff':'#ff9bd2'):a.setup==='PB'?(isL?'#35d98a':'#ff5c70'):a.setup==='RV'?(isL?'#00e5ff':'#ffd400'):'#b56cff';
     const badgeY=Math.max(12,Math.min(host.clientHeight-22,y+(isL?1:-1)*(30+idx*24)));
     const line=document.createElement('div');line.className='sigAnchorLine';line.style.color=col;line.style.left=x+'px';line.style.top=Math.min(y,badgeY)+'px';line.style.height=Math.max(6,Math.abs(badgeY-y))+'px';layer.appendChild(line);
     const dot=document.createElement('div');dot.className='sigAnchorDot';dot.style.color=col;dot.style.left=x+'px';dot.style.top=y+'px';layer.appendChild(dot);
@@ -672,7 +673,7 @@ function renderMarkers(){
     const ts=Math.floor(Number(e.ts||0)/1000);if(!ts||ts<from)continue;
     const isL=String(e.side||'').toUpperCase()==='LONG', candleTs=Math.floor(ts/bucketSec)*bucketSec, st=String(e.stage||'').toUpperCase();
     if(!['RELEASE','ALIGN','EXPANSION','MA_HIT','REALIGN','RE_EXPANSION','BREAKDOWN'].includes(st))continue;
-    const col=st==='BREAKDOWN'?'#ffffff':st==='MA_HIT'?'#f1c75b':(isL?'#56e6c2':'#ff7b7b');
+    const col=({RELEASE:isL?'#56e6c2':'#ff7b7b',ALIGN:'#8fa3b8',EXPANSION:isL?'#35d98a':'#ff5c70',MA_HIT:'#f1c75b',REALIGN:isL?'#00e5ff':'#ff9bd2',RE_EXPANSION:isL?'#b56cff':'#ff8a4a',BREAKDOWN:'#ffffff'}[st]||'#90a6a0');
     const shape=st==='MA_HIT'||st==='REALIGN'?'circle':st==='BREAKDOWN'?'diamond':(isL?'arrowUp':'arrowDown');
     marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:col,shape,text:''});
   }}
