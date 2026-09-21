@@ -172,3 +172,10 @@ It also publishes an invalidation level near the opposite side of VWAP14 / the M
 - Added VWAP14 engine heartbeat (LIVE / STALE / OFFLINE) with update age.
 - 24H SERVER status now reflects public ticker and business candle streams directly.
 - No VWAP14 signal-condition changes from v6.70.
+
+
+## v6.72 — BOOT / LIVE SYNC HOTFIX
+- Fixed a frontend boot crash caused by legacy renderContext() referencing the removed #mtf panel.
+- Server/VWAP14 sync now starts independently of chart history boot, so a chart-side error cannot block TODAY, VWAP14 state or heartbeat.
+- VWAP14 signal logic is unchanged from v6.71.
+- Cache/version bumped to v6.72.

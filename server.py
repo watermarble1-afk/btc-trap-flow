@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.69 VWAP14 ONLY LAB KST")
+app=FastAPI(title="BTC Trap Flow Collector v6.72 VWAP14 ONLY KST")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 @app.middleware("http")
@@ -2535,7 +2535,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.69 VWAP14 ONLY LAB KST","ok":True,"status":status,"signal_mode":SIGNAL_MODE,"legacy_engines_enabled":False}
+    return {"service":"BTC Trap Flow Collector v6.72 VWAP14 ONLY KST","ok":True,"status":status,"signal_mode":SIGNAL_MODE,"legacy_engines_enabled":False}
 
 def market_bias_snapshot():
     vals={tf:trend_bias_tf(tf) for tf in ("5M","15M","1H","4H")}

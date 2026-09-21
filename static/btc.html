@@ -83,7 +83,7 @@ body.vwap-only .cards .card{display:block!important}
 <body class="embedded-btc vwap-only"><div class="wrap">
 <div class="top">
   <div>
-    <h1>BTC OKX RADAR v6.71 · VWAP14 ONLY</h1>
+    <h1>BTC OKX RADAR v6.72 · VWAP14 ONLY</h1>
     <div class="sub">VWAP14 + MA KNOT 방향 레이더 단독 검증 · 기존 신호 엔진 전원 OFF</div>
   </div>
   <div id="status" class="tiny">초기화 중…</div>
@@ -115,7 +115,7 @@ body.vwap-only .cards .card{display:block!important}
  <div class="indRow"><span>기타</span><label><input type="checkbox" id="vwapChk"> VWAP</label><label><input type="checkbox" id="volChk" checked> 거래량</label></div>
  <div style="font-size:9px;color:#7f8ba0;margin-top:7px">예: 5·20·60·120·240 또는 직접 숫자 입력 · 설정은 이 브라우저에 저장</div>
 </div></div><div id="enginePanel" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:6px 0;padding:8px 10px;border:1px solid #263247;border-radius:8px;background:#0b111b">
-<b style="font-size:10px">LIVE SIGNALS · v6.71 · VWAP14 ONLY</b>
+<b style="font-size:10px">LIVE SIGNALS · v6.72 · VWAP14 ONLY</b>
 <div class="sigLayerCtl">
   <button class="sigLayerBtn on" data-layer="vwapma" type="button">↗↘ VWAP14 방향</button>
 </div>
@@ -223,7 +223,7 @@ let precursorEvents=[];
 let eventEntryEvents=[];
 let vwapMaEvents=[];
 // v6.67 chart-layer visibility. Display only; never changes server engines or research recording.
-const SIGNAL_LAYER_KEY='btc_signal_layers_v671';
+const SIGNAL_LAYER_KEY='btc_signal_layers_v672';
 let signalLayers={vwapma:true};
 try{const z=JSON.parse(localStorage.getItem(SIGNAL_LAYER_KEY)||'null');if(z&&typeof z==='object'&&typeof z.vwapma==='boolean')signalLayers.vwapma=z.vwapma}catch(e){}
 function applySignalLayerUI(){
@@ -797,7 +797,7 @@ async function syncResearchSummary(){
   const el=$('researchSummary');if(!el)return;
   try{const x=await fetch(SERVER_API+'/api/research/summary',{cache:'no-store'}).then(r=>r.json());
     const rows=x.vwap_ma||[];const w=rows.filter(z=>z.stage==='WATCH').reduce((n,z)=>n+Number(z.n||0),0),l=rows.filter(z=>z.stage==='LEAN').reduce((n,z)=>n+Number(z.n||0),0),r=rows.filter(z=>z.stage==='RELEASE').reduce((n,z)=>n+Number(z.n||0),0);
-    el.innerHTML=`VWAP14 · WATCH ${w} · LEAN ${l} · RELEASE ${r}<br><span class="tiny">다른 신호 엔진은 v6.71에서 신규 생성 OFF</span>`;
+    el.innerHTML=`VWAP14 · WATCH ${w} · LEAN ${l} · RELEASE ${r}<br><span class="tiny">다른 신호 엔진은 v6.72에서 신규 생성 OFF</span>`;
   }catch(e){el.textContent='VWAP14 연구 집계 연결 대기'}
 }
 let syncServerBusy=false;
@@ -1027,18 +1027,7 @@ function renderTurnRadar(r){
   if($('radWhy'))$('radWhy').innerHTML=`· REGIME ${r.regime?.side||'MIXED'}<br>· 5M ${r.structure?.['5M']||'—'} / 15M ${r.structure?.['15M']||'—'}<br>· LONG ${Number(r.long_score||0).toFixed(0)} vs SHORT ${Number(r.short_score||0).toFixed(0)}<br>· 점수는 확률이 아닌 실시간 근거 합류 강도`;
 }
 
-function renderContext(){
-  let h1=structure(confirmed(cache['1H']||[])),h4=structure(confirmed(cache['4H']||[])),m15=structure(confirmed(cache['15M']||[])),m5=structure(confirmed(cache['5M']||[]));
-  $('mtf').innerHTML=[['5M',m5],['15M',m15],['1H',h1],['4H',h4]].map(([k,v])=>`<div>${k}<b class="${v==='BULL'?'green':v==='BEAR'?'red':'yellow'}">${v}</b></div>`).join('');
-  const b=(serverLive&&serverLive.bias)||null;
-  let overall=b?.overall;
-  if(!overall){const s=(m5==='BULL'?1:m5==='BEAR'?-1:0)+(m15==='BULL'?2:m15==='BEAR'?-2:0)+(h1==='BULL'?3:h1==='BEAR'?-3:0)+(h4==='BULL'?4:h4==='BEAR'?-4:0);overall=s>=5?'STRONG LONG':s>=2?'LONG':s<=-5?'STRONG SHORT':s<=-2?'SHORT':'MIXED';}
-  const bo=$('biasOverall'),bd=$('biasDetail');
-  if(bo){bo.textContent=overall;bo.style.color=overall.includes('LONG')?'#35d98a':overall.includes('SHORT')?'#ff5c70':'#f1c75b';}
-  if(bd)bd.textContent=`4H ${b?.['4H']||h4} · 1H ${b?.['1H']||h1} · 15M ${b?.['15M']||m15} · 5M ${b?.['5M']||m5}`;
-  const tb=$('topBias'); if(tb){tb.textContent=overall;tb.style.color=overall.includes('LONG')?'#35d98a':overall.includes('SHORT')?'#ff5c70':'#f1c75b';}
-  const td=$('topBiasDetail'); if(td)td.textContent=`4H ${b?.['4H']||h4} · 1H ${b?.['1H']||h1} · 15M ${b?.['15M']||m15} · 5M ${b?.['5M']||m5}`;
-}
+function renderContext(){ /* v6.72: legacy context panels removed; intentionally no-op */ }
 function renderChart(full=true){
   let a=cache[cur];if(!a?.length)return;
   candle.setData(a);
@@ -1094,7 +1083,12 @@ async function boot(){
   renderChart(true);updateDailyMove();connectBusiness();
   $('status').textContent='WebSocket 연결 중…';
 }
-boot().then(()=>{syncServer();syncSetupWatch();syncResearchSummary();setInterval(syncServer,10000);setInterval(syncSetupWatch,2000);setInterval(syncResearchSummary,15000)}).catch(e=>{$('status').textContent='오류: '+e.message});
+function startServerSync(){
+  syncServer();syncSetupWatch();syncResearchSummary();
+  setInterval(syncServer,10000);setInterval(syncSetupWatch,2000);setInterval(syncResearchSummary,15000);
+}
+startServerSync();
+boot().catch(e=>{console.error('chart boot',e);$('status').textContent='차트 오류: '+e.message});
 
 // ---- USER INDICATORS v4.1 ----
 let userMA=[],maSeries=[],userVWAP=null;
