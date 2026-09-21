@@ -940,19 +940,22 @@ def _vwap_ma_features():
             'SHORT':{'score':min(100,short_strength),'invalidation':ma[60]+.35*A}}
 
 def _save_vwap_ma_event(side,stage,feat,now):
+    """Persist MA-cycle phase transitions for chart markers/research."""
+    if side not in ('LONG','SHORT') or stage not in ('RELEASE','ALIGN','EXPANSION','MA_HIT','REALIGN','RE_EXPANSION','BREAKDOWN'):
+        return False,[]
     bucket=int(now//900000); d=feat[side]
-    reasons=['VWAP14_NEAR','MA_KNOT']
-    if feat.get('compressing'): reasons.append('KNOT_TIGHTENING')
-    if (side=='LONG' and feat.get('failed_down')) or (side=='SHORT' and feat.get('failed_up')): reasons.append('FAILED_VWAP_BREAK')
-    if (side=='LONG' and feat.get('down_stall')) or (side=='SHORT' and feat.get('up_stall')): reasons.append('PRICE_EXTENSION_STALL')
-    if stage in ('LEAN','RELEASE'): reasons.append('VWAP_HOLD' if side=='LONG' else 'VWAP_REJECT')
-    if stage=='RELEASE': reasons.append('MA_KNOT_RELEASE')
-    ctx={'distance_atr':feat['distance_atr'],'bundle':feat['bundle'],'short_slope':feat['short_slope'],'slope_accel':feat['slope_accel'],
-         'slope20':feat['slope20'],'failed_down':feat['failed_down'],'failed_up':feat['failed_up'],'above_count':feat['above_count'],'below_count':feat['below_count']}
+    reasons=[]
+    if feat.get('compression'): reasons.append('COMPRESSION_RELEASE')
+    if feat.get('expanding'): reasons.append('MA_SPREAD_EXPANDING')
+    if (feat.get('long_hit') if side=='LONG' else feat.get('short_hit')): reasons.append('MA_HIT')
+    if (feat.get('long_realign') if side=='LONG' else feat.get('short_realign')): reasons.append('REALIGN')
+    reasons.append('VWAP_ABOVE' if feat.get('distance_atr',0)>=0 else 'VWAP_BELOW')
+    ctx={'distance_atr':feat['distance_atr'],'short_spread':feat['short_spread'],'med_spread':feat['med_spread'],
+         'spread_delta':feat['spread_delta'],'ma':feat['ma'],'slopes':feat['slopes_all']}
     c=db(); cur=c.execute("""INSERT OR IGNORE INTO vwap_ma_events(ts,bucket,side,stage,score,price,vwap14,knot_atr,invalidation,reason,context_json)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?)""",(int(now),bucket,side,stage,float(d['score']),float(feat['price']),float(feat['vwap14']),float(feat['bundle']['width_atr']),float(d['invalidation']),' | '.join(reasons),json.dumps(ctx,separators=(',',':'),ensure_ascii=False)))
+      VALUES(?,?,?,?,?,?,?,?,?,?,?)""",(int(now),bucket,side,stage,float(d['score']),float(feat['price']),float(feat['vwap14']),float(feat['short_spread']),float(d['invalidation']),' | '.join(reasons),json.dumps(ctx,separators=(',',':'),ensure_ascii=False)))
     inserted=cur.rowcount>0
-    if inserted and stage=='RELEASE':
+    if inserted and stage in ('RE_EXPANSION','EXPANSION'):
         eid=cur.lastrowid; c.execute("INSERT OR IGNORE INTO vwap_ma_research(event_id,started_ts,last_ts,mfe_pct,mae_pct) VALUES(?,?,?,?,?)",(eid,int(now),int(now),0.0,0.0))
     c.commit(); c.close(); return inserted,reasons
 
@@ -996,7 +999,11 @@ def evaluate_vwap_ma():
     prev_stage=str(rt.get('stage') or 'NONE')
     # Preserve RE_EXPANSION recognition one cycle after a hit/realign.
     if side!='NONE' and phase=='EXPANSION' and prev_stage in ('MA_HIT','REALIGN'): phase='RE_EXPANSION'
-    if phase!=prev_stage: rt['stage']=phase;rt['last_change_ts']=now
+    if phase!=prev_stage:
+        rt['stage']=phase;rt['last_change_ts']=now
+        if side in ('LONG','SHORT'):
+            try:_save_vwap_ma_event(side,phase,feat,now)
+            except Exception as e: print('ma-cycle event save',e)
     d=feat.get(side) if side in ('LONG','SHORT') else None
     reasons=[]
     if side!='NONE':

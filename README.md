@@ -179,3 +179,9 @@ It also publishes an invalidation level near the opposite side of VWAP14 / the M
 - Server/VWAP14 sync now starts independently of chart history boot, so a chart-side error cannot block TODAY, VWAP14 state or heartbeat.
 - VWAP14 signal logic is unchanged from v6.71.
 - Cache/version bumped to v6.72.
+
+## v7.01 MA CYCLE CHART PATCH
+- Removed legacy VW WATCH / VW LEAN / VW REL markers from the chart layer.
+- MA CYCLE phase transitions are now persisted and drawn on the actual candle where they occur: RELEASE / ALIGN / EXPANSION / MA_HIT / REALIGN / RE_EXPANSION / BREAKDOWN.
+- Added always-on SMA 5 / 10 / 20 / 60 / 120 / 240 / 480 to BTC desktop and mobile charts.
+- BIAS remains persistent through ordinary pullbacks; chart markers represent PHASE changes, not independent LONG/SHORT calls.

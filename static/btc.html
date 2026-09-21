@@ -138,7 +138,7 @@ body.vwap-only .cards .card{display:block!important}
     </div>
     <div class="directionMeta" id="directionMeta">VWAP14 엔진 데이터 대기 중…</div>
   </div>
-  <div class="legend"><span><b style="color:#56e6c2">○/↗/▲ VWAP14</b> WATCH → LEAN → RELEASE</span><span><b style="color:#c7d0dd">X</b> 내 포지션 종료</span><span><b class="purple">VWAP14</b> 최근 14봉 롤링 지표</span></div>
+  <div class="legend"><span><b style="color:#56e6c2">MA CYCLE</b> RELEASE → ALIGN → EXPANSION → MA HIT → REALIGN → RE-EXP</span><span><b style="color:#c7d0dd">X</b> 내 포지션 종료</span><span><b class="purple">VWAP14</b> 최근 14봉 롤링 지표</span></div>
   <div class="warn">v7은 기존 단발 LONG/SHORT 판단 대신 큰 방향 BIAS를 유지하면서 MA 사이클을 추적합니다. 핵심 타점은 이평치기 후 REALIGN → RE_EXPANSION입니다.</div>
 </section>
 
@@ -207,7 +207,7 @@ const CCH={'1M':'candle1m','3M':'candle3m','5M':'candle5m','15M':'candle15m','1H
 const SEC={'1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400};
 const N=12000;
 
-let cache={},cur='15M',chart,candle,volume,vwapSeries,pubWS,bizWS,lastPub=0,lastBiz=0;
+let cache={},cur='15M',chart,candle,volume,vwapSeries,cycleMaSeries=[],pubWS,bizWS,lastPub=0,lastBiz=0;
 let trades=[], oiHist=[], book={imb:0,ts:0}, currentOI=null;
 let liveSignal=null;
 let renderedMarkers=[];
@@ -602,9 +602,11 @@ function signalAnchorRows(){
     }
   }
   if(signalLayers.vwapma){
+    const allowed=new Set(['RELEASE','ALIGN','EXPANSION','MA_HIT','REALIGN','RE_EXPANSION','BREAKDOWN']);
     for(const e of (vwapMaEvents||[])){
+      const st=String(e.stage||'').toUpperCase();if(!allowed.has(st))continue;
       const rawTs=Math.floor(Number(e.ts||0)/1000);if(!rawTs||rawTs<from)continue;
-      out.push({mode:'VWAPMA',stage:String(e.stage||'WATCH').toUpperCase(),side:String(e.side||'').toUpperCase()==='LONG'?'L':'S',candleTs:Math.floor(rawTs/bucketSec)*bucketSec,rawTs,score:Math.round(Number(e.score||0)),name:e.reason||'VWAP14 DIRECTION',entry:Number(e.price||0)});
+      out.push({mode:'VWAPMA',stage:st,side:String(e.side||'').toUpperCase()==='LONG'?'L':'S',candleTs:Math.floor(rawTs/bucketSec)*bucketSec,rawTs,score:Math.round(Number(e.score||0)),name:e.reason||'MA CYCLE',entry:Number(e.price||0)});
     }
   }
   if(false){
@@ -634,7 +636,7 @@ function renderSignalAnchors(){
     const badgeY=Math.max(12,Math.min(host.clientHeight-22,y+(isL?1:-1)*(30+idx*24)));
     const line=document.createElement('div');line.className='sigAnchorLine';line.style.color=col;line.style.left=x+'px';line.style.top=Math.min(y,badgeY)+'px';line.style.height=Math.max(6,Math.abs(badgeY-y))+'px';layer.appendChild(line);
     const dot=document.createElement('div');dot.className='sigAnchorDot';dot.style.color=col;dot.style.left=x+'px';dot.style.top=y+'px';layer.appendChild(dot);
-    const badge=document.createElement('div');badge.className='sigAnchorBadge';badge.style.color=col;badge.style.left=x+'px';badge.style.top=badgeY+'px';badge.textContent=a.mode==='EXEC'?`${isL?'▲':'▼'} EXEC ${a.side}`:a.mode==='EVENT'?`◎ EVT ${a.side} ${a.score}`:a.mode==='VWAPMA'?`${a.stage==='RELEASE'?(isL?'▲':'▼'):a.stage==='LEAN'?(isL?'↗':'↘'):'○'} VW ${a.stage==='RELEASE'?'REL':a.stage} ${a.side}`:a.mode==='EARLY'?`◌ EARLY ${a.side} ${a.score}`:`${isL?'▲':'▼'} ${a.setup} ${a.side} ${a.score}`;
+    const badge=document.createElement('div');badge.className='sigAnchorBadge';badge.style.color=col;badge.style.left=x+'px';badge.style.top=badgeY+'px';badge.textContent=a.mode==='EXEC'?`${isL?'▲':'▼'} EXEC ${a.side}`:a.mode==='EVENT'?`◎ EVT ${a.side} ${a.score}`:a.mode==='VWAPMA'?`${a.stage==='RE_EXPANSION'?'🚀':a.stage==='MA_HIT'?'◆':a.stage==='BREAKDOWN'?'✕':(isL?'▲':'▼')} ${a.stage.replace('RE_EXPANSION','RE-EXP').replace('EXPANSION','EXPAND').replace('REALIGN','REALIGN').replace('RELEASE','RELEASE')} ${a.side}`:a.mode==='EARLY'?`◌ EARLY ${a.side} ${a.score}`:`${isL?'▲':'▼'} ${a.setup} ${a.side} ${a.score}`;
     const tm=new Date(a.rawTs*1000).toLocaleString('ko-KR',{hour12:false});badge.title=`${a.name} · ${tm} · score ${a.score}${a.entry?` · $${fmt(a.entry)}`:''}`;layer.appendChild(badge);
   }
 }
@@ -659,9 +661,11 @@ function renderMarkers(){
   }}
   if(signalLayers.vwapma){for(const e of (vwapMaEvents||[])){
     const ts=Math.floor(Number(e.ts||0)/1000);if(!ts||ts<from)continue;
-    const isL=String(e.side||'').toUpperCase()==='LONG', candleTs=Math.floor(ts/bucketSec)*bucketSec, st=String(e.stage||'WATCH').toUpperCase();
-    const col=st==='RELEASE'?(isL?'#56e6c2':'#ff7b7b'):st==='LEAN'?(isL?'#79d9c0':'#e9a0a0'):'#90a6a0';
-    marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:col,shape:st==='WATCH'?'circle':(isL?'arrowUp':'arrowDown'),text:''});
+    const isL=String(e.side||'').toUpperCase()==='LONG', candleTs=Math.floor(ts/bucketSec)*bucketSec, st=String(e.stage||'').toUpperCase();
+    if(!['RELEASE','ALIGN','EXPANSION','MA_HIT','REALIGN','RE_EXPANSION','BREAKDOWN'].includes(st))continue;
+    const col=st==='BREAKDOWN'?'#ffffff':st==='MA_HIT'?'#f1c75b':(isL?'#56e6c2':'#ff7b7b');
+    const shape=st==='MA_HIT'||st==='REALIGN'?'circle':st==='BREAKDOWN'?'diamond':(isL?'arrowUp':'arrowDown');
+    marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:col,shape,text:''});
   }}
   if(false){
     const seen=new Set();
@@ -1030,6 +1034,7 @@ function renderChart(full=true){
   candle.setData(a);
   volume.setData(a.map(x=>({time:x.time,value:x.volume,color:x.close>=x.open?'rgba(47,213,139,.30)':'rgba(255,92,112,.30)'})));
   vwapSeries.setData(calcVWAP(a,cur));
+  for(const z of cycleMaSeries)z.series.setData(calcMA(a,z.n,'SMA'));
   $('price').textContent='$'+fmt(a.at(-1).close);renderMarkers();renderContext();
   try{drawInd()}catch(e){};if(full){let i=Math.max(0,a.length-420);chart.timeScale().setVisibleRange({from:a[i].time,to:a.at(-1).time})}
 }
@@ -1061,6 +1066,8 @@ function initChart(){
   candle=chart.addCandlestickSeries({upColor:'#2fd58b',downColor:'#ff5c70',borderVisible:false,wickUpColor:'#2fd58b',wickDownColor:'#ff5c70'});
   volume=chart.addHistogramSeries({priceFormat:{type:'volume'},priceScaleId:'vol'});
   vwapSeries=chart.addLineSeries({color:'#b37cff',lineWidth:2,priceLineVisible:false,lastValueVisible:true,title:'VWAP14'});
+  const cycleMaDefs=[{n:5,c:'#f6c344'},{n:10,c:'#4cc9f0'},{n:20,c:'#f72585'},{n:60,c:'#80ed99'},{n:120,c:'#ff9f1c'},{n:240,c:'#c77dff'},{n:480,c:'#e0e1dd'}];
+  cycleMaSeries=cycleMaDefs.map(m=>({n:m.n,series:chart.addLineSeries({color:m.c,lineWidth:m.n<=20?2:1,priceLineVisible:false,lastValueVisible:false,title:'MA'+m.n})}));
   chart.priceScale('vol').applyOptions({scaleMargins:{top:.82,bottom:0}});
   new ResizeObserver(()=>{chart.applyOptions({width:$('chart').clientWidth});requestAnimationFrame(renderSignalAnchors)}).observe($('chart'));
   chart.subscribeCrosshairMove(p=>{if(p&&p.time)showHoverPct(p.time)});
