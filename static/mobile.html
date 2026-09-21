@@ -191,7 +191,7 @@ body.vwap-only .cards .card{display:block!important}
     <div class="row"><span>TOP 위험도</span><b id="tbTop">—</b></div>
     <div class="row"><span>BOTTOM 위험도</span><b id="tbBottom">—</b></div>
     <div class="row"><span>현재 해석</span><b id="tbWhy">데이터 계산 중</b></div>
-    <div class="warn" style="display:block">TOP/BOTTOM은 반대 포지션 진입 신호가 아닙니다. 이격 과대 → 발산 둔화 → 단기 이평 꺾임을 추적합니다. TOP WATCH → TOP WARNING → EXIT L / BOTTOM WATCH → BOTTOM WARNING → EXIT S.</div>
+    <div class="warn" style="display:block">TOP/BOTTOM은 반대 포지션 진입 신호가 아닙니다. 이격 과대 → 발산 둔화 → 단기 이평 꺾임을 추적합니다. WATCH는 패널 감시용 · 차트에는 TOP/BOTTOM WARN과 EXIT만 1회 표시.</div>
   </div>
 
   <div class="box">
@@ -622,7 +622,7 @@ function calcTopBottomEvents(a){
     if(i>=14){const q=a[i-14],qt=(Number(q.high)+Number(q.low)+Number(q.close))/3,qv=Math.max(0,Number(q.volume||0));pv-=qt*qv;vv-=qv}
     if(i>=13)vw[i]=vv>0?pv/vv:null;
   }
-  const out=[];let lastStage='NONE',lastEmit=-99;
+  const out=[];let lastStage='NONE';let topWarned=false,topExited=false,botWarned=false,botExited=false;
   for(let i=125;i<N;i++){
     const A=Math.max(Number(atrs[i]||0),1), p=Number(a[i].close), v=Number(vw[i]||p);
     if(lens.some(n=>ma[n][i]==null||ma[n][i-3]==null))continue;
@@ -648,9 +648,19 @@ function calcTopBottomEvents(a){
     if(top>=82 && topTurn){stage='EXIT_L';side='TOP'} else if(bot>=82 && botTurn){stage='EXIT_S';side='BOTTOM'}
     else if(top>=70){stage='TOP_WARNING';side='TOP'} else if(bot>=70){stage='BOTTOM_WARNING';side='BOTTOM'}
     else if(top>=55){stage='TOP_WATCH';side='TOP'} else if(bot>=55){stage='BOTTOM_WATCH';side='BOTTOM'}
-    if(stage!=='NONE' && (stage!==lastStage || i-lastEmit>=5)){
-      out.push({time:Number(a[i].time),stage,side,score:side==='TOP'?top:bot,price:p,vdist,spread,dSpread,slope:ss});lastStage=stage;lastEmit=i;
-    } else if(stage==='NONE') lastStage='NONE';
+    // v7.05: one-shot TOP/BOTTOM cycle. WATCH remains panel/research only; chart renders WARN/EXIT only.
+    // Re-arm only after the relevant score cools below 50, so a single overheat cycle cannot spam labels.
+    if(top<50){topWarned=false;topExited=false;}
+    if(bot<50){botWarned=false;botExited=false;}
+    let emit=false;
+    if(stage==='TOP_WATCH'){emit=stage!==lastStage;}
+    else if(stage==='BOTTOM_WATCH'){emit=stage!==lastStage;}
+    else if(stage==='TOP_WARNING'){if(!topWarned){emit=true;topWarned=true;}}
+    else if(stage==='BOTTOM_WARNING'){if(!botWarned){emit=true;botWarned=true;}}
+    else if(stage==='EXIT_L'){if(!topExited){emit=true;topExited=true;topWarned=true;}}
+    else if(stage==='EXIT_S'){if(!botExited){emit=true;botExited=true;botWarned=true;}}
+    if(emit)out.push({time:Number(a[i].time),stage,side,score:side==='TOP'?top:bot,price:p,vdist,spread,dSpread,slope:ss});
+    lastStage=stage;
   }
   return out;
 }
@@ -700,6 +710,7 @@ function signalAnchorRows(){
   }
   if(signalLayers.topbottom){
     for(const e of calcTopBottomEvents(cache[cur]||[])){
+      if(e.stage==='TOP_WATCH'||e.stage==='BOTTOM_WATCH')continue;
       const isTop=e.side==='TOP';
       out.push({mode:'TOPBOTTOM',stage:e.stage,side:isTop?'S':'L',candleTs:e.time,rawTs:e.time,score:e.score,name:`${e.stage} · VWAP ${e.vdist.toFixed(2)}ATR · MA ${e.spread.toFixed(2)}ATR`,entry:e.price});
     }
@@ -774,6 +785,7 @@ function renderMarkers(){
     }
   }
   if(signalLayers.topbottom){for(const e of calcTopBottomEvents(cache[cur]||[])){
+    if(e.stage==='TOP_WATCH'||e.stage==='BOTTOM_WATCH')continue;
     const isTop=e.side==='TOP', exit=e.stage==='EXIT_L'||e.stage==='EXIT_S';
     marks.push({time:e.time,position:isTop?'aboveBar':'belowBar',color:isTop?'#ffb020':'#5ee6a8',shape:exit?'diamond':'circle',text:''});
   }}
