@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.72 VWAP14 ONLY KST")
+app=FastAPI(title="BTC MA Cycle Radar v7.0 KST")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 @app.middleware("http")
@@ -32,7 +32,7 @@ trades=deque(maxlen=64)
 # v6.63: persistent 1-minute aggressor-flow buckets. These power 1M/3M/5M/15M pressure.
 flow_minutes=deque(maxlen=16)
 oi_hist=deque(maxlen=16)
-candles={"1M":deque(maxlen=80),"3M":deque(maxlen=80),"5M":deque(maxlen=80),"15M":deque(maxlen=160),"1H":deque(maxlen=80),"4H":deque(maxlen=80),"1D":deque(maxlen=40)}
+candles={"1M":deque(maxlen=80),"3M":deque(maxlen=80),"5M":deque(maxlen=80),"15M":deque(maxlen=720),"1H":deque(maxlen=80),"4H":deque(maxlen=80),"1D":deque(maxlen=40)}
 book_imb=0.0
 current_oi=None
 last_price=None
@@ -104,7 +104,7 @@ retest_consumed_break={"LONG":0,"SHORT":0}
 retest_consumed_loaded=False
 scalp_prev_d10=0.0
 status={"public":"starting","business":"starting","started":int(time.time()*1000)}
-SIGNAL_MODE="VWAP14_ONLY"
+SIGNAL_MODE="MA_CYCLE_V7"
 LEGACY_ENGINES_ENABLED=False
 # v6.27: throttle CPU/SQLite-heavy research work so high-rate trade WS cannot starve HTTP.
 last_heavy_ms={"excursion":0,"manager":0,"evaluate":0,"outcomes":0}
@@ -887,74 +887,57 @@ def _ma_slope(tf,n,back=1):
     return (now-old)/max(atr_tf(tf,24),1.0)
 
 def _vwap_ma_features():
-    """15M user-style structure: rolling VWAP14 + MA5/8/10/20 knot.
+    """15M MA-cycle radar matching the user's discretionary process.
 
-    Returns symmetric LONG/SHORT evidence. It is deliberately a context/lead detector,
-    not a probability model.
+    Direction (BIAS) and timing (PHASE) are intentionally separated.
+    The engine reads MA alignment/slope/spread + VWAP14 and classifies the
+    repeating cycle: COMPRESSION -> RELEASE -> ALIGN -> EXPANSION -> MA_HIT
+    -> REALIGN -> RE_EXPANSION.  A counter-trend wiggle is never a new bias
+    unless the medium structure actually breaks.
     """
     a=list(candles.get('15M',[]))
-    if len(a)<28 or not last_price:return None
+    if len(a)<125 or not last_price:return None
     p=float(last_price); A=max(atr_tf('15M',24),1.0)
-    vw=rolling_vwap_tf('15M',14,0); bundle=_ma_bundle('15M',0); prev_bundle=_ma_bundle('15M',2)
-    if vw is None or not bundle:return None
-    vdist=(p-vw)/A; knot=float(bundle['width_atr'])
-    compressing=bool(prev_bundle and knot<=float(prev_bundle['width_atr'])*.92) or knot<=.18
-    short_slope=sum(_ma_slope('15M',n,1) for n in (5,8,10))/3.0
-    short_prev=sum((_sma_at('15M',n,2) or 0)-(_sma_at('15M',n,3) or 0) for n in (5,8,10))/(3.0*A)
-    slope_accel=short_slope-short_prev
-    slope20=_ma_slope('15M',20,1)
-
-    # Reconstruct rolling VWAP for recent bars so a brief poke/reclaim is distinguishable from a clean hold.
-    recent=[]
-    for off in (0,1,2):
-        idx=len(a)-1-off
-        vwi=rolling_vwap_tf('15M',14,off)
-        if idx<0 or vwi is None:continue
-        b=a[idx]; recent.append({"bar":b,"vwap":vwi,"off":off})
-    above=sum(1 for z in recent if float(z['bar']['close'])>=float(z['vwap'])-.025*A)
-    below=sum(1 for z in recent if float(z['bar']['close'])<=float(z['vwap'])+.025*A)
-    failed_down=any(float(z['bar']['low'])<float(z['vwap'])-.015*A and float(z['bar']['close'])>=float(z['vwap']) and (float(z['vwap'])-float(z['bar']['low']))<=.35*A for z in recent)
-    failed_up=any(float(z['bar']['high'])>float(z['vwap'])+.015*A and float(z['bar']['close'])<=float(z['vwap']) and (float(z['bar']['high'])-float(z['vwap']))<=.35*A for z in recent)
-
-    # Failed extension: a fresh push beyond the previous micro-range is small rather than expanding.
-    prev_lows=[float(x['low']) for x in a[-6:-3]]; new_lows=[float(x['low']) for x in a[-3:]]
-    prev_highs=[float(x['high']) for x in a[-6:-3]]; new_highs=[float(x['high']) for x in a[-3:]]
-    down_ext=(min(new_lows)-min(prev_lows))/A if prev_lows and new_lows else 0.0
-    up_ext=(max(new_highs)-max(prev_highs))/A if prev_highs and new_highs else 0.0
-    down_stall=down_ext>=-.12
-    up_stall=up_ext<=.12
-
-    knot_ok=knot<=.36
-    near_vwap=abs(vdist)<=.46
-    long_watch=knot_ok and near_vwap and p>=vw-.16*A
-    short_watch=knot_ok and near_vwap and p<=vw+.16*A
-    long_inflex=(short_slope>=-.035 and slope_accel>=.012) or (short_slope>0)
-    short_inflex=(short_slope<=.035 and slope_accel<=-.012) or (short_slope<0)
-    long_hold=(above>=2 and p>=vw-.035*A)
-    short_hold=(below>=2 and p<=vw+.035*A)
-    long_lean=long_watch and long_hold and (failed_down or down_stall) and long_inflex and p>=bundle['center']-.08*A
-    short_lean=short_watch and short_hold and (failed_up or up_stall) and short_inflex and p<=bundle['center']+.08*A
-    long_release=long_lean and p>=max(vw,bundle['high'])+.045*A and short_slope>.004
-    short_release=short_lean and p<=min(vw,bundle['low'])-.045*A and short_slope<-.004
-
-    knot_component=max(0.0,min(30.0,(.38-knot)/.30*30.0))
-    def score(side):
-        isL=side=='LONG'; watch=long_watch if isL else short_watch; hold=long_hold if isL else short_hold
-        fail=(failed_down or down_stall) if isL else (failed_up or up_stall)
-        inf=long_inflex if isL else short_inflex; rel=long_release if isL else short_release
-        s=knot_component+(20 if near_vwap else 0)+(18 if hold else 0)+(16 if fail else 0)+(12 if inf else 0)+(14 if rel else 0)
-        if not watch:s=min(s,44)
-        return max(0.0,min(100.0,s))
-    invalid_long=min(vw,bundle['low'],float(bundle['ma'][20]))-.08*A
-    invalid_short=max(vw,bundle['high'],float(bundle['ma'][20]))+.08*A
-    return {
-      'price':p,'atr':A,'vwap14':vw,'distance_atr':vdist,'bundle':bundle,'compressing':compressing,
-      'short_slope':short_slope,'slope_accel':slope_accel,'slope20':slope20,
-      'failed_down':failed_down,'failed_up':failed_up,'down_stall':down_stall,'up_stall':up_stall,
-      'above_count':above,'below_count':below,
-      'LONG':{'watch':long_watch,'lean':long_lean,'release':long_release,'score':score('LONG'),'invalidation':invalid_long},
-      'SHORT':{'watch':short_watch,'lean':short_lean,'release':short_release,'score':score('SHORT'),'invalidation':invalid_short}
-    }
+    lens=(5,10,20,60,120)
+    ma={n:_sma_at('15M',n,0) for n in lens}
+    prev={n:_sma_at('15M',n,3) for n in lens}
+    if any(v is None for v in ma.values()) or any(v is None for v in prev.values()):return None
+    vw=rolling_vwap_tf('15M',14,0)
+    if vw is None:return None
+    slopes={n:(ma[n]-prev[n])/(3*A) for n in lens}
+    short=(5,10,20); medium=(20,60,120)
+    short_vals=[ma[n] for n in short]; med_vals=[ma[n] for n in medium]
+    short_spread=(max(short_vals)-min(short_vals))/A
+    med_spread=(max(med_vals)-min(med_vals))/A
+    prev_short=[prev[n] for n in short]
+    prev_spread=(max(prev_short)-min(prev_short))/A
+    spread_delta=short_spread-prev_spread
+    long_align=ma[5]>ma[10]>ma[20]>ma[60]>ma[120]
+    short_align=ma[5]<ma[10]<ma[20]<ma[60]<ma[120]
+    long_core=ma[20]>ma[60]>ma[120] and slopes[20]>-.015 and slopes[60]>-.012
+    short_core=ma[20]<ma[60]<ma[120] and slopes[20]<.015 and slopes[60]<.012
+    long_slope=sum(slopes[n] for n in short)/3
+    short_slope=-long_slope
+    vdist=(p-vw)/A
+    compression=short_spread<=.20 or (short_spread<=.32 and spread_delta<-.025)
+    expanding=spread_delta>.018 and abs(long_slope)>.008
+    # 'MA hit': price returns into the fast/medium ribbon while the core trend survives.
+    ribbon_lo=min(ma[5],ma[10],ma[20],ma[60]); ribbon_hi=max(ma[5],ma[10],ma[20],ma[60])
+    long_hit=long_core and p<=ribbon_hi+.10*A and p>=ma[60]-.28*A
+    short_hit=short_core and p>=ribbon_lo-.10*A and p<=ma[60]+.28*A
+    long_realign=long_core and ma[5]>ma[10]>ma[20] and slopes[5]>0 and slopes[10]>0 and p>=vw-.12*A
+    short_realign=short_core and ma[5]<ma[10]<ma[20] and slopes[5]<0 and slopes[10]<0 and p<=vw+.12*A
+    long_break=(p<ma[60]-.35*A and ma[20]<ma[60] and slopes[20]<-.025) or (ma[20]<ma[60]<ma[120] and p<vw-.25*A)
+    short_break=(p>ma[60]+.35*A and ma[20]>ma[60] and slopes[20]>.025) or (ma[20]>ma[60]>ma[120] and p>vw+.25*A)
+    long_strength=(30 if long_core else 0)+(22 if long_align else 0)+(16 if long_slope>.01 else 0)+(12 if vdist>-.10 else 0)+(12 if spread_delta>.01 else 0)+(8 if slopes[120]>=-.005 else 0)
+    short_strength=(30 if short_core else 0)+(22 if short_align else 0)+(16 if short_slope>.01 else 0)+(12 if vdist<.10 else 0)+(12 if spread_delta>.01 else 0)+(8 if slopes[120]<=.005 else 0)
+    return {'price':p,'atr':A,'vwap14':vw,'distance_atr':vdist,'ma':ma,'slopes_all':slopes,
+            'short_spread':short_spread,'med_spread':med_spread,'spread_delta':spread_delta,
+            'compression':compression,'expanding':expanding,'long_align':long_align,'short_align':short_align,
+            'long_core':long_core,'short_core':short_core,'long_hit':long_hit,'short_hit':short_hit,
+            'long_realign':long_realign,'short_realign':short_realign,'long_break':long_break,'short_break':short_break,
+            'LONG':{'score':min(100,long_strength),'invalidation':ma[60]-.35*A},
+            'SHORT':{'score':min(100,short_strength),'invalidation':ma[60]+.35*A}}
 
 def _save_vwap_ma_event(side,stage,feat,now):
     bucket=int(now//900000); d=feat[side]
@@ -974,73 +957,64 @@ def _save_vwap_ma_event(side,stage,feat,now):
     c.commit(); c.close(); return inserted,reasons
 
 def evaluate_vwap_ma():
-    """Independent VWAP14/MA direction radar: WATCH -> LEAN -> RELEASE.
-
-    It never feeds/vetoes EXEC, EARLY or EVENT. The goal is to surface the user's
-    chart-reading pattern early enough to inspect manually.
-    """
+    """Persistent MA-cycle state machine. Bias changes only on structural failure."""
     global vwap_ma_state,vwap_ma_runtime
     feat=_vwap_ma_features(); now=int(time.time()*1000)
     if not feat:
-        vwap_ma_state={**vwap_ma_state,'updated_ts':now,'state':'WARMUP','side':'NONE','stage':'NONE','reasons':['15M VWAP14/MA WARMUP']}
+        vwap_ma_state={**vwap_ma_state,'updated_ts':now,'state':'WARMUP','side':'NONE','stage':'WARMUP','reasons':['15M MA120 WARMUP']}
         return vwap_ma_state
-    candidates=[]
-    for side in ('LONG','SHORT'):
-        d=feat[side]
-        stage='RELEASE' if d['release'] else 'LEAN' if d['lean'] else 'WATCH' if d['watch'] else 'NONE'
-        rank={'NONE':0,'WATCH':1,'LEAN':2,'RELEASE':3}[stage]
-        candidates.append((rank,float(d['score']),side,stage))
-    candidates.sort(reverse=True); rank,score,side,stage=candidates[0]
-    # If both sides are only WATCH with near-identical evidence, avoid pretending direction exists.
-    other=candidates[1]
-    if rank<=1 and abs(score-other[1])<5:
-        side='NONE';stage='WATCH' if rank==1 else 'NONE'
     rt=vwap_ma_runtime
-    if side=='NONE':
-        rt.update({'side':'NONE','stage':stage,'started_ts':0,'last_change_ts':now})
+    old=str(rt.get('side') or 'NONE')
+    # Hysteresis: preserve trend through ordinary pullbacks/MA hits.
+    if old=='LONG' and not feat['long_break']:
+        side='LONG'
+    elif old=='SHORT' and not feat['short_break']:
+        side='SHORT'
+    elif feat['LONG']['score']>=58 and feat['LONG']['score']>=feat['SHORT']['score']+12:
+        side='LONG'
+    elif feat['SHORT']['score']>=58 and feat['SHORT']['score']>=feat['LONG']['score']+12:
+        side='SHORT'
     else:
-        desired=stage
-        if rt.get('side')!=side:
-            rt.update({'side':side,'stage':'NONE','started_ts':now,'last_change_ts':now})
-        current=str(rt.get('stage') or 'NONE'); age=now-int(rt.get('last_change_ts') or now)
-        # Force a visible lifecycle. A condition that is already strong on first detection still
-        # starts at WATCH; it must persist before LEAN, and LEAN must persist before RELEASE.
-        if current=='NONE':
-            stage='WATCH' if desired in ('WATCH','LEAN','RELEASE') else 'NONE'
-        elif current=='WATCH':
-            if desired=='NONE': stage='NONE'
-            elif desired in ('LEAN','RELEASE') and age>=8000: stage='LEAN'
-            else: stage='WATCH'
-        elif current=='LEAN':
-            if desired=='NONE': stage='NONE'
-            elif desired=='WATCH': stage='WATCH'
-            elif desired=='RELEASE' and age>=8000: stage='RELEASE'
-            else: stage='LEAN'
-        else:  # RELEASE
-            stage='RELEASE' if desired=='RELEASE' else ('LEAN' if desired=='LEAN' else 'WATCH' if desired=='WATCH' else 'NONE')
-        if stage!=rt.get('stage'):
-            inserted,reasons=_save_vwap_ma_event(side,stage,feat,now) if stage in ('WATCH','LEAN','RELEASE') else (False,[])
-            rt['stage']=stage;rt['last_change_ts']=now
-            if stage=='RELEASE' and inserted: rt['last_release'][side]=now
-        else:
-            reasons=[]
+        side='NONE'
+    if side!=old:
+        rt['side']=side;rt['started_ts']=now;rt['last_change_ts']=now
+    isL=side=='LONG'
+    if side=='NONE':
+        phase='COMPRESSION' if feat['compression'] else 'SCANNING'
+    else:
+        align=feat['long_align'] if isL else feat['short_align']
+        hit=feat['long_hit'] if isL else feat['short_hit']
+        realign=feat['long_realign'] if isL else feat['short_realign']
+        brk=feat['long_break'] if isL else feat['short_break']
+        if brk: phase='BREAKDOWN'
+        elif hit and not realign: phase='MA_HIT'
+        elif hit and realign: phase='REALIGN'
+        elif align and feat['expanding']: phase='RE_EXPANSION' if str(rt.get('stage')) in ('MA_HIT','REALIGN') else 'EXPANSION'
+        elif align: phase='ALIGN'
+        elif feat['compression']: phase='COMPRESSION'
+        else: phase='RELEASE'
+    prev_stage=str(rt.get('stage') or 'NONE')
+    # Preserve RE_EXPANSION recognition one cycle after a hit/realign.
+    if side!='NONE' and phase=='EXPANSION' and prev_stage in ('MA_HIT','REALIGN'): phase='RE_EXPANSION'
+    if phase!=prev_stage: rt['stage']=phase;rt['last_change_ts']=now
     d=feat.get(side) if side in ('LONG','SHORT') else None
     reasons=[]
-    if side in ('LONG','SHORT'):
-        if feat['bundle']['width_atr']<=.36: reasons.append('MA KNOT')
-        reasons.append('VWAP14 '+('HOLD' if side=='LONG' else 'REJECT'))
-        if (side=='LONG' and feat['failed_down']) or (side=='SHORT' and feat['failed_up']):reasons.append('FAILED BREAK')
-        if (side=='LONG' and feat['down_stall']) or (side=='SHORT' and feat['up_stall']):reasons.append('PRICE STALL')
-        if stage in ('LEAN','RELEASE'):reasons.append('SLOPE INFLECTION')
-        if stage=='RELEASE':reasons.append('KNOT RELEASE')
-    state=stage if stage!='NONE' else 'SCANNING'
-    vwap_ma_state={
-      'updated_ts':now,'state':state,'side':side,'stage':stage,'score':round(float(d['score']) if d else 0,1),
+    if side!='NONE':
+        reasons.append('CORE '+('정배열' if isL else '역배열'))
+        reasons.append('VWAP '+('상단' if feat['distance_atr']>=0 else '하단'))
+        if feat['compression']: reasons.append('이평 수렴')
+        if feat['expanding']: reasons.append('이격 발산')
+        if (feat['long_hit'] if isL else feat['short_hit']): reasons.append('이평치기')
+        if (feat['long_realign'] if isL else feat['short_realign']): reasons.append('재정렬')
+    else: reasons.append('방향 확정 전')
+    score=float(d['score']) if d else max(float(feat['LONG']['score']),float(feat['SHORT']['score']))
+    vwap_ma_state={'updated_ts':now,'state':phase,'side':side,'stage':phase,'score':round(score,1),
       'vwap14':round(float(feat['vwap14']),2),'price':round(float(feat['price']),2),'distance_atr':round(float(feat['distance_atr']),3),
-      'knot_atr':round(float(feat['bundle']['width_atr']),3),'invalidation':round(float(d['invalidation']),2) if d else None,
-      'slopes':{'short':round(float(feat['short_slope']),4),'accel':round(float(feat['slope_accel']),4),'ma20':round(float(feat['slope20']),4)},
-      'reasons':reasons,'active_since':int(rt.get('started_ts') or 0),
-      'note':'WATCH=VWAP14+MA knot proximity, LEAN=hold/reject+failed move+slope turn, RELEASE=knot escape. Research only.'}
+      'knot_atr':round(float(feat['short_spread']),3),'spread_delta':round(float(feat['spread_delta']),4),
+      'invalidation':round(float(d['invalidation']),2) if d else None,
+      'slopes':{'short':round(sum(feat['slopes_all'][n] for n in (5,10,20))/3,4),'accel':round(float(feat['spread_delta']),4),'ma20':round(float(feat['slopes_all'][20]),4)},
+      'ma':{str(k):round(float(v),2) for k,v in feat['ma'].items()},'reasons':reasons,'active_since':int(rt.get('started_ts') or 0),
+      'note':'BIAS is persistent. PHASE tracks compression/release/alignment/expansion/MA-hit/realign/re-expansion/breakdown.'}
     return vwap_ma_state
 
 def update_vwap_ma_research():
@@ -2455,12 +2429,16 @@ async def seed():
             try:
                 # v6.69 ONLY-LAB: seed only the data required by VWAP14 Direction + daily move.
                 raw=[]; after=None
-                for _ in range(1):
-                    params={"instId":INST,"bar":bar,"limit":160 if label=="15M" else 40}
-                    r=(await h.get("https://www.okx.com/api/v5/market/candles",params=params)).json()
+                pages=3 if label=="15M" else 1
+                for page in range(pages):
+                    params={"instId":INST,"bar":bar,"limit":300 if label=="15M" else 40}
+                    if after is not None: params["after"]=str(after)
+                    endpoint="https://www.okx.com/api/v5/market/history-candles" if page>0 else "https://www.okx.com/api/v5/market/candles"
+                    r=(await h.get(endpoint,params=params)).json()
                     batch=r.get("data",[])
                     if not batch: break
                     raw.extend(batch)
+                    after=min(int(x[0]) for x in batch)
                 uniq={int(x[0]):x for x in raw}
                 arr=[]
                 for _,x in sorted(uniq.items()):
@@ -2535,7 +2513,7 @@ async def startup():
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.72 VWAP14 ONLY KST","ok":True,"status":status,"signal_mode":SIGNAL_MODE,"legacy_engines_enabled":False}
+    return {"service":"BTC MA Cycle Radar v7.0 KST","ok":True,"status":status,"signal_mode":SIGNAL_MODE,"legacy_engines_enabled":False}
 
 def market_bias_snapshot():
     vals={tf:trend_bias_tf(tf) for tf in ("5M","15M","1H","4H")}
