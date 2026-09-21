@@ -1,4 +1,38 @@
-# BTC OKX RADAR v6.67 — EXEC + PRECURSOR LAB
+# BTC OKX RADAR v6.69 — VWAP14 ONLY LAB
+
+## 목적
+이번 버전은 새로 만든 **VWAP14 + MA KNOT 방향 엔진만 단독 검증**하기 위한 경량 기준판입니다.
+기존 신호 데이터는 DB에 보존하지만 신규 생성은 중단합니다.
+
+### 활성 엔진
+- VWAP14 DIRECTION: `WATCH → LEAN → RELEASE`
+- 기준: 15M Rolling VWAP14 + MA5/8/10/20 knot + failed move + slope inflection
+- 내 수동 포지션 B/S/X 기록은 유지
+
+### 전원 OFF
+- EXEC Decision
+- PULLBACK / REVERSAL / RETEST
+- EARLY / PRECURSOR
+- EVENT ENTRY
+- 1H / 4H 독립 신호
+- SCALP / 구 15M / standalone VWAP
+- MTF order-flow pressure 수집 및 snapshot writer
+
+### 경량화
+- 서버 public WS: trades/books/OI 대신 ticker만 구독
+- 서버 business WS: 15M + 1D만 구독
+- seed: 15M + 1D만 로드
+- VWAP14 엔진 평가 1초 간격, outcome 연구 2초 간격
+- PC/모바일은 EXEC/EARLY/EVENT/BASE 신호 API를 더 이상 fetch하지 않음
+- 브라우저의 별도 trades/books/OI public WS도 시작하지 않음
+- 차트에는 VWAP14 WATCH/LEAN/RELEASE + 내 B/S/X만 표시
+
+### 보존
+기존 DB 테이블/과거 신호는 삭제하지 않습니다. 나중에 비교가 필요하면 다시 꺼낼 수 있습니다.
+
+---
+
+# BTC OKX RADAR v6.68 — VWAP14 DIRECTION LAB
 
 This version freezes the current EXEC Decision Layer for validation and removes unrelated live signal generation from the runtime/UI. It adds one independent leading-anomaly research engine (PRECURSOR) without changing or vetoing EXEC.
 
@@ -97,3 +131,37 @@ The actual OKX/Railway long-running soak test still has to occur in the deployed
 - OFF 버튼은 opacity를 낮춰 ON/OFF 구분을 명확히 함.
 - iframe/service-worker cache key를 v668로 갱신.
 - 서버/EXEC/EARLY/EVENT 신호 로직은 v6.67과 동일.
+
+## v6.68 — VWAP14 DIRECTION LAB
+
+This build keeps the existing EXEC / EARLY / EVENT engines frozen for side-by-side comparison and adds one independent research engine based on the user's real 15-minute chart process.
+
+### Chart VWAP
+- Main chart VWAP is now **rolling Length 14** instead of UTC session-anchored.
+- Calculation: last 14 candles, HLC3 = (H+L+C)/3, weighted by candle base volume.
+- The visible line is labeled **VWAP14**.
+- The frozen legacy EXEC engine still keeps its prior internal anchored VWAP so the EXEC benchmark is not silently changed in the same experiment.
+
+### VWAP14 DIRECTION engine (15M)
+The engine watches MA5 / MA8 / MA10 / MA20 as a bundle and records a lifecycle rather than one late confirmation:
+1. **WATCH** — price is near VWAP14 and the MA bundle is compressed (MA KNOT).
+2. **LEAN** — VWAP14 is being held/rejected, the attempted move is failing/stalling, and short-MA slope starts to inflect.
+3. **RELEASE** — price leaves the MA knot on the VWAP-supported side. This is the actual entry-candidate research event.
+
+It also publishes an invalidation level near the opposite side of VWAP14 / the MA bundle. WATCH and LEAN are alerts to inspect the chart, not entry commands.
+
+### Research / UI
+- New independent chart toggle: `VWAP14 방향`.
+- Chart badges: `VW WATCH`, `VW LEAN`, `VW REL`.
+- New side panel: VWAP14 value, MA knot width in ATR, invalidation, reasons.
+- RELEASE events receive 5m / 15m / 30m / 60m, MFE and MAE outcome research.
+- New export: `/api/research/export.csv?kind=vwapma`.
+- Cache version bumped to 668 on PC/mobile.
+
+## v6.70 — VWAP14 ONLY UI CLEANUP
+- Removed obsolete/stopped signal panels from PC/mobile UI.
+- Top dashboard now shows BTC price, VWAP14, stage, direction, VWAP distance, MA knot width and invalidation.
+- Added VWAP14 DIRECTION FLOW panel below the chart with WATCH → LEAN → RELEASE active-stage highlighting.
+- Right panel now contains only VWAP14 direction details, signal guide, research summary, manual position and live VWAP14 stream.
+- Default chart timeframe is 15M to match the active engine.
+- Server signal logic remains v6.69 VWAP14-only; this patch changes UI/observability only.

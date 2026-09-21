@@ -15,7 +15,7 @@ DB=os.getenv("DB_PATH","/data/trapflow.db")
 if not os.path.isdir(os.path.dirname(DB)):
     DB="trapflow.db"
 
-app=FastAPI(title="BTC Trap Flow Collector v6.67 EXEC + PRECURSOR + EVENT LAB KST")
+app=FastAPI(title="BTC Trap Flow Collector v6.69 VWAP14 ONLY LAB KST")
 app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
 
 @app.middleware("http")
@@ -28,11 +28,11 @@ async def no_stale_terminal_html(request: Request, call_next):
         response.headers["Expires"] = "0"
     return response
 
-trades=deque(maxlen=12000)
+trades=deque(maxlen=64)
 # v6.63: persistent 1-minute aggressor-flow buckets. These power 1M/3M/5M/15M pressure.
-flow_minutes=deque(maxlen=240)
-oi_hist=deque(maxlen=2000)
-candles={"1M":deque(maxlen=900),"3M":deque(maxlen=900),"5M":deque(maxlen=900),"15M":deque(maxlen=900),"1H":deque(maxlen=900),"4H":deque(maxlen=900),"1D":deque(maxlen=900)}
+flow_minutes=deque(maxlen=16)
+oi_hist=deque(maxlen=16)
+candles={"1M":deque(maxlen=80),"3M":deque(maxlen=80),"5M":deque(maxlen=80),"15M":deque(maxlen=160),"1H":deque(maxlen=80),"4H":deque(maxlen=80),"1D":deque(maxlen=40)}
 book_imb=0.0
 current_oi=None
 last_price=None
@@ -85,6 +85,17 @@ event_entry_runtime={
     "LONG":None,"SHORT":None,"last_emit":{"LONG":0,"SHORT":0},
     "last_stage":{"LONG":None,"SHORT":None}
 }
+# v6.69: VWAP14 + MA KNOT is the ONLY live signal engine. All legacy signal engines are runtime-disabled.
+vwap_ma_state={
+    "updated_ts":0,"state":"SCANNING","side":"NONE","stage":"NONE","score":0.0,
+    "vwap14":None,"price":None,"distance_atr":None,"knot_atr":None,"invalidation":None,
+    "slopes":{},"reasons":[],"active_since":0,
+    "note":"OKX-style rolling VWAP14 + MA5/8/10/20 compression; research only"
+}
+vwap_ma_runtime={
+    "side":"NONE","stage":"NONE","started_ts":0,"last_change_ts":0,
+    "last_emit":{},"last_release":{"LONG":0,"SHORT":0}
+}
 setup_flow_prev={"ts":0,"d10":0.0,"d30":0.0}
 setup_stage_last={}
 shadow_last_bucket={}
@@ -93,6 +104,8 @@ retest_consumed_break={"LONG":0,"SHORT":0}
 retest_consumed_loaded=False
 scalp_prev_d10=0.0
 status={"public":"starting","business":"starting","started":int(time.time()*1000)}
+SIGNAL_MODE="VWAP14_ONLY"
+LEGACY_ENGINES_ENABLED=False
 # v6.27: throttle CPU/SQLite-heavy research work so high-rate trade WS cannot starve HTTP.
 last_heavy_ms={"excursion":0,"manager":0,"evaluate":0,"outcomes":0}
 
@@ -234,6 +247,18 @@ def db():
       event_id INTEGER PRIMARY KEY, started_ts INTEGER, last_ts INTEGER,
       mfe_pct REAL DEFAULT 0, mae_pct REAL DEFAULT 0, p5 REAL, p15 REAL, p30 REAL, p60 REAL,
       next_exec_ts INTEGER, lead_sec REAL, FOREIGN KEY(event_id) REFERENCES event_entry_events(id)
+    )""")
+    # v6.68: VWAP14 + MA KNOT direction lifecycle and RELEASE outcome research.
+    c.execute("""CREATE TABLE IF NOT EXISTS vwap_ma_events(
+      id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, bucket INTEGER, side TEXT, stage TEXT, score REAL,
+      price REAL, vwap14 REAL, knot_atr REAL, invalidation REAL, reason TEXT, context_json TEXT,
+      UNIQUE(bucket,side,stage)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_vwap_ma_events_ts ON vwap_ma_events(ts)")
+    c.execute("""CREATE TABLE IF NOT EXISTS vwap_ma_research(
+      event_id INTEGER PRIMARY KEY, started_ts INTEGER, last_ts INTEGER,
+      mfe_pct REAL DEFAULT 0, mae_pct REAL DEFAULT 0, p5 REAL, p15 REAL, p30 REAL, p60 REAL,
+      FOREIGN KEY(event_id) REFERENCES vwap_ma_events(id)
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS decision_research(
       decision_id INTEGER PRIMARY KEY, started_ts INTEGER, last_ts INTEGER,
@@ -830,6 +855,211 @@ def vwap_tf(tf,n=240):
     den=sum(float(x.get("volume",0) or 0) for x in session)
     if den<=0:return None
     return sum(((float(x["high"])+float(x["low"])+float(x["close"]))/3.0)*float(x.get("volume",0) or 0) for x in session)/den
+
+def rolling_vwap_tf(tf,n=14,offset=0):
+    """Rolling n-candle VWAP for the new v6.68 direction radar.
+
+    Uses HLC3 * base-volume and intentionally does NOT reset at UTC midnight.
+    Existing vwap_tf() stays unchanged so the frozen EXEC benchmark is not altered.
+    """
+    a=list(candles.get(tf,[]))
+    end=len(a)-int(offset or 0)
+    if end<n or end<=0:return None
+    w=a[end-n:end]
+    den=sum(float(x.get("volume",0) or 0) for x in w)
+    if den<=0:return None
+    return sum(((float(x["high"])+float(x["low"])+float(x["close"]))/3.0)*float(x.get("volume",0) or 0) for x in w)/den
+
+def _sma_at(tf,n,offset=0):
+    a=list(candles.get(tf,[])); end=len(a)-int(offset or 0)
+    if end<n or end<=0:return None
+    return sum(float(x["close"]) for x in a[end-n:end])/n
+
+def _ma_bundle(tf='15M',offset=0):
+    vals={n:_sma_at(tf,n,offset) for n in (5,8,10,20)}
+    if any(v is None for v in vals.values()):return None
+    A=max(atr_tf(tf,24),1.0); arr=list(vals.values())
+    return {"ma":vals,"low":min(arr),"high":max(arr),"center":sum(arr)/len(arr),"width_atr":(max(arr)-min(arr))/A}
+
+def _ma_slope(tf,n,back=1):
+    now=_sma_at(tf,n,0); old=_sma_at(tf,n,back)
+    if now is None or old is None:return 0.0
+    return (now-old)/max(atr_tf(tf,24),1.0)
+
+def _vwap_ma_features():
+    """15M user-style structure: rolling VWAP14 + MA5/8/10/20 knot.
+
+    Returns symmetric LONG/SHORT evidence. It is deliberately a context/lead detector,
+    not a probability model.
+    """
+    a=list(candles.get('15M',[]))
+    if len(a)<28 or not last_price:return None
+    p=float(last_price); A=max(atr_tf('15M',24),1.0)
+    vw=rolling_vwap_tf('15M',14,0); bundle=_ma_bundle('15M',0); prev_bundle=_ma_bundle('15M',2)
+    if vw is None or not bundle:return None
+    vdist=(p-vw)/A; knot=float(bundle['width_atr'])
+    compressing=bool(prev_bundle and knot<=float(prev_bundle['width_atr'])*.92) or knot<=.18
+    short_slope=sum(_ma_slope('15M',n,1) for n in (5,8,10))/3.0
+    short_prev=sum((_sma_at('15M',n,2) or 0)-(_sma_at('15M',n,3) or 0) for n in (5,8,10))/(3.0*A)
+    slope_accel=short_slope-short_prev
+    slope20=_ma_slope('15M',20,1)
+
+    # Reconstruct rolling VWAP for recent bars so a brief poke/reclaim is distinguishable from a clean hold.
+    recent=[]
+    for off in (0,1,2):
+        idx=len(a)-1-off
+        vwi=rolling_vwap_tf('15M',14,off)
+        if idx<0 or vwi is None:continue
+        b=a[idx]; recent.append({"bar":b,"vwap":vwi,"off":off})
+    above=sum(1 for z in recent if float(z['bar']['close'])>=float(z['vwap'])-.025*A)
+    below=sum(1 for z in recent if float(z['bar']['close'])<=float(z['vwap'])+.025*A)
+    failed_down=any(float(z['bar']['low'])<float(z['vwap'])-.015*A and float(z['bar']['close'])>=float(z['vwap']) and (float(z['vwap'])-float(z['bar']['low']))<=.35*A for z in recent)
+    failed_up=any(float(z['bar']['high'])>float(z['vwap'])+.015*A and float(z['bar']['close'])<=float(z['vwap']) and (float(z['bar']['high'])-float(z['vwap']))<=.35*A for z in recent)
+
+    # Failed extension: a fresh push beyond the previous micro-range is small rather than expanding.
+    prev_lows=[float(x['low']) for x in a[-6:-3]]; new_lows=[float(x['low']) for x in a[-3:]]
+    prev_highs=[float(x['high']) for x in a[-6:-3]]; new_highs=[float(x['high']) for x in a[-3:]]
+    down_ext=(min(new_lows)-min(prev_lows))/A if prev_lows and new_lows else 0.0
+    up_ext=(max(new_highs)-max(prev_highs))/A if prev_highs and new_highs else 0.0
+    down_stall=down_ext>=-.12
+    up_stall=up_ext<=.12
+
+    knot_ok=knot<=.36
+    near_vwap=abs(vdist)<=.46
+    long_watch=knot_ok and near_vwap and p>=vw-.16*A
+    short_watch=knot_ok and near_vwap and p<=vw+.16*A
+    long_inflex=(short_slope>=-.035 and slope_accel>=.012) or (short_slope>0)
+    short_inflex=(short_slope<=.035 and slope_accel<=-.012) or (short_slope<0)
+    long_hold=(above>=2 and p>=vw-.035*A)
+    short_hold=(below>=2 and p<=vw+.035*A)
+    long_lean=long_watch and long_hold and (failed_down or down_stall) and long_inflex and p>=bundle['center']-.08*A
+    short_lean=short_watch and short_hold and (failed_up or up_stall) and short_inflex and p<=bundle['center']+.08*A
+    long_release=long_lean and p>=max(vw,bundle['high'])+.045*A and short_slope>.004
+    short_release=short_lean and p<=min(vw,bundle['low'])-.045*A and short_slope<-.004
+
+    knot_component=max(0.0,min(30.0,(.38-knot)/.30*30.0))
+    def score(side):
+        isL=side=='LONG'; watch=long_watch if isL else short_watch; hold=long_hold if isL else short_hold
+        fail=(failed_down or down_stall) if isL else (failed_up or up_stall)
+        inf=long_inflex if isL else short_inflex; rel=long_release if isL else short_release
+        s=knot_component+(20 if near_vwap else 0)+(18 if hold else 0)+(16 if fail else 0)+(12 if inf else 0)+(14 if rel else 0)
+        if not watch:s=min(s,44)
+        return max(0.0,min(100.0,s))
+    invalid_long=min(vw,bundle['low'],float(bundle['ma'][20]))-.08*A
+    invalid_short=max(vw,bundle['high'],float(bundle['ma'][20]))+.08*A
+    return {
+      'price':p,'atr':A,'vwap14':vw,'distance_atr':vdist,'bundle':bundle,'compressing':compressing,
+      'short_slope':short_slope,'slope_accel':slope_accel,'slope20':slope20,
+      'failed_down':failed_down,'failed_up':failed_up,'down_stall':down_stall,'up_stall':up_stall,
+      'above_count':above,'below_count':below,
+      'LONG':{'watch':long_watch,'lean':long_lean,'release':long_release,'score':score('LONG'),'invalidation':invalid_long},
+      'SHORT':{'watch':short_watch,'lean':short_lean,'release':short_release,'score':score('SHORT'),'invalidation':invalid_short}
+    }
+
+def _save_vwap_ma_event(side,stage,feat,now):
+    bucket=int(now//900000); d=feat[side]
+    reasons=['VWAP14_NEAR','MA_KNOT']
+    if feat.get('compressing'): reasons.append('KNOT_TIGHTENING')
+    if (side=='LONG' and feat.get('failed_down')) or (side=='SHORT' and feat.get('failed_up')): reasons.append('FAILED_VWAP_BREAK')
+    if (side=='LONG' and feat.get('down_stall')) or (side=='SHORT' and feat.get('up_stall')): reasons.append('PRICE_EXTENSION_STALL')
+    if stage in ('LEAN','RELEASE'): reasons.append('VWAP_HOLD' if side=='LONG' else 'VWAP_REJECT')
+    if stage=='RELEASE': reasons.append('MA_KNOT_RELEASE')
+    ctx={'distance_atr':feat['distance_atr'],'bundle':feat['bundle'],'short_slope':feat['short_slope'],'slope_accel':feat['slope_accel'],
+         'slope20':feat['slope20'],'failed_down':feat['failed_down'],'failed_up':feat['failed_up'],'above_count':feat['above_count'],'below_count':feat['below_count']}
+    c=db(); cur=c.execute("""INSERT OR IGNORE INTO vwap_ma_events(ts,bucket,side,stage,score,price,vwap14,knot_atr,invalidation,reason,context_json)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?)""",(int(now),bucket,side,stage,float(d['score']),float(feat['price']),float(feat['vwap14']),float(feat['bundle']['width_atr']),float(d['invalidation']),' | '.join(reasons),json.dumps(ctx,separators=(',',':'),ensure_ascii=False)))
+    inserted=cur.rowcount>0
+    if inserted and stage=='RELEASE':
+        eid=cur.lastrowid; c.execute("INSERT OR IGNORE INTO vwap_ma_research(event_id,started_ts,last_ts,mfe_pct,mae_pct) VALUES(?,?,?,?,?)",(eid,int(now),int(now),0.0,0.0))
+    c.commit(); c.close(); return inserted,reasons
+
+def evaluate_vwap_ma():
+    """Independent VWAP14/MA direction radar: WATCH -> LEAN -> RELEASE.
+
+    It never feeds/vetoes EXEC, EARLY or EVENT. The goal is to surface the user's
+    chart-reading pattern early enough to inspect manually.
+    """
+    global vwap_ma_state,vwap_ma_runtime
+    feat=_vwap_ma_features(); now=int(time.time()*1000)
+    if not feat:
+        vwap_ma_state={**vwap_ma_state,'updated_ts':now,'state':'WARMUP','side':'NONE','stage':'NONE','reasons':['15M VWAP14/MA WARMUP']}
+        return vwap_ma_state
+    candidates=[]
+    for side in ('LONG','SHORT'):
+        d=feat[side]
+        stage='RELEASE' if d['release'] else 'LEAN' if d['lean'] else 'WATCH' if d['watch'] else 'NONE'
+        rank={'NONE':0,'WATCH':1,'LEAN':2,'RELEASE':3}[stage]
+        candidates.append((rank,float(d['score']),side,stage))
+    candidates.sort(reverse=True); rank,score,side,stage=candidates[0]
+    # If both sides are only WATCH with near-identical evidence, avoid pretending direction exists.
+    other=candidates[1]
+    if rank<=1 and abs(score-other[1])<5:
+        side='NONE';stage='WATCH' if rank==1 else 'NONE'
+    rt=vwap_ma_runtime
+    if side=='NONE':
+        rt.update({'side':'NONE','stage':stage,'started_ts':0,'last_change_ts':now})
+    else:
+        desired=stage
+        if rt.get('side')!=side:
+            rt.update({'side':side,'stage':'NONE','started_ts':now,'last_change_ts':now})
+        current=str(rt.get('stage') or 'NONE'); age=now-int(rt.get('last_change_ts') or now)
+        # Force a visible lifecycle. A condition that is already strong on first detection still
+        # starts at WATCH; it must persist before LEAN, and LEAN must persist before RELEASE.
+        if current=='NONE':
+            stage='WATCH' if desired in ('WATCH','LEAN','RELEASE') else 'NONE'
+        elif current=='WATCH':
+            if desired=='NONE': stage='NONE'
+            elif desired in ('LEAN','RELEASE') and age>=8000: stage='LEAN'
+            else: stage='WATCH'
+        elif current=='LEAN':
+            if desired=='NONE': stage='NONE'
+            elif desired=='WATCH': stage='WATCH'
+            elif desired=='RELEASE' and age>=8000: stage='RELEASE'
+            else: stage='LEAN'
+        else:  # RELEASE
+            stage='RELEASE' if desired=='RELEASE' else ('LEAN' if desired=='LEAN' else 'WATCH' if desired=='WATCH' else 'NONE')
+        if stage!=rt.get('stage'):
+            inserted,reasons=_save_vwap_ma_event(side,stage,feat,now) if stage in ('WATCH','LEAN','RELEASE') else (False,[])
+            rt['stage']=stage;rt['last_change_ts']=now
+            if stage=='RELEASE' and inserted: rt['last_release'][side]=now
+        else:
+            reasons=[]
+    d=feat.get(side) if side in ('LONG','SHORT') else None
+    reasons=[]
+    if side in ('LONG','SHORT'):
+        if feat['bundle']['width_atr']<=.36: reasons.append('MA KNOT')
+        reasons.append('VWAP14 '+('HOLD' if side=='LONG' else 'REJECT'))
+        if (side=='LONG' and feat['failed_down']) or (side=='SHORT' and feat['failed_up']):reasons.append('FAILED BREAK')
+        if (side=='LONG' and feat['down_stall']) or (side=='SHORT' and feat['up_stall']):reasons.append('PRICE STALL')
+        if stage in ('LEAN','RELEASE'):reasons.append('SLOPE INFLECTION')
+        if stage=='RELEASE':reasons.append('KNOT RELEASE')
+    state=stage if stage!='NONE' else 'SCANNING'
+    vwap_ma_state={
+      'updated_ts':now,'state':state,'side':side,'stage':stage,'score':round(float(d['score']) if d else 0,1),
+      'vwap14':round(float(feat['vwap14']),2),'price':round(float(feat['price']),2),'distance_atr':round(float(feat['distance_atr']),3),
+      'knot_atr':round(float(feat['bundle']['width_atr']),3),'invalidation':round(float(d['invalidation']),2) if d else None,
+      'slopes':{'short':round(float(feat['short_slope']),4),'accel':round(float(feat['slope_accel']),4),'ma20':round(float(feat['slope20']),4)},
+      'reasons':reasons,'active_since':int(rt.get('started_ts') or 0),
+      'note':'WATCH=VWAP14+MA knot proximity, LEAN=hold/reject+failed move+slope turn, RELEASE=knot escape. Research only.'}
+    return vwap_ma_state
+
+def update_vwap_ma_research():
+    if not last_price:return
+    now=int(time.time()*1000); px=float(last_price); c=db(); c.row_factory=sqlite3.Row
+    rows=c.execute("""SELECT e.*,r.started_ts,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60
+      FROM vwap_ma_events e JOIN vwap_ma_research r ON r.event_id=e.id WHERE e.stage='RELEASE' AND (? - e.ts)<=7200000
+      ORDER BY e.ts DESC LIMIT 500""",(now,)).fetchall()
+    for r in rows:
+        side=str(r['side']); entry=float(r['price'] or 0)
+        if not entry:continue
+        move=(px-entry)/entry*100*(1 if side=='LONG' else -1)
+        mfe=max(float(r['mfe_pct'] or 0),move); mae=min(float(r['mae_pct'] or 0),move)
+        vals={}; age=now-int(r['ts'])
+        for mins,col in ((5,'p5'),(15,'p15'),(30,'p30'),(60,'p60')):
+            if r[col] is None and age>=mins*60000: vals[col]=px
+        c.execute("""UPDATE vwap_ma_research SET last_ts=?,mfe_pct=?,mae_pct=?,p5=COALESCE(p5,?),p15=COALESCE(p15,?),p30=COALESCE(p30,?),p60=COALESCE(p60,?) WHERE event_id=?""",
+          (now,mfe,mae,vals.get('p5'),vals.get('p15'),vals.get('p30'),vals.get('p60'),int(r['id'])))
+    c.commit(); c.close()
 
 def vwap_signal_context(tf, atr_value):
     """VWAP-only location context. MA EARLY is retired in v6.29.
@@ -2221,18 +2451,16 @@ def update_outcomes():
 
 async def seed():
     async with httpx.AsyncClient(timeout=15) as h:
-        for label,bar in [("1M","1m"),("3M","3m"),("5M","5m"),("15M","15m"),("1H","1H"),("4H","4H"),("1D","1D")]:
+        for label,bar in [("15M","15m"),("1D","1D")]:
             try:
-                # Fetch enough history for SMA480. OKX candles are newest-first; paginate older bars.
+                # v6.69 ONLY-LAB: seed only the data required by VWAP14 Direction + daily move.
                 raw=[]; after=None
-                for _ in range(2):
-                    params={"instId":INST,"bar":bar,"limit":300}
-                    if after is not None: params["after"]=after
+                for _ in range(1):
+                    params={"instId":INST,"bar":bar,"limit":160 if label=="15M" else 40}
                     r=(await h.get("https://www.okx.com/api/v5/market/candles",params=params)).json()
                     batch=r.get("data",[])
                     if not batch: break
-                    raw.extend(batch); after=batch[-1][0]
-                    if len(batch)<300: break
+                    raw.extend(batch)
                 uniq={int(x[0]):x for x in raw}
                 arr=[]
                 for _,x in sorted(uniq.items()):
@@ -2242,47 +2470,36 @@ async def seed():
             except Exception as e: print("seed",label,e)
 
 async def public_loop():
-    global current_oi,book_imb,last_price
+    """v6.69 ONLY-LAB: lightweight last-price feed + VWAP14 Direction evaluator only.
+
+    EXEC / PB-RV-RT / EARLY / EVENT / MTF pressure / position-manager are deliberately
+    not called here. Historical DB rows remain untouched for later audit.
+    """
+    global last_price
     while True:
         try:
             async with websockets.connect(PUB,ping_interval=20,ping_timeout=20) as ws:
                 status["public"]="live"
-                await ws.send(json.dumps({"op":"subscribe","args":[
-                    {"channel":"trades","instId":INST},{"channel":"books5","instId":INST},{"channel":"open-interest","instId":INST}]}))
+                await ws.send(json.dumps({"op":"subscribe","args":[{"channel":"tickers","instId":INST}]}))
                 async for raw in ws:
                     m=json.loads(raw)
-                    ch=m.get("arg",{}).get("channel")
+                    if m.get("arg",{}).get("channel")!="tickers":
+                        continue
                     for d in m.get("data",[]):
-                        if ch=="trades":
-                            px=float(d["px"]); sz=float(d["sz"]); ts=int(d["ts"]);last_price=px
-                            trades.append({"px":px,"ts":ts,"side":d["side"],"notional":px*sz}); add_minute_flow(px,ts,d["side"],px*sz)
-                        elif ch=="open-interest":
-                            current_oi=float(d["oi"]);oi_hist.append({"ts":int(d["ts"]),"oi":current_oi})
-                        elif ch=="books5":
-                            b=sum(float(x[1]) for x in d.get("bids",[]));a=sum(float(x[1]) for x in d.get("asks",[]))
-                            book_imb=(b-a)/(b+a) if b+a else 0
-                    # High-rate OKX trades can arrive many times per second. The research engine
-                    # used to run SQLite-heavy work on every WS packet, starving FastAPI and
-                    # producing long requests/499s. Keep market ingestion hot, throttle heavy work.
+                        if d.get("last") is not None:
+                            last_price=float(d["last"])
                     now_ms=int(time.time()*1000)
-                    if now_ms-last_heavy_ms["excursion"]>=500:
-                        update_position_excursions(); last_heavy_ms["excursion"]=now_ms
-                    if now_ms-last_heavy_ms["manager"]>=500:
-                        try:
-                            manage_position_reversal()
-                        except Exception as e:
-                            print("position_manager",repr(e))
-                        last_heavy_ms["manager"]=now_ms
-                    if now_ms-last_heavy_ms["evaluate"]>=350:
-                        evaluate(); evaluate_precursor(); evaluate_event_entry()
+                    if now_ms-last_heavy_ms["evaluate"]>=1000:
+                        evaluate_vwap_ma()
                         last_heavy_ms["evaluate"]=now_ms
-                    if now_ms-last_heavy_ms["outcomes"]>=1000:
-                        update_user_trade_research(); update_decision_research(); update_precursor_research(); update_event_entry_research(); last_heavy_ms["outcomes"]=now_ms
+                    if now_ms-last_heavy_ms["outcomes"]>=2000:
+                        update_vwap_ma_research()
+                        last_heavy_ms["outcomes"]=now_ms
         except Exception as e:
             status["public"]="reconnecting";print("public",e);await asyncio.sleep(2)
 
 async def business_loop():
-    mapping={"candle1m":"1M","candle3m":"3M","candle5m":"5M","candle15m":"15M","candle1H":"1H","candle4H":"4H","candle1D":"1D"}
+    mapping={"candle15m":"15M","candle1D":"1D"}
     while True:
         try:
             async with websockets.connect(BIZ,ping_interval=20,ping_timeout=20) as ws:
@@ -2311,13 +2528,14 @@ async def snapshot_loop():
 
 @app.on_event("startup")
 async def startup():
-    c=db();c.close(); load_minute_flow()
+    c=db();c.close()
     await seed()
-    asyncio.create_task(public_loop());asyncio.create_task(business_loop());asyncio.create_task(snapshot_loop())
+    # v6.69 ONLY-LAB: no minute-flow restore and no snapshot writer.
+    asyncio.create_task(public_loop());asyncio.create_task(business_loop())
 
 @app.get("/api/status")
 def home():
-    return {"service":"BTC Trap Flow Collector v6.67 EXEC + PRECURSOR + EVENT LAB KST","ok":True,"status":status}
+    return {"service":"BTC Trap Flow Collector v6.69 VWAP14 ONLY LAB KST","ok":True,"status":status,"signal_mode":SIGNAL_MODE,"legacy_engines_enabled":False}
 
 def market_bias_snapshot():
     vals={tf:trend_bias_tf(tf) for tf in ("5M","15M","1H","4H")}
@@ -2409,36 +2627,44 @@ def daily_move_snapshot():
 
 @app.get("/api/live")
 def live():
-    a,b=flow(10000),flow(30000);H,L=liquidity15()
-    return {"price":last_price,"d10":a["ratio"],"d30":b["ratio"],"oi":current_oi,"oi60":oi_delta(),
-            "flow":flow_intensity(),"book":book_imb,"liqH":H,"liqL":L,"armed":trap_arm,"status":status,
-            "bias":market_bias_snapshot(),"radar":turn_radar_snapshot(),"pressure":mtf_pressure_snapshot(),"setup_watch":setup_watch,"decision":decision_state,"precursor":precursor_state,"event_entry":event_entry_state,"daily":daily_move_snapshot()}
+    return {"price":last_price,"status":status,"vwap_ma":vwap_ma_state,"daily":daily_move_snapshot(),
+            "signal_mode":SIGNAL_MODE,"legacy_engines_enabled":False}
 
 @app.get("/api/setup-watch")
 def api_setup_watch():
-    """Lightweight 3-SETUP + fresh MTF pressure endpoint for ~2s UI polling."""
-    return {**setup_watch,"pressure":mtf_pressure_snapshot(),"decision":decision_state,"precursor":precursor_state,"event_entry":event_entry_state}
+    # Compatibility endpoint kept for old clients; no legacy setup engine runs in v6.69.
+    return {"disabled":True,"signal_mode":SIGNAL_MODE,"vwap_ma":vwap_ma_state}
 
 @app.get("/api/pressure")
 def api_pressure():
-    return mtf_pressure_snapshot()
+    return {"disabled":True,"state":"OFF","reason":"VWAP14_ONLY"}
 
 @app.get("/api/decision")
 def api_decision():
-    return decision_state
+    return {"disabled":True,"action":"OFF","bias":"NEUTRAL"}
 
 @app.get("/api/precursor")
 def api_precursor():
-    return precursor_state
+    return {"disabled":True,"state":"OFF","side":"NONE"}
 
 @app.get("/api/event-entry")
 def api_event_entry():
-    return event_entry_state
+    return {"disabled":True,"state":"OFF","side":"NONE"}
 
 @app.get("/api/event-entry-events")
 def api_event_entry_events(limit:int=500):
     c=db(); c.row_factory=sqlite3.Row
     rows=[dict(x) for x in c.execute("SELECT * FROM event_entry_events ORDER BY ts DESC LIMIT ?",(min(max(int(limit),1),2000),)).fetchall()]
+    c.close(); return rows
+
+@app.get("/api/vwap-ma")
+def api_vwap_ma():
+    return vwap_ma_state
+
+@app.get("/api/vwap-ma-events")
+def api_vwap_ma_events(limit:int=1000):
+    c=db(); c.row_factory=sqlite3.Row
+    rows=[dict(x) for x in c.execute("SELECT * FROM vwap_ma_events ORDER BY ts DESC LIMIT ?",(min(max(int(limit),1),3000),)).fetchall()]
     c.close(); return rows
 
 @app.get("/api/precursor-events")
@@ -2455,23 +2681,11 @@ def api_decision_events(limit:int=500):
 
 @app.get("/api/research/summary")
 def api_research_summary():
+    # v6.69 ONLY-LAB: do not scan retired research tables on every UI refresh.
     c=db(); c.row_factory=sqlite3.Row
-    stages=[dict(x) for x in c.execute("""SELECT setup,stage,COUNT(*) n FROM setup_stage_events GROUP BY setup,stage ORDER BY setup,stage""").fetchall()]
-    shadows=[dict(x) for x in c.execute("""SELECT setup,variant,COUNT(*) n,AVG(r.mfe_pct) avg_mfe,AVG(r.mae_pct) avg_mae
-      FROM shadow_signals s LEFT JOIN shadow_research r ON r.shadow_id=s.id GROUP BY setup,variant ORDER BY setup,variant""").fetchall()]
-    base=[dict(x) for x in c.execute("""SELECT CASE WHEN name LIKE 'PULLBACK%' THEN 'PULLBACK' WHEN name LIKE 'REVERSAL%' THEN 'REVERSAL' WHEN name LIKE 'RETEST%' THEN 'RETEST' ELSE 'OTHER' END setup,
-      COUNT(*) n,AVG(r.mfe_pct) avg_mfe,AVG(r.mae_pct) avg_mae FROM signals s LEFT JOIN signal_research r ON r.signal_id=s.id
-      WHERE name LIKE 'PULLBACK%' OR name LIKE 'REVERSAL%' OR name LIKE 'RETEST%' GROUP BY setup""").fetchall()]
-    user=c.execute("""SELECT COUNT(*) n,AVG(mfe_pct) avg_mfe,AVG(mae_pct) avg_mae FROM user_trade_research""").fetchone()
-    decisions=[dict(x) for x in c.execute("""SELECT e.event,e.side,COUNT(*) n,AVG(r.mfe_pct) avg_mfe,AVG(r.mae_pct) avg_mae
-      FROM decision_events e LEFT JOIN decision_research r ON r.decision_id=e.id GROUP BY e.event,e.side ORDER BY e.event,e.side""").fetchall()]
-    precursor=[dict(x) for x in c.execute("""SELECT e.side,COUNT(*) n,AVG(r.mfe_pct) avg_mfe,AVG(r.mae_pct) avg_mae,AVG(r.lead_sec) avg_lead_sec,
-      SUM(CASE WHEN r.next_exec_ts IS NOT NULL THEN 1 ELSE 0 END) matched_exec
-      FROM precursor_events e LEFT JOIN precursor_research r ON r.precursor_id=e.id GROUP BY e.side ORDER BY e.side""").fetchall()]
-    event_entry=[dict(x) for x in c.execute("""SELECT e.side,COUNT(*) n,AVG(r.mfe_pct) avg_mfe,AVG(r.mae_pct) avg_mae,AVG(r.lead_sec) avg_lead_sec,
-      SUM(CASE WHEN r.next_exec_ts IS NOT NULL THEN 1 ELSE 0 END) matched_exec
-      FROM event_entry_events e LEFT JOIN event_entry_research r ON r.event_id=e.id GROUP BY e.side ORDER BY e.side""").fetchall()]
-    c.close(); return {"setup_stage_events":stages,"shadow":shadows,"base":base,"user":dict(user) if user else {},"decision":decisions,"precursor":precursor,"event_entry":event_entry}
+    vwap_ma=[dict(x) for x in c.execute("""SELECT e.side,e.stage,COUNT(*) n,AVG(r.mfe_pct) avg_mfe,AVG(r.mae_pct) avg_mae
+      FROM vwap_ma_events e LEFT JOIN vwap_ma_research r ON r.event_id=e.id GROUP BY e.side,e.stage ORDER BY e.side,e.stage""").fetchall()]
+    c.close(); return {"mode":SIGNAL_MODE,"vwap_ma":vwap_ma}
 
 @app.get("/api/research/export")
 def api_research_export(limit:int=5000):
@@ -2484,7 +2698,8 @@ def api_research_export(limit:int=5000):
       "user":[dict(x) for x in c.execute("SELECT * FROM user_trade_research ORDER BY started_ts DESC LIMIT ?",(lim,)).fetchall()],
       "decision":[dict(x) for x in c.execute("""SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM decision_events e LEFT JOIN decision_research r ON r.decision_id=e.id ORDER BY e.ts DESC LIMIT ?""",(lim,)).fetchall()],
       "precursor":[dict(x) for x in c.execute("""SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec FROM precursor_events e LEFT JOIN precursor_research r ON r.precursor_id=e.id ORDER BY e.ts DESC LIMIT ?""",(lim,)).fetchall()],
-      "event_entry":[dict(x) for x in c.execute("""SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec FROM event_entry_events e LEFT JOIN event_entry_research r ON r.event_id=e.id ORDER BY e.ts DESC LIMIT ?""",(lim,)).fetchall()]
+      "event_entry":[dict(x) for x in c.execute("""SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec FROM event_entry_events e LEFT JOIN event_entry_research r ON r.event_id=e.id ORDER BY e.ts DESC LIMIT ?""",(lim,)).fetchall()],
+      "vwap_ma":[dict(x) for x in c.execute("""SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM vwap_ma_events e LEFT JOIN vwap_ma_research r ON r.event_id=e.id ORDER BY e.ts DESC LIMIT ?""",(lim,)).fetchall()]
     }
     c.close(); return out
 
@@ -2499,9 +2714,10 @@ def api_research_export_csv(kind:str="signals", limit:int=10000):
       "user":"SELECT * FROM user_trade_research ORDER BY started_ts DESC LIMIT ?",
       "decision":"SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM decision_events e LEFT JOIN decision_research r ON r.decision_id=e.id ORDER BY e.ts DESC LIMIT ?",
       "precursor":"SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec FROM precursor_events e LEFT JOIN precursor_research r ON r.precursor_id=e.id ORDER BY e.ts DESC LIMIT ?",
-      "event":"SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec FROM event_entry_events e LEFT JOIN event_entry_research r ON r.event_id=e.id ORDER BY e.ts DESC LIMIT ?"
+      "event":"SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60,r.next_exec_ts,r.lead_sec FROM event_entry_events e LEFT JOIN event_entry_research r ON r.event_id=e.id ORDER BY e.ts DESC LIMIT ?",
+      "vwapma":"SELECT e.*,r.mfe_pct,r.mae_pct,r.p5,r.p15,r.p30,r.p60 FROM vwap_ma_events e LEFT JOIN vwap_ma_research r ON r.event_id=e.id ORDER BY e.ts DESC LIMIT ?"
     }
-    if k not in qs: c.close(); return Response("kind must be signals, setup, shadow, user, decision, precursor, or event",status_code=400,media_type="text/plain")
+    if k not in qs: c.close(); return Response("kind must be signals, setup, shadow, user, decision, precursor, event, or vwapma",status_code=400,media_type="text/plain")
     rows=[dict(x) for x in c.execute(qs[k],(lim,)).fetchall()]; c.close(); buf=io.StringIO()
     if rows:
         w=csv.DictWriter(buf,fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
