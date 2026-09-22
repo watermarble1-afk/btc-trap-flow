@@ -104,7 +104,7 @@ retest_consumed_break={"LONG":0,"SHORT":0}
 retest_consumed_loaded=False
 scalp_prev_d10=0.0
 status={"public":"starting","business":"starting","started":int(time.time()*1000)}
-SIGNAL_MODE="MA_CYCLE_V7"
+SIGNAL_MODE="MA_CYCLE_V7_09"
 LEGACY_ENGINES_ENABLED=False
 # v6.27: throttle CPU/SQLite-heavy research work so high-rate trade WS cannot starve HTTP.
 last_heavy_ms={"excursion":0,"manager":0,"evaluate":0,"outcomes":0}
@@ -159,10 +159,17 @@ def db():
       engine TEXT PRIMARY KEY, side TEXT, exit_ts INTEGER, exit_price REAL, atr REAL, reason TEXT
     )""")
     c.execute("""CREATE TABLE IF NOT EXISTS user_positions(
-      id INTEGER PRIMARY KEY CHECK(id=1), side TEXT, entry REAL, opened_ts INTEGER, updated_ts INTEGER
+      id INTEGER PRIMARY KEY CHECK(id=1), side TEXT, entry REAL, opened_ts INTEGER, updated_ts INTEGER, leverage INTEGER DEFAULT 1
     )""")
+    upcols={r[1] for r in c.execute("PRAGMA table_info(user_positions)").fetchall()}
+    if "leverage" not in upcols:c.execute("ALTER TABLE user_positions ADD COLUMN leverage INTEGER DEFAULT 1")
     c.execute("""CREATE TABLE IF NOT EXISTS user_position_events(
-      id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, event TEXT, side TEXT, price REAL, note TEXT
+      id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, event TEXT, side TEXT, price REAL, note TEXT, leverage INTEGER DEFAULT 1
+    )""")
+    uecols={r[1] for r in c.execute("PRAGMA table_info(user_position_events)").fetchall()}
+    if "leverage" not in uecols:c.execute("ALTER TABLE user_position_events ADD COLUMN leverage INTEGER DEFAULT 1")
+    c.execute("""CREATE TABLE IF NOT EXISTS user_limit_orders(
+      id INTEGER PRIMARY KEY CHECK(id=1), side TEXT, limit_price REAL, leverage INTEGER DEFAULT 1, created_ts INTEGER
     )""")
     c.execute("UPDATE engine_positions SET engine='5M' WHERE engine='CORE' AND NOT EXISTS (SELECT 1 FROM engine_positions x WHERE x.engine='5M')")
     c.execute("DELETE FROM engine_positions WHERE engine='CORE'")
@@ -1000,17 +1007,24 @@ def evaluate_vwap_ma():
     ma=feat['ma']; sl=feat['slopes_all']
     fast_long_order=ma[5] >= ma[10] >= ma[20]
     fast_short_order=ma[5] <= ma[10] <= ma[20]
-    fast_long=(sl[5]>.004 and sl[10]>-.002 and p>=ma[20]-.06*A and (fast_long_order or p>=ma[5]))
-    fast_short=(sl[5]<-.004 and sl[10]<.002 and p<=ma[20]+.06*A and (fast_short_order or p<=ma[5]))
-    # When both/none are marginal, use price + ribbon slope as a tie breaker.
-    if fast_long and not fast_short:
+    # v7.09: tactical turn must not wait for MA20/full ribbon confirmation.
+    # A real turn often starts with price losing/reclaiming MA5/10 while MA20 still lags.
+    fast_mid=(ma[5]+ma[10])/2.0
+    fast_long=(sl[5]>.0025 and p>=fast_mid-.025*A and (ma[5]>=ma[10] or sl[10]>-.001))
+    fast_short=(sl[5]<-.0025 and p<=fast_mid+.025*A and (ma[5]<=ma[10] or sl[10]<.001))
+    avg_fast_slope=(sl[5]+sl[10]+sl[20])/3.0
+    early_long=(p>ma[5] and p>ma[10] and sl[5]>.0015 and avg_fast_slope>-.002)
+    early_short=(p<ma[5] and p<ma[10] and sl[5]<-.0015 and avg_fast_slope<.002)
+    if (fast_long or early_long) and not (fast_short or early_short):
         cycle_side='LONG'
-    elif fast_short and not fast_long:
+    elif (fast_short or early_short) and not (fast_long or early_long):
         cycle_side='SHORT'
     else:
-        short_slope=(sl[5]+sl[10]+sl[20])/3.0
-        if short_slope>.006 and p>=ma[20]: cycle_side='LONG'
-        elif short_slope<-.006 and p<=ma[20]: cycle_side='SHORT'
+        # Tie breaker deliberately uses the fast ribbon, not the sticky big BIAS.
+        if avg_fast_slope>.003 and p>=fast_mid: cycle_side='LONG'
+        elif avg_fast_slope<-.003 and p<=fast_mid: cycle_side='SHORT'
+        elif p<ma[5] and sl[5]<0: cycle_side='SHORT'
+        elif p>ma[5] and sl[5]>0: cycle_side='LONG'
         else: cycle_side=bias
 
     if cycle_side=='NONE':
@@ -1019,7 +1033,7 @@ def evaluate_vwap_ma():
         isL=cycle_side=='LONG'
         # ALIGN is the fast ribbon alignment. Full 5/10/20/60/120 alignment is a
         # trend-strength property, not a prerequisite for seeing a tactical turn.
-        align=(fast_long_order and sl[5]>0 and sl[10]>=-.002) if isL else (fast_short_order and sl[5]<0 and sl[10]<=.002)
+        align=(ma[5]>=ma[10] and sl[5]>0 and sl[10]>=-.002 and p>=ma[10]-.04*A) if isL else (ma[5]<=ma[10] and sl[5]<0 and sl[10]<=.002 and p<=ma[10]+.04*A)
         hit=feat['long_hit'] if isL else feat['short_hit']
         realign=feat['long_realign'] if isL else feat['short_realign']
         brk=feat['long_break'] if bias=='LONG' else feat['short_break'] if bias=='SHORT' else False
@@ -2959,30 +2973,75 @@ def manual_close_position(engine: str):
     return {"ok":True,"engine":engine,"side":pos["side"],"entry":pos["entry"],"exit":px,"reason":"MANUAL"}
 
 
+def _fill_user_limit_if_hit():
+    """Fill the single pending simulator limit order when live price reaches/passes it."""
+    px=float(last_price or 0)
+    if px<=0:return
+    c=db(); c.row_factory=sqlite3.Row
+    pos=c.execute("SELECT * FROM user_positions WHERE id=1").fetchone()
+    order=c.execute("SELECT * FROM user_limit_orders WHERE id=1").fetchone()
+    if pos or not order:
+        c.close(); return
+    side=str(order["side"]); lp=float(order["limit_price"]); lev=max(1,min(30,int(order["leverage"] or 1)))
+    hit=(side=="LONG" and px<=lp) or (side=="SHORT" and px>=lp)
+    if not hit:
+        c.close(); return
+    now=int(time.time()*1000)
+    # Simulator assumes the requested limit price as the fill price once touched/passed.
+    c.execute("INSERT INTO user_positions(id,side,entry,opened_ts,updated_ts,leverage) VALUES(1,?,?,?,?,?)",(side,lp,now,now,lev))
+    c.execute("INSERT INTO user_position_events(ts,event,side,price,note,leverage) VALUES(?,?,?,?,?,?)",(now,"OPEN",side,lp,"USER LIMIT",lev))
+    c.execute("DELETE FROM user_limit_orders WHERE id=1")
+    c.commit(); c.close()
+
 @app.get("/api/user-position")
 def api_user_position():
+    _fill_user_limit_if_hit()
     c=db(); c.row_factory=sqlite3.Row
-    r=c.execute("SELECT * FROM user_positions WHERE id=1").fetchone(); c.close()
+    r=c.execute("SELECT * FROM user_positions WHERE id=1").fetchone()
+    pending=c.execute("SELECT * FROM user_limit_orders WHERE id=1").fetchone(); c.close()
     if not r:
-        return {"side":"FLAT","current_price":float(last_price or 0),"live_pct":0.0,"live_usd":0.0}
+        out={"side":"FLAT","current_price":float(last_price or 0),"live_pct":0.0,"live_usd":0.0,"leverage":1}
+        if pending: out["pending_limit"]=dict(pending)
+        return out
     out=dict(r)
-    px=float(last_price or out.get("entry") or 0); ent=float(out.get("entry") or 0)
-    usd=(px-ent) if out.get("side")=="LONG" else (ent-px)
-    out.update({"current_price":px,"live_usd":usd,"live_pct":usd/ent*100 if ent else 0.0})
+    px=float(last_price or out.get("entry") or 0); ent=float(out.get("entry") or 0); lev=max(1,min(30,int(out.get("leverage") or 1)))
+    raw=(px-ent) if out.get("side")=="LONG" else (ent-px)
+    out.update({"current_price":px,"live_usd":raw*lev,"live_pct":raw/ent*100*lev if ent else 0.0,"leverage":lev})
+    if pending: out["pending_limit"]=dict(pending)
     return out
 
 @app.post("/api/user-position/open")
 async def api_user_position_open(request: Request):
     body=await request.json(); side=str(body.get("side","")).upper()
     if side not in ("LONG","SHORT"): return {"ok":False,"error":"side must be LONG or SHORT"}
+    try: lev=int(body.get("leverage",1))
+    except: lev=1
+    lev=max(1,min(30,lev))
+    order_type=str(body.get("order_type","MARKET")).upper()
     px=float(last_price or 0)
     if px<=0:return {"ok":False,"error":"live price unavailable"}
     now=int(time.time()*1000); c=db(); c.row_factory=sqlite3.Row
     old=c.execute("SELECT * FROM user_positions WHERE id=1").fetchone()
-    if old:return {"ok":False,"error":"user position already open"}
-    c.execute("INSERT INTO user_positions(id,side,entry,opened_ts,updated_ts) VALUES(1,?,?,?,?)",(side,px,now,now))
-    c.execute("INSERT INTO user_position_events(ts,event,side,price,note) VALUES(?,?,?,?,?)",(now,"OPEN",side,px,"USER"))
-    c.commit(); c.close(); return {"ok":True,"side":side,"entry":px,"opened_ts":now}
+    if old: c.close(); return {"ok":False,"error":"user position already open"}
+    if order_type=="LIMIT":
+        try: lp=float(body.get("limit_price",0))
+        except: lp=0
+        if lp<=0: c.close(); return {"ok":False,"error":"valid limit_price required"}
+        # Buy-limit above current / sell-limit below current is marketable: fill immediately at current simulator price.
+        marketable=(side=="LONG" and lp>=px) or (side=="SHORT" and lp<=px)
+        if not marketable:
+            c.execute("INSERT OR REPLACE INTO user_limit_orders(id,side,limit_price,leverage,created_ts) VALUES(1,?,?,?,?)",(side,lp,lev,now))
+            c.commit(); c.close(); return {"ok":True,"pending":True,"side":side,"limit_price":lp,"leverage":lev}
+    c.execute("DELETE FROM user_limit_orders WHERE id=1")
+    c.execute("INSERT INTO user_positions(id,side,entry,opened_ts,updated_ts,leverage) VALUES(1,?,?,?,?,?)",(side,px,now,now,lev))
+    c.execute("INSERT INTO user_position_events(ts,event,side,price,note,leverage) VALUES(?,?,?,?,?,?)",(now,"OPEN",side,px,"USER MARKET" if order_type!="LIMIT" else "USER LIMIT MARKETABLE",lev))
+    c.commit(); c.close(); return {"ok":True,"side":side,"entry":px,"opened_ts":now,"leverage":lev}
+
+@app.post("/api/user-position/cancel-limit")
+def api_user_position_cancel_limit():
+    c=db(); r=c.execute("SELECT * FROM user_limit_orders WHERE id=1").fetchone()
+    if not r: c.close(); return {"ok":False,"error":"no pending limit order"}
+    c.execute("DELETE FROM user_limit_orders WHERE id=1"); c.commit(); c.close(); return {"ok":True}
 
 @app.post("/api/user-position/close")
 def api_user_position_close():
@@ -2990,10 +3049,10 @@ def api_user_position_close():
     r=c.execute("SELECT * FROM user_positions WHERE id=1").fetchone()
     if not r: c.close(); return {"ok":False,"error":"no user position"}
     if px<=0: c.close(); return {"ok":False,"error":"live price unavailable"}
-    now=int(time.time()*1000); side=r["side"]
-    c.execute("INSERT INTO user_position_events(ts,event,side,price,note) VALUES(?,?,?,?,?)",(now,"EXIT",side,px,"USER MANUAL"))
+    now=int(time.time()*1000); side=r["side"]; lev=max(1,min(30,int(r["leverage"] or 1)))
+    c.execute("INSERT INTO user_position_events(ts,event,side,price,note,leverage) VALUES(?,?,?,?,?,?)",(now,"EXIT",side,px,"USER MANUAL",lev))
     c.execute("DELETE FROM user_positions WHERE id=1"); c.commit(); c.close()
-    return {"ok":True,"side":side,"entry":r["entry"],"exit":px}
+    return {"ok":True,"side":side,"entry":r["entry"],"exit":px,"leverage":lev}
 
 @app.get("/api/user-position-events")
 def api_user_position_events():
@@ -3010,7 +3069,7 @@ def api_user_position_performance():
         if e["event"]=="OPEN": op=e
         elif e["event"]=="EXIT" and op:
             entry=float(op["price"]); exitp=float(e["price"]); side=op["side"]
-            usd=(exitp-entry) if side=="LONG" else (entry-exitp); pct=usd/entry*100 if entry else 0
+            lev=max(1,min(30,int(op["leverage"] or 1))) if "leverage" in op.keys() else 1; usd=((exitp-entry) if side=="LONG" else (entry-exitp))*lev; pct=usd/entry*100 if entry else 0
             rows.append({"opened_ts":op["ts"],"closed_ts":e["ts"],"side":side,"entry":entry,"exit":exitp,"return_pct":pct,"pnl_usd":usd})
             total_pct+=pct; total_usd+=usd; op=None
     trades=list(reversed(rows))

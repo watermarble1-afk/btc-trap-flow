@@ -201,3 +201,17 @@ It also publishes an invalidation level near the opposite side of VWAP14 / the M
 - Counter-bias RELEASE/ALIGN/EXPANSION can now be emitted without flipping big BIAS.
 - RE-COMPRESSION L/S label now follows emerging fast-ribbon direction instead of lagging MA20 direction.
 - Fast 5/10/20 alignment is used for tactical ALIGN; 20/60/120 remains big-structure context.
+
+## v7.08 Manual Simulator Order Patch
+- Manual simulator supports MARKET / LIMIT entry.
+- Adjustable leverage 1x-30x (default 30x in UI).
+- Pending limit order is filled at the requested limit price once live BTC reaches/passes it.
+- Pending limit order can be cancelled from the position box.
+- Simulator P/L percentage and displayed P/L are leverage-adjusted; this remains a research simulator and does not send OKX orders.
+
+## v7.09 MA CYCLE SHORT TURN + CHART PERF
+- Tactical LONG/SHORT cycle now reacts to price vs MA5/MA10 and fast-ribbon slope before lagging MA20 fully turns.
+- Sticky 15M BIAS remains separate; a LONG BIAS can emit tactical SHORT RELEASE/ALIGN/EXPANSION.
+- ALIGN timing uses fast MA5/MA10 structure; full medium alignment is not required for tactical turn detection.
+- Chart signal rendering throttled (~250-280ms), historical label count capped (PC 60 / mobile 40).
+- Removed duplicate native MA-cycle markers; rich anchored MA-cycle labels remain, reducing DOM/chart work.
