@@ -960,69 +960,121 @@ def _save_vwap_ma_event(side,stage,feat,now):
     c.commit(); c.close(); return inserted,reasons
 
 def evaluate_vwap_ma():
-    """Persistent MA-cycle state machine. Bias changes only on structural failure."""
+    """Persistent 15M MA-cycle state machine.
+
+    v7.07 fix:
+    - BIAS stays persistent (medium structure), but CYCLE direction may temporarily
+      run counter to the bias. This lets a LONG bias print RELEASE/ALIGN/EXPANSION S
+      during a real pullback instead of forcing every phase to LONG.
+    - prev_stage is read before phase evaluation (v7.06 could reference it before
+      assignment when compression was reached, interrupting the public loop).
+    - RELEASE/ALIGN use the fast 5/10/20 ribbon; BIAS still uses 20/60/120.
+    """
     global vwap_ma_state,vwap_ma_runtime
     feat=_vwap_ma_features(); now=int(time.time()*1000)
     if not feat:
-        vwap_ma_state={**vwap_ma_state,'updated_ts':now,'state':'WARMUP','side':'NONE','stage':'WARMUP','reasons':['15M MA120 WARMUP']}
+        vwap_ma_state={**vwap_ma_state,'updated_ts':now,'state':'WARMUP','side':'NONE','cycle_side':'NONE','stage':'WARMUP','reasons':['15M MA120 WARMUP']}
         return vwap_ma_state
+
     rt=vwap_ma_runtime
     old=str(rt.get('side') or 'NONE')
-    # Hysteresis: preserve trend through ordinary pullbacks/MA hits.
+    prev_stage=str(rt.get('stage') or 'NONE')  # MUST be captured before phase logic.
+
+    # Big-picture BIAS: deliberately sticky. Ordinary pullbacks do not flip it.
     if old=='LONG' and not feat['long_break']:
-        side='LONG'
+        bias='LONG'
     elif old=='SHORT' and not feat['short_break']:
-        side='SHORT'
+        bias='SHORT'
     elif feat['LONG']['score']>=58 and feat['LONG']['score']>=feat['SHORT']['score']+12:
-        side='LONG'
+        bias='LONG'
     elif feat['SHORT']['score']>=58 and feat['SHORT']['score']>=feat['LONG']['score']+12:
-        side='SHORT'
+        bias='SHORT'
     else:
-        side='NONE'
-    if side!=old:
-        rt['side']=side;rt['started_ts']=now;rt['last_change_ts']=now
-    isL=side=='LONG'
-    if side=='NONE':
+        bias='NONE'
+    if bias!=old:
+        rt['side']=bias; rt['started_ts']=now; rt['last_change_ts']=now
+
+    # Tactical cycle direction: read the fast ribbon independently from BIAS.
+    # This is what v7.06 was missing: a LONG BIAS could suppress all S phases.
+    A=float(feat['atr']); p=float(feat['price']); vw=float(feat['vwap14'])
+    ma=feat['ma']; sl=feat['slopes_all']
+    fast_long_order=ma[5] >= ma[10] >= ma[20]
+    fast_short_order=ma[5] <= ma[10] <= ma[20]
+    fast_long=(sl[5]>.004 and sl[10]>-.002 and p>=ma[20]-.06*A and (fast_long_order or p>=ma[5]))
+    fast_short=(sl[5]<-.004 and sl[10]<.002 and p<=ma[20]+.06*A and (fast_short_order or p<=ma[5]))
+    # When both/none are marginal, use price + ribbon slope as a tie breaker.
+    if fast_long and not fast_short:
+        cycle_side='LONG'
+    elif fast_short and not fast_long:
+        cycle_side='SHORT'
+    else:
+        short_slope=(sl[5]+sl[10]+sl[20])/3.0
+        if short_slope>.006 and p>=ma[20]: cycle_side='LONG'
+        elif short_slope<-.006 and p<=ma[20]: cycle_side='SHORT'
+        else: cycle_side=bias
+
+    if cycle_side=='NONE':
         phase='COMPRESSION' if feat['compression'] else 'SCANNING'
     else:
-        align=feat['long_align'] if isL else feat['short_align']
+        isL=cycle_side=='LONG'
+        # ALIGN is the fast ribbon alignment. Full 5/10/20/60/120 alignment is a
+        # trend-strength property, not a prerequisite for seeing a tactical turn.
+        align=(fast_long_order and sl[5]>0 and sl[10]>=-.002) if isL else (fast_short_order and sl[5]<0 and sl[10]<=.002)
         hit=feat['long_hit'] if isL else feat['short_hit']
         realign=feat['long_realign'] if isL else feat['short_realign']
-        brk=feat['long_break'] if isL else feat['short_break']
-        if brk: phase='BREAKDOWN'
-        elif hit and not realign: phase='MA_HIT'
-        elif hit and realign: phase='REALIGN'
-        elif align and feat['expanding']: phase='RE_EXPANSION' if str(rt.get('stage')) in ('MA_HIT','REALIGN') else 'EXPANSION'
-        elif align: phase='ALIGN'
-        elif feat['compression'] and prev_stage in ('EXPANSION','RE_EXPANSION','REALIGN','MA_HIT','ALIGN'): phase='RE_COMPRESSION'
-        elif feat['compression']: phase='COMPRESSION'
-        else: phase='RELEASE'
-    prev_stage=str(rt.get('stage') or 'NONE')
-    # Preserve RE_EXPANSION recognition one cycle after a hit/realign.
-    if side!='NONE' and phase=='EXPANSION' and prev_stage in ('MA_HIT','REALIGN'): phase='RE_EXPANSION'
-    if phase!=prev_stage:
-        rt['stage']=phase;rt['last_change_ts']=now
-        if side in ('LONG','SHORT'):
-            try:_save_vwap_ma_event(side,phase,feat,now)
+        brk=feat['long_break'] if bias=='LONG' else feat['short_break'] if bias=='SHORT' else False
+        directional_expand=feat['expanding'] and (((sl[5]+sl[10]+sl[20])/3)>0 if isL else ((sl[5]+sl[10]+sl[20])/3)<0)
+
+        if brk and cycle_side==bias:
+            phase='BREAKDOWN'
+        elif hit and realign and cycle_side==bias:
+            phase='REALIGN'
+        elif hit and not realign and cycle_side==bias:
+            phase='MA_HIT'
+        elif align and directional_expand:
+            phase='RE_EXPANSION' if prev_stage in ('MA_HIT','REALIGN') and cycle_side==bias else 'EXPANSION'
+        elif align:
+            phase='ALIGN'
+        elif feat['compression'] and prev_stage in ('EXPANSION','RE_EXPANSION','REALIGN','MA_HIT','ALIGN','RELEASE'):
+            phase='RE_COMPRESSION'
+        elif feat['compression']:
+            phase='COMPRESSION'
+        else:
+            phase='RELEASE'
+
+    # Event direction follows the tactical cycle, while state.side remains big BIAS.
+    event_side=cycle_side if cycle_side in ('LONG','SHORT') else bias
+    if phase!=prev_stage or str(rt.get('cycle_side') or 'NONE')!=str(event_side):
+        rt['stage']=phase; rt['cycle_side']=event_side; rt['last_change_ts']=now
+        if event_side in ('LONG','SHORT'):
+            try:_save_vwap_ma_event(event_side,phase,feat,now)
             except Exception as e: print('ma-cycle event save',e)
-    d=feat.get(side) if side in ('LONG','SHORT') else None
+
+    d=feat.get(bias) if bias in ('LONG','SHORT') else None
     reasons=[]
-    if side!='NONE':
-        reasons.append('CORE '+('정배열' if isL else '역배열'))
-        reasons.append('VWAP '+('상단' if feat['distance_atr']>=0 else '하단'))
-        if feat['compression']: reasons.append('이평 수렴')
-        if feat['expanding']: reasons.append('이격 발산')
-        if (feat['long_hit'] if isL else feat['short_hit']): reasons.append('이평치기')
-        if (feat['long_realign'] if isL else feat['short_realign']): reasons.append('재정렬')
-    else: reasons.append('방향 확정 전')
+    if bias!='NONE':
+        reasons.append('BIAS '+('상방' if bias=='LONG' else '하방'))
+    else:
+        reasons.append('BIAS 중립')
+    if event_side in ('LONG','SHORT'):
+        reasons.append('CYCLE '+('상방' if event_side=='LONG' else '하방'))
+    reasons.append('VWAP '+('상단' if feat['distance_atr']>=0 else '하단'))
+    if feat['compression']: reasons.append('이평 수렴')
+    if feat['expanding']: reasons.append('이격 발산')
+    if event_side in ('LONG','SHORT'):
+        eL=event_side=='LONG'
+        if (feat['long_hit'] if eL else feat['short_hit']): reasons.append('이평치기')
+        if (feat['long_realign'] if eL else feat['short_realign']): reasons.append('재정렬')
+
     score=float(d['score']) if d else max(float(feat['LONG']['score']),float(feat['SHORT']['score']))
-    vwap_ma_state={'updated_ts':now,'state':phase,'side':side,'stage':phase,'score':round(score,1),
+    inv=float(d['invalidation']) if d else None
+    vwap_ma_state={'updated_ts':now,'state':phase,'side':bias,'cycle_side':event_side,'stage':phase,'score':round(score,1),
       'vwap14':round(float(feat['vwap14']),2),'price':round(float(feat['price']),2),'distance_atr':round(float(feat['distance_atr']),3),
       'knot_atr':round(float(feat['short_spread']),3),'spread_delta':round(float(feat['spread_delta']),4),
-      'invalidation':round(float(d['invalidation']),2) if d else None,
+      'invalidation':round(inv,2) if inv is not None else None,
       'slopes':{'short':round(sum(feat['slopes_all'][n] for n in (5,10,20))/3,4),'accel':round(float(feat['spread_delta']),4),'ma20':round(float(feat['slopes_all'][20]),4)},
       'ma':{str(k):round(float(v),2) for k,v in feat['ma'].items()},'reasons':reasons,'active_since':int(rt.get('started_ts') or 0),
-      'note':'BIAS is persistent. PHASE tracks compression/release/alignment/expansion/MA-hit/realign/re-expansion/re-compression/breakdown.'}
+      'note':'BIAS is persistent; CYCLE side is independent so counter-bias pullbacks can emit RELEASE/ALIGN/EXPANSION.'}
     return vwap_ma_state
 
 def update_vwap_ma_research():

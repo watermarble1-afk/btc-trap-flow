@@ -193,3 +193,11 @@ It also publishes an invalidation level near the opposite side of VWAP14 / the M
 - TOP/BOTTOM is a reversal-risk / exit-watch module, not an automatic opposite-position entry signal.
 - Uses only data available up to each candle: VWAP14 distance, short-MA spread, spread contraction, short-MA slope deceleration/turn, and candle rejection context.
 - Adds separate TOP/BOTTOM chart signal ON/OFF toggle; preference is saved in browser localStorage.
+
+
+## v7.07 MA CYCLE STATE FIX
+- Fixed v7.06 `prev_stage` use-before-assignment during compression.
+- Separated persistent 15M BIAS from tactical CYCLE direction.
+- Counter-bias RELEASE/ALIGN/EXPANSION can now be emitted without flipping big BIAS.
+- RE-COMPRESSION L/S label now follows emerging fast-ribbon direction instead of lagging MA20 direction.
+- Fast 5/10/20 alignment is used for tactical ALIGN; 20/60/120 remains big-structure context.

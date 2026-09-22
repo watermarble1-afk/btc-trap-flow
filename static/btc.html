@@ -612,9 +612,15 @@ function calcReCompressionEvents(a){
     if(spread>=.48 || prevSpread>=.55)armed=true;
     const recontract=armed && spread<=.34 && d<=-.035;
     if(recontract && i-lastEmit>=4){
-      const s5=(ma[5][i]-ma[5][i-3])/(3*A), s20=(ma[20][i]-ma[20][i-3])/(3*A);
-      const side=(s20>=0 || ma[20][i]>=ma[20][i-3])?'LONG':'SHORT';
-      out.push({time:Number(a[i].time),stage:'RE_COMPRESSION',side,price:Number(a[i].close),spread,dSpread:d,slope5:s5});
+      const s5=(ma[5][i]-ma[5][i-3])/(3*A), s10=(ma[10][i]-ma[10][i-3])/(3*A);
+      const pNow=Number(a[i].close), center=(ma[5][i]+ma[10][i]+ma[20][i])/3;
+      // v7.07: label RE-COMP by the direction currently emerging from the fast ribbon,
+      // not by the lagging MA20's previous trend. This fixes late S labels at a bullish re-knot.
+      let side;
+      if(s5>.004 && s10>-.002 && pNow>=center) side='LONG';
+      else if(s5<-.004 && s10<.002 && pNow<=center) side='SHORT';
+      else side=pNow>=center?'LONG':'SHORT';
+      out.push({time:Number(a[i].time),stage:'RE_COMPRESSION',side,price:pNow,spread,dSpread:d,slope5:s5});
       lastEmit=i;armed=false;
     }
   }
@@ -1030,12 +1036,13 @@ function renderEventEntry(e){
 
 function renderVWAPMA(v){
   if(!v)return;
-  const stage=String(v.stage||v.state||'SCANNING').toUpperCase(), side=String(v.side||'NONE').toUpperCase(), score=Number(v.score||0);
+  const stage=String(v.stage||v.state||'SCANNING').toUpperCase(), side=String(v.side||'NONE').toUpperCase(), cycleSide=String(v.cycle_side||side||'NONE').toUpperCase(), score=Number(v.score||0);
   const entryZone=stage==='REALIGN'||stage==='RE_EXPANSION';
-  const col=entryZone?(side==='LONG'?'#56e6c2':'#ff7b7b'):stage==='BREAKDOWN'?'#ffb04a':side==='LONG'?'#79d9c0':side==='SHORT'?'#e9a0a0':'#8d99ad';
+  const phaseSide=cycleSide;
+  const col=entryZone?(phaseSide==='LONG'?'#56e6c2':'#ff7b7b'):stage==='BREAKDOWN'?'#ffb04a':phaseSide==='LONG'?'#79d9c0':phaseSide==='SHORT'?'#e9a0a0':'#8d99ad';
   const vwap=Number(v.vwap14), px=Number(v.price), dist=Number(v.distance_atr), spread=Number(v.knot_atr), inv=Number(v.invalidation);
   const slopes=v.slopes||{}, slope=Number(slopes.short), delta=Number(v.spread_delta ?? slopes.accel);
-  if($('vwapMaState')){$('vwapMaState').textContent=`${stage}${side!=='NONE'?' · '+side:''}`;$('vwapMaState').style.color=col;}
+  if($('vwapMaState')){$('vwapMaState').textContent=`${stage}${phaseSide!=='NONE'?' · '+phaseSide:''}`;$('vwapMaState').style.color=col;}
   if($('vwapMaSide')){$('vwapMaSide').textContent=side==='NONE'?'NEUTRAL':side;$('vwapMaSide').style.color=side==='LONG'?'#35d98a':side==='SHORT'?'#ff5c70':'#8d99ad';}
   if($('vwapMaPrice'))$('vwapMaPrice').textContent=px>0?'$'+fmt(px):'—';
   if($('vwapMaValue'))$('vwapMaValue').textContent=vwap>0?'$'+fmt(vwap):'—';
@@ -1052,10 +1059,10 @@ function renderVWAPMA(v){
   if($('topVwapDistance'))$('topVwapDistance').textContent=Number.isFinite(dist)?`${dist>=0?'+':''}${dist.toFixed(2)} ATR`:'—';
   if($('topVwapKnot'))$('topVwapKnot').textContent=Number.isFinite(spread)?spread.toFixed(3)+' ATR':'—';
   if($('topVwapInvalid'))$('topVwapInvalid').textContent=inv>0?'$'+fmt(inv):'—';
-  const now=$('directionNow');if(now){now.textContent=`${side==='NONE'?'NEUTRAL':side} · ${stage}`;now.style.color=col;}
+  const now=$('directionNow');if(now){now.textContent=`${side==='NONE'?'NEUTRAL':side} · ${stage}${phaseSide!==side?' · CYCLE '+phaseSide:''}`;now.style.color=col;}
   const group=stage==='REALIGN'||stage==='RE_EXPANSION'?3:(stage==='ALIGN'||stage==='EXPANSION'||stage==='MA_HIT'?2:1);
   [['stageWatch',1],['stageLean',2],['stageRelease',3]].forEach(([id,n])=>{const el=$(id);if(!el)return;el.classList.toggle('active',group===n);el.classList.toggle('done',group>n);});
-  if($('directionMeta'))$('directionMeta').innerHTML=`BIAS <b style="color:${side==='LONG'?'#35d98a':side==='SHORT'?'#ff5c70':'#8d99ad'}">${side}</b> · PHASE <b>${stage}</b> · 가격 $${px>0?fmt(px):'—'} · VWAP14 $${vwap>0?fmt(vwap):'—'} · 이격 ${Number.isFinite(spread)?spread.toFixed(3)+' ATR':'—'}<br><span class="tiny">${(v.reasons||[]).join(' → ')||'꼬임/풀림/배열을 추적 중'}</span>`;
+  if($('directionMeta'))$('directionMeta').innerHTML=`BIAS <b style="color:${side==='LONG'?'#35d98a':side==='SHORT'?'#ff5c70':'#8d99ad'}">${side}</b> · CYCLE <b>${phaseSide}</b> · PHASE <b>${stage}</b> · 가격 $${px>0?fmt(px):'—'} · VWAP14 $${vwap>0?fmt(vwap):'—'} · 이격 ${Number.isFinite(spread)?spread.toFixed(3)+' ATR':'—'}<br><span class="tiny">${(v.reasons||[]).join(' → ')||'꼬임/풀림/배열을 추적 중'}</span>`;
 }
 function renderDecision(d){
   if(!d)return;
