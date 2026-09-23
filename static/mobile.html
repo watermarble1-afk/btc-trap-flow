@@ -203,6 +203,11 @@ body.vwap-only .cards .card{display:block!important}
 
   <div class="box mySidePosition">
     <h3>👤 내 포지션 <span class="tiny">수동 시뮬레이터</span></h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:8px 0">
+      <label class="tiny">주문 방식<select id="myOrderType" style="width:100%;margin-top:4px;padding:7px;background:#101827;color:#dbe5f4;border:1px solid #2b3a52;border-radius:7px"><option value="MARKET">시장가</option><option value="LIMIT">지정가</option></select></label>
+      <label class="tiny">레버리지<select id="myLeverage" style="width:100%;margin-top:4px;padding:7px;background:#101827;color:#dbe5f4;border:1px solid #2b3a52;border-radius:7px"><option value="1">1x</option><option value="2">2x</option><option value="3">3x</option><option value="4">4x</option><option value="5">5x</option><option value="6">6x</option><option value="7">7x</option><option value="8">8x</option><option value="9">9x</option><option value="10">10x</option><option value="11">11x</option><option value="12">12x</option><option value="13">13x</option><option value="14">14x</option><option value="15">15x</option><option value="16">16x</option><option value="17">17x</option><option value="18">18x</option><option value="19">19x</option><option value="20">20x</option><option value="21">21x</option><option value="22">22x</option><option value="23">23x</option><option value="24">24x</option><option value="25">25x</option><option value="26">26x</option><option value="27">27x</option><option value="28">28x</option><option value="29">29x</option><option value="30" selected>30x</option></select></label>
+    </div>
+    <label id="myLimitWrap" class="tiny" style="display:none;margin:7px 0">지정가 (USDT)<input id="myLimitPrice" inputmode="decimal" placeholder="예: 112500" style="width:100%;margin-top:4px;padding:8px;background:#101827;color:#dbe5f4;border:1px solid #2b3a52;border-radius:7px"></label>
     <div class="myTradeControls"><button onclick="openMyPos('LONG')">LONG 진입</button><button onclick="openMyPos('SHORT')">SHORT 진입</button></div>
     <div id="myPosition" class="myPositionBox">불러오는 중…</div>
   </div>
@@ -256,6 +261,8 @@ let vwapMaEvents=[];
 // v6.67 chart-layer visibility. Display only; never changes server engines or research recording.
 const SIGNAL_LAYER_KEY='btc_signal_layers_v672';
 let signalLayers={vwapma:true,topbottom:true};
+// v7.09 chart performance: throttle expensive marker/DOM rebuilds and cap historical labels.
+let _markerTimer=0,_anchorTimer=0,_markerLast=0,_anchorLast=0;const MAX_SIGNAL_LABELS=40,MAX_CHART_MARKERS=100;
 try{const z=JSON.parse(localStorage.getItem(SIGNAL_LAYER_KEY)||'null');if(z&&typeof z==='object'){if(typeof z.vwapma==='boolean')signalLayers.vwapma=z.vwapma;if(typeof z.topbottom==='boolean')signalLayers.topbottom=z.topbottom}}catch(e){}
 function applySignalLayerUI(){
   document.querySelectorAll('.sigLayerBtn').forEach(b=>{const on=!!signalLayers[b.dataset.layer];b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');b.dataset.state=on?'ON':'OFF';b.title=(b.dataset.layer||'').toUpperCase()+' '+(on?'ON':'OFF')+' · 클릭해서 차트 표시 전환';});
@@ -765,11 +772,11 @@ function signalAnchorRows(){
   }
   return out;
 }
-function renderSignalAnchors(){
+function _renderSignalAnchorsNow(){
   const host=$('chart');if(!host||!chart||!candle)return;
   let layer=host.querySelector('.signalAnchorLayer');if(!layer){layer=document.createElement('div');layer.className='signalAnchorLayer';host.appendChild(layer)}
   layer.innerHTML='';
-  const rows=signalAnchorRows(), bars=new Map((cache[cur]||[]).map(x=>[Number(x.time),x])), stack={};
+  const allRows=signalAnchorRows();const rows=allRows.length>MAX_SIGNAL_LABELS?allRows.slice(-MAX_SIGNAL_LABELS):allRows, bars=new Map((cache[cur]||[]).map(x=>[Number(x.time),x])), stack={};
   for(const a of rows){
     const bar=bars.get(a.candleTs);if(!bar)continue;
     const x=chart.timeScale().timeToCoordinate(a.candleTs);if(x==null)continue;
@@ -784,7 +791,7 @@ function renderSignalAnchors(){
     const tm=new Date(a.rawTs*1000).toLocaleString('ko-KR',{hour12:false});badge.title=`${a.name} · ${tm} · score ${a.score}${a.entry?` · $${fmt(a.entry)}`:''}`;layer.appendChild(badge);
   }
 }
-function renderMarkers(){
+function _renderMarkersNow(){
   const from=cache[cur]?.[0]?.time||0, marks=[];
   const bucketSec={'1M':60,'3M':180,'5M':300,'15M':900,'1H':3600,'4H':14400,'1D':86400,'1W':604800,'1MO':2592000}[cur]||300;
   if(false){for(const e of (decisionEvents||[])){
@@ -803,7 +810,7 @@ function renderMarkers(){
     const isL=String(e.side||'').toUpperCase()==='LONG', candleTs=Math.floor(ts/bucketSec)*bucketSec;
     marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:isL?'#e7a84a':'#ff8a4a',shape:'diamond',text:''});
   }}
-  if(signalLayers.vwapma){for(const e of (vwapMaEvents||[])){
+  if(false&&signalLayers.vwapma){for(const e of (vwapMaEvents||[])){
     const ts=Math.floor(Number(e.ts||0)/1000);if(!ts||ts<from)continue;
     const isL=String(e.side||'').toUpperCase()==='LONG', candleTs=Math.floor(ts/bucketSec)*bucketSec, st=String(e.stage||'').toUpperCase();
     if(!['RELEASE','ALIGN','EXPANSION','MA_HIT','REALIGN','RE_EXPANSION','RE_COMPRESSION','BREAKDOWN'].includes(st))continue;
@@ -832,7 +839,18 @@ function renderMarkers(){
     if(ev==='OPEN')marks.push({time:candleTs,position:isL?'belowBar':'aboveBar',color:isL?'#35d98a':'#ff5c70',shape:isL?'arrowUp':'arrowDown',text:isL?'B':'S'});
     else marks.push({time:candleTs,position:isL?'aboveBar':'belowBar',color:'#ffffff',shape:'circle',text:'X'});
   }
-  marks.sort((a,b)=>a.time-b.time);try{candle.setMarkers(marks)}catch(e){};requestAnimationFrame(renderSignalAnchors);
+  marks.sort((a,b)=>a.time-b.time);const shown=marks.length>MAX_CHART_MARKERS?marks.slice(-MAX_CHART_MARKERS):marks;try{candle.setMarkers(shown)}catch(e){};renderSignalAnchors();
+}
+
+function renderSignalAnchors(){
+  const now=performance.now();const wait=Math.max(0,280-(now-_anchorLast));
+  if(wait>0){if(!_anchorTimer)_anchorTimer=setTimeout(()=>{_anchorTimer=0;renderSignalAnchors()},wait);return;}
+  _anchorLast=now;_renderSignalAnchorsNow();
+}
+function renderMarkers(){
+  const now=performance.now();const wait=Math.max(0,250-(now-_markerLast));
+  if(wait>0){if(!_markerTimer)_markerTimer=setTimeout(()=>{_markerTimer=0;renderMarkers()},wait);return;}
+  _markerLast=now;_renderMarkersNow();
 }
 
 function updateDailyMove(){
@@ -917,7 +935,7 @@ function renderMyTradeLedger(){
   const rows=[]; let op=null;
   for(const e of ev){
     const t=String(e.event||'').toUpperCase();
-    if(t==='OPEN') op={ts:Number(e.ts),side:String(e.side||''),entry:Number(e.price)};
+    if(t==='OPEN') op={ts:Number(e.ts),side:String(e.side||''),entry:Number(e.price),leverage:Number(e.leverage||1)};
     else if(t==='EXIT'&&op){rows.push({...op,exit:Number(e.price),exitTs:Number(e.ts)});op=null;}
   }
   if(op) rows.push({...op,exit:null,exitTs:null});
@@ -926,9 +944,9 @@ function renderMyTradeLedger(){
   el.innerHTML=rows.slice(0,60).map(r=>{
     const held=(r.exitTs||Date.now())-r.ts, mins=Math.max(0,Math.floor(held/60000));
     const hold=mins>=60?`${Math.floor(mins/60)}시간 ${mins%60}분`:`${mins}분`;
-    let usd=null,pct=null; if(r.exit!=null&&r.entry){usd=r.side==='SHORT'?r.entry-r.exit:r.exit-r.entry;pct=usd/r.entry*100;}
+    let usd=null,pct=null; if(r.exit!=null&&r.entry){usd=(r.side==='SHORT'?r.entry-r.exit:r.exit-r.entry)*Number(r.leverage||1);pct=usd/r.entry*100;}
     const col=r.side==='LONG'?'#35d98a':'#ff5c70';
-    return `<tr style="border-top:1px solid #1f2a3a"><td style="padding:7px 6px">${new Date(r.ts).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</td><td style="color:${col};font-weight:800">${r.side==='LONG'?'LONG':'SHORT'}</td><td>$${fmt(r.entry)}</td><td>${r.exit==null?'보유중':'$'+fmt(r.exit)}</td><td>${hold}</td><td style="color:${usd==null?'#f0c84b':usd>=0?'#35d98a':'#ff5c70'}">${usd==null?'—':(usd>=0?'+$':'-$')+fmt(Math.abs(usd))}</td><td style="color:${pct==null?'#f0c84b':pct>=0?'#35d98a':'#ff5c70'}">${pct==null?'OPEN':(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td></tr>`;
+    return `<tr style="border-top:1px solid #1f2a3a"><td style="padding:7px 6px">${new Date(r.ts).toLocaleString('ko-KR',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}</td><td style="color:${col};font-weight:800">${r.side==='LONG'?'LONG':'SHORT'} ${Number(r.leverage||1)}x</td><td>$${fmt(r.entry)}</td><td>${r.exit==null?'보유중':'$'+fmt(r.exit)}</td><td>${hold}</td><td style="color:${usd==null?'#f0c84b':usd>=0?'#35d98a':'#ff5c70'}">${usd==null?'—':(usd>=0?'+$':'-$')+fmt(Math.abs(usd))}</td><td style="color:${pct==null?'#f0c84b':pct>=0?'#35d98a':'#ff5c70'}">${pct==null?'OPEN':(pct>=0?'+':'')+pct.toFixed(2)+'%'}</td></tr>`;
   }).join('');
 }
 
@@ -984,7 +1002,7 @@ async function syncServer(){
     if(rs[2].status==='fulfilled')vwapMaEvents=Array.isArray(rs[2].value)?rs[2].value:[];
     decisionEvents=[];precursorEvents=[];eventEntryEvents=[];serverSaved=[];positionEvents=[];liveEnginePositions=[];
     renderMyTradeLedger();
-    const mp=$('myPosition');if(mp){if(myPosition.side&&myPosition.side!=='FLAT'){const ent=Number(myPosition.entry||0),now=Number(myPosition.current_price||currentPrice()||live?.price||0),usd=Number.isFinite(Number(myPosition.live_usd))?Number(myPosition.live_usd):(myPosition.side==='LONG'?now-ent:ent-now),pc=Number.isFinite(Number(myPosition.live_pct))?Number(myPosition.live_pct):(ent?usd/ent*100:0);mp.innerHTML=`<b style="color:${myPosition.side==='LONG'?'#35d98a':'#ff5c70'}">${myPosition.side}</b> · 진입 $${fmt(ent)} · 현재 $${fmt(now)} · <b class="myLivePnl" style="color:${pc>=0?'#35d98a':'#ff4f64'}">실시간 ${pc>=0?'+':''}${pc.toFixed(3)}% · ${usd>=0?'+':'-'}$${fmt(Math.abs(usd))}</b> <button onclick="closeMyPos()" style="margin-left:8px">포지션 종료</button>`;}else mp.innerHTML='<span style="color:#8d99ad">현재 내 포지션 없음</span>';}
+    const mp=$('myPosition');if(mp){if(myPosition.side&&myPosition.side!=='FLAT'){const ent=Number(myPosition.entry||0),now=Number(myPosition.current_price||currentPrice()||live?.price||0),lev=Number(myPosition.leverage||1),usd=Number(myPosition.live_usd||0),pc=Number(myPosition.live_pct||0);mp.innerHTML=`<b style="color:${myPosition.side==='LONG'?'#35d98a':'#ff5c70'}">${myPosition.side}</b> · <b>${lev}x</b> · 진입 $${fmt(ent)} · 현재 $${fmt(now)} · <b class="myLivePnl" style="color:${pc>=0?'#35d98a':'#ff4f64'}">레버리지 반영 ${pc>=0?'+':''}${pc.toFixed(3)}% · ${usd>=0?'+':'-'}$${fmt(Math.abs(usd))}</b> <button onclick="closeMyPos()" style="margin-left:8px">포지션 종료</button>`;}else if(myPosition.pending_limit){const q=myPosition.pending_limit;mp.innerHTML=`<b style="color:#f1c75b">지정가 대기</b> · ${q.side} · <b>${q.leverage}x</b> · $${fmt(Number(q.limit_price))} <button onclick="cancelMyLimit()" style="margin-left:8px">주문 취소</button>`;}else mp.innerHTML='<span style="color:#8d99ad">현재 내 포지션 없음</span>';}
     if($('srvCount'))$('srvCount').textContent=String(vwapMaEvents.length);
     if($('srvLast')){const latest=[...vwapMaEvents].sort((a,b)=>Number(b.ts)-Number(a.ts))[0];$('srvLast').textContent=latest?`최근 VWAP14 ${latest.stage} ${latest.side} · ${new Date(Number(latest.ts)).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})}`:`BTC $${fmt(live.price)} · VWAP14 이벤트 대기`;}
     renderHistory();renderMarkers();
@@ -994,7 +1012,9 @@ async function syncServer(){
   }finally{syncServerBusy=false;}
 }
 
-async function openMyPos(side){try{const r=await fetch(SERVER_API+'/api/user-position/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({side})});const j=await r.json();if(!j.ok)throw new Error(j.error||'failed');await syncServer();}catch(e){alert('내 포지션 진입 실패: '+e.message)}}
+async function openMyPos(side){try{const order_type=$('myOrderType')?.value||'MARKET',leverage=Math.max(1,Math.min(30,Number($('myLeverage')?.value||30)));let body={side,order_type,leverage};if(order_type==='LIMIT'){const limit_price=Number($('myLimitPrice')?.value||0);if(!(limit_price>0)){alert('지정가를 입력해줘.');return;}body.limit_price=limit_price;}const r=await fetch(SERVER_API+'/api/user-position/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const j=await r.json();if(!j.ok)throw new Error(j.error||'failed');await syncServer();}catch(e){alert('내 포지션 진입 실패: '+e.message)}}
+async function cancelMyLimit(){try{const r=await fetch(SERVER_API+'/api/user-position/cancel-limit',{method:'POST'});const j=await r.json();if(!j.ok)throw new Error(j.error||'failed');await syncServer();}catch(e){alert('지정가 취소 실패: '+e.message)}}
+$('myOrderType')?.addEventListener('change',()=>{const w=$('myLimitWrap');if(w)w.style.display=$('myOrderType').value==='LIMIT'?'block':'none';});
 async function closeMyPos(){if(!confirm('내 시뮬레이터 포지션을 현재가로 종료할까?'))return;try{const r=await fetch(SERVER_API+'/api/user-position/close',{method:'POST'});const j=await r.json();if(!j.ok)throw new Error(j.error||'failed');await syncServer();}catch(e){alert('내 포지션 종료 실패: '+e.message)}}
 async function manualCloseMain(engine){
   const label=engLabel(engine);

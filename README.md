@@ -215,3 +215,8 @@ It also publishes an invalidation level near the opposite side of VWAP14 / the M
 - ALIGN timing uses fast MA5/MA10 structure; full medium alignment is not required for tactical turn detection.
 - Chart signal rendering throttled (~250-280ms), historical label count capped (PC 60 / mobile 40).
 - Removed duplicate native MA-cycle markers; rich anchored MA-cycle labels remain, reducing DOM/chart work.
+
+## v7.10 simulator UI hotfix
+- Fixed leverage selector markup in both desktop and mobile pages. v7.08/v7.09 accidentally embedded a JavaScript template expression as literal HTML, so the 1x-30x options were not rendered by the browser.
+- MARKET/LIMIT UI and server-side limit/leverage logic are retained.
+- Default leverage remains 30x.
