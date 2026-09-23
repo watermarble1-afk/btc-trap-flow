@@ -262,7 +262,7 @@ let vwapMaEvents=[];
 const SIGNAL_LAYER_KEY='btc_signal_layers_v672';
 let signalLayers={vwapma:true,topbottom:true};
 // v7.09 chart performance: throttle expensive marker/DOM rebuilds and cap historical labels.
-let _markerTimer=0,_anchorTimer=0,_markerLast=0,_anchorLast=0;const MAX_SIGNAL_LABELS=40,MAX_CHART_MARKERS=100;
+let _markerTimer=0,_anchorTimer=0,_markerLast=0,_anchorLast=0;const MAX_SIGNAL_LABELS=22,MAX_CHART_MARKERS=70;
 try{const z=JSON.parse(localStorage.getItem(SIGNAL_LAYER_KEY)||'null');if(z&&typeof z==='object'){if(typeof z.vwapma==='boolean')signalLayers.vwapma=z.vwapma;if(typeof z.topbottom==='boolean')signalLayers.topbottom=z.topbottom}}catch(e){}
 function applySignalLayerUI(){
   document.querySelectorAll('.sigLayerBtn').forEach(b=>{const on=!!signalLayers[b.dataset.layer];b.classList.toggle('on',on);b.setAttribute('aria-pressed',on?'true':'false');b.dataset.state=on?'ON':'OFF';b.title=(b.dataset.layer||'').toUpperCase()+' '+(on?'ON':'OFF')+' · 클릭해서 차트 표시 전환';});
@@ -535,7 +535,10 @@ async function loadOlder(label){
 }
 function installInfiniteHistory(){
   chart.timeScale().subscribeVisibleLogicalRangeChange(range=>{
-    requestAnimationFrame(renderSignalAnchors);
+    // v7.11 PERF: signal DOM used to rebuild repeatedly while dragging/zooming, causing chart lag.
+    // Hide labels during movement and rebuild once after the gesture settles.
+    const layer=$('chart')?.querySelector('.signalAnchorLayer');if(layer)layer.style.visibility='hidden';
+    clearTimeout(window.__sigPanTimer);window.__sigPanTimer=setTimeout(()=>{if(layer)layer.style.visibility='visible';_anchorLast=0;renderSignalAnchors();},140);
     if(!range || lazyBusy)return;
     // When the user scrolls close to the oldest loaded bars, fetch another 300.
     if(range.from<80)loadOlder(cur);
@@ -776,7 +779,11 @@ function _renderSignalAnchorsNow(){
   const host=$('chart');if(!host||!chart||!candle)return;
   let layer=host.querySelector('.signalAnchorLayer');if(!layer){layer=document.createElement('div');layer.className='signalAnchorLayer';host.appendChild(layer)}
   layer.innerHTML='';
-  const allRows=signalAnchorRows();const rows=allRows.length>MAX_SIGNAL_LABELS?allRows.slice(-MAX_SIGNAL_LABELS):allRows, bars=new Map((cache[cur]||[]).map(x=>[Number(x.time),x])), stack={};
+  const allRows=signalAnchorRows();
+  // v7.11 PERF: build labels only for the candles currently on screen.
+  let vis=null;try{vis=chart.timeScale().getVisibleRange()}catch(e){}
+  const visibleRows=vis?allRows.filter(a=>a.candleTs>=Number(vis.from)-bucketSec&&a.candleTs<=Number(vis.to)+bucketSec):allRows;
+  const rows=visibleRows.length>MAX_SIGNAL_LABELS?visibleRows.slice(-MAX_SIGNAL_LABELS):visibleRows, bars=new Map((cache[cur]||[]).map(x=>[Number(x.time),x])), stack={};
   for(const a of rows){
     const bar=bars.get(a.candleTs);if(!bar)continue;
     const x=chart.timeScale().timeToCoordinate(a.candleTs);if(x==null)continue;
@@ -785,8 +792,7 @@ function _renderSignalAnchorsNow(){
     const cycleColor=(stage,isL)=>({RELEASE:isL?'#56e6c2':'#ff7b7b',ALIGN:'#8fa3b8',EXPANSION:isL?'#35d98a':'#ff5c70',MA_HIT:'#f1c75b',REALIGN:isL?'#00e5ff':'#ff9bd2',RE_EXPANSION:isL?'#b56cff':'#ff8a4a',RE_COMPRESSION:'#f1c75b',BREAKDOWN:'#ffffff'}[stage]||'#90a6a0');
     const col=a.mode==='TOPBOTTOM'?(a.stage.includes('TOP')||a.stage==='EXIT_L'?'#ffb020':'#5ee6a8'):a.mode==='EXEC'?(isL?'#35d98a':'#ff5c70'):a.mode==='EVENT'?(isL?'#e7a84a':'#ff8a4a'):((a.mode==='VWAPMA'||a.mode==='VWAPMA_LOCAL')||a.mode==='VWAPMA_LOCAL')?cycleColor(a.stage,isL):a.mode==='EARLY'?(isL?'#8fb5ff':'#ff9bd2'):a.setup==='PB'?(isL?'#35d98a':'#ff5c70'):a.setup==='RV'?(isL?'#00e5ff':'#ffd400'):'#b56cff';
     const badgeY=Math.max(12,Math.min(host.clientHeight-22,y+(isL?1:-1)*(30+idx*24)));
-    const line=document.createElement('div');line.className='sigAnchorLine';line.style.color=col;line.style.left=x+'px';line.style.top=Math.min(y,badgeY)+'px';line.style.height=Math.max(6,Math.abs(badgeY-y))+'px';layer.appendChild(line);
-    const dot=document.createElement('div');dot.className='sigAnchorDot';dot.style.color=col;dot.style.left=x+'px';dot.style.top=y+'px';layer.appendChild(dot);
+    // v7.11 PERF: one DOM node per signal (badge only). Previous line+dot+badge tripled layout work.
     const badge=document.createElement('div');badge.className='sigAnchorBadge';badge.style.color=col;badge.style.left=x+'px';badge.style.top=badgeY+'px';badge.textContent=a.mode==='TOPBOTTOM'?`${a.stage.includes('TOP')||a.stage==='EXIT_L'?'⌃':'⌄'} ${a.stage.replace('TOP_WARNING','TOP WARN').replace('BOTTOM_WARNING','BOT WARN').replace('TOP_WATCH','TOP WATCH').replace('BOTTOM_WATCH','BOT WATCH').replace('EXIT_L','EXIT L').replace('EXIT_S','EXIT S')} ${a.score}`:a.mode==='EXEC'?`${isL?'▲':'▼'} EXEC ${a.side}`:a.mode==='EVENT'?`◎ EVT ${a.side} ${a.score}`:(a.mode==='VWAPMA'||a.mode==='VWAPMA_LOCAL')?`${a.stage==='RE_EXPANSION'?'🚀':a.stage==='MA_HIT'?'◆':a.stage==='BREAKDOWN'?'✕':(isL?'▲':'▼')} ${a.stage.replace('RE_EXPANSION','RE-EXP').replace('EXPANSION','EXPAND').replace('REALIGN','REALIGN').replace('RELEASE','RELEASE')} ${a.side}`:a.mode==='EARLY'?`◌ EARLY ${a.side} ${a.score}`:`${isL?'▲':'▼'} ${a.setup} ${a.side} ${a.score}`;
     const tm=new Date(a.rawTs*1000).toLocaleString('ko-KR',{hour12:false});badge.title=`${a.name} · ${tm} · score ${a.score}${a.entry?` · $${fmt(a.entry)}`:''}`;layer.appendChild(badge);
   }
@@ -843,7 +849,7 @@ function _renderMarkersNow(){
 }
 
 function renderSignalAnchors(){
-  const now=performance.now();const wait=Math.max(0,280-(now-_anchorLast));
+  const now=performance.now();const wait=Math.max(0,450-(now-_anchorLast));
   if(wait>0){if(!_anchorTimer)_anchorTimer=setTimeout(()=>{_anchorTimer=0;renderSignalAnchors()},wait);return;}
   _anchorLast=now;_renderSignalAnchorsNow();
 }

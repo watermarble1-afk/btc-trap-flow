@@ -220,3 +220,11 @@ It also publishes an invalidation level near the opposite side of VWAP14 / the M
 - Fixed leverage selector markup in both desktop and mobile pages. v7.08/v7.09 accidentally embedded a JavaScript template expression as literal HTML, so the 1x-30x options were not rendered by the browser.
 - MARKET/LIMIT UI and server-side limit/leverage logic are retained.
 - Default leverage remains 30x.
+
+## v7.11 SIGNAL RENDER PERF
+- Chart signal overlay optimized without changing MA CYCLE signal logic.
+- During pan/zoom, signal DOM is temporarily hidden and rebuilt once after movement settles.
+- Only visible-range signal labels are rendered.
+- Signal overlay reduced from 3 DOM nodes (line+dot+badge) to 1 badge per signal.
+- PC visible signal label cap 32; mobile 22; chart marker cap 70.
+- v7.10 simulator market/limit + 1x~30x leverage retained.
